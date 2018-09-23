@@ -3,12 +3,16 @@ package Kubernetes::REST::ListToRequest;
   use HTTP::Tiny;
   use JSON::MaybeXS;
   use Kubernetes::REST::Error;
+  use Kubernetes::REST::HTTPRequest;
+  use Module::Runtime qw/require_module/;
 
   has _json => (is => 'ro', default => sub { JSON::MaybeXS->new });
 
   sub callinfo_class {
     my ($self, $call) = @_;
-    "Kubernetes::REST::Call::$call"
+    my $class = "Kubernetes::REST::Call::$call";
+    require_module($class);
+    return $class;
   }
 
   sub params2request {
@@ -37,33 +41,39 @@ package Kubernetes::REST::ListToRequest;
       }
     }
 
-    my $params = {};
-    foreach my $param (@{ $call_object->_query_params }) {
-      my $key = $param->{ name };
-      my $value = $call_object->$key;
-      next if (not defined $value);
-
-      my $location = defined $param->{ location } ? $param->{ location } : $key;
-      $params->{ $location } = $value;
+    my $params;
+    if ($call_object->can('_query_params')) {
+      $params = {};
+      foreach my $param (@{ $call_object->_query_params }) {
+        my $key = $param->{ name };
+        my $value = $call_object->$key;
+        next if (not defined $value);
+  
+        my $location = defined $param->{ location } ? $param->{ location } : $key;
+        $params->{ $location } = $value;
+      }
     }
 
-    my $url_params = {};
-    foreach my $param (@{ $call_object->_url_params }) {
-      my $key = $param->{ name };
-      my $value = $call_object->$key;
-      next if (not defined $value);
-
-      my $location = defined $param->{ location } ? $param->{ location } : $key;
-      $url_params->{ $location } = $value;
-    }
     my $url = $call_object->_url;
-    $url =~ s/\:([a-z0-9_-]+)/$url_params->{ $1 }/ge;
+    my $url_params;
+    if ($call_object->can('_url_params')) {
+      $url_params = {};
+      foreach my $param (@{ $call_object->_url_params }) {
+        my $key = $param->{ name };
+        my $value = $call_object->$key;
+        next if (not defined $value);
+  
+        my $location = defined $param->{ location } ? $param->{ location } : $key;
+        $url_params->{ $location } = $value;
+      }
+      $url =~ s/\:([a-z0-9_-]+)/$url_params->{ $1 }/ge;
+    }
+    my $qstring = HTTP::Tiny->www_form_urlencode($params) if (defined $params);
 
-    my $qstring = HTTP::Tiny->www_form_urlencode($params);
     my $req = Kubernetes::REST::HTTPRequest->new;
     $req->method($call_object->_method);
     $req->url(
-      "$url?$qstring",
+      (defined $qstring) ? "$url?$qstring" : $url
     );
     $req->headers({
       (defined $body_struct) ? ('Content-Type' => 'application/json') : (),
