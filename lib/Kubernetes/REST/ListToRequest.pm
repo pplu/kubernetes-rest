@@ -16,7 +16,7 @@ package Kubernetes::REST::ListToRequest;
   }
 
   sub params2request {
-    my ($self, $call, $user_params) = @_;
+    my ($self, $call, $base_url, $auth, $user_params) = @_;
 
     my $call_object = eval { $self->callinfo_class($call)->new(@$user_params) };
     if ($@) {
@@ -73,11 +73,12 @@ package Kubernetes::REST::ListToRequest;
     my $req = Kubernetes::REST::HTTPRequest->new;
     $req->method($call_object->_method);
     $req->url(
-      (defined $qstring) ? "$url?$qstring" : $url
+      (defined $qstring) ? "${base_url}${url}?$qstring" : "${base_url}${url}",
     );
     $req->headers({
       (defined $body_struct) ? ('Content-Type' => 'application/json') : (),
       Accept => 'application/json',
+      (defined $auth->token) ? (Authorization => 'Bearer ' . $auth->token) : (),
     });
     $req->content($self->_json->encode($body_struct)) if (defined $body_struct);
 

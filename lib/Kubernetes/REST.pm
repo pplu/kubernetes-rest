@@ -1,6 +1,6 @@
 package Kubernetes::REST;
   use Moo;
-  use Types::Standard qw/HasMethods/;
+  use Types::Standard qw/HasMethods Str/;
 
   our $VERSION = '0.01';
 
@@ -17,9 +17,14 @@ package Kubernetes::REST;
     Kubernetes::REST::Result2Hash->new
   });
 
+  has server => (is => 'ro', isa => Str, required => 1);
+  #TODO: decide the interface for the credentials object. For now, it if has a token method,
+  #      it will use it
+  has credentials => (is => 'ro', required => 1);
+
   sub _invoke {
     my ($self, $method, $params) = @_;
-    my $req = $self->param_converter->params2request($method, $params);
+    my $req = $self->param_converter->params2request($method, $self->server, $self->credentials, $params);
     my $result = $self->io->call($req);
     return $self->result_parser->result2return($result);
   }
