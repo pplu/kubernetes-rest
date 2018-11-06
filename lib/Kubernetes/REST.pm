@@ -34,4 +34,16 @@ package Kubernetes::REST;
     $self->_invoke('GetCoreAPIVersions', [ @params ]);
   }
 
+  sub GetNamespaces {
+    my ($self, @params) = @_;
+    $self->_invoke('GetNamespaces', [ @params ]);
+  }
+
+  sub GetNamespace {
+    my ($self, @params) = @_;
+    $self->_invoke('GetNamespace', [ @params ]);
+  }
+
+
+
 1;
