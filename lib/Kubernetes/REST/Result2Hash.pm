@@ -45,6 +45,12 @@ package Kubernetes::REST::Result2Hash;
 
     # Throw a Kubernetes::REST::RemoteError exception from
     # the info in $struct
+    # {"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"Unauthorized","reason":"Unauthorized","code":401}
+    Kubernetes::REST::RemoteError->throw(
+      status => $response->status,
+      type => 'RemoteError',
+      message => "$struct->{ message }: $struct->{ reason }",
+    );
   }
 
 1;
