@@ -1,4 +1,5 @@
 requires 'HTTP::Tiny';
+requires 'IO::Socket::SSL';
 requires 'Moo';
 requires 'Type::Tiny';
 requires 'Throwable::Error';
