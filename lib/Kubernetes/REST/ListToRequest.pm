@@ -66,7 +66,7 @@ package Kubernetes::REST::ListToRequest;
         my $location = defined $param->{ location } ? $param->{ location } : $key;
         $url_params->{ $location } = $value;
       }
-      $url =~ s/\:([a-z0-9_-]+)/$url_params->{ $1 }/ge;
+      $url =~ s/\{([a-z0-9_-]+)\}/$url_params->{ $1 }/ge;
     }
     my $qstring = HTTP::Tiny->www_form_urlencode($params) if (defined $params);
 
