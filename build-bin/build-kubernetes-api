@@ -1,0 +1,17 @@
+#!/usr/bin/env perl
+
+use v5.10;
+
+use FindBin;
+use lib "$FindBin::Bin/../build-lib";
+
+use strict;
+use warnings;
+use KubeBuilder;
+
+$|=1;
+
+my $builder = KubeBuilder->new(
+  schema_file => 'spec/swagger.json'
+);
+$builder->build;

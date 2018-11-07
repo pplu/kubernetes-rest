@@ -1,0 +1,23 @@
+package [% method.fullyqualified_methodname %];
+  use Moo;
+  [% IF (method.type_list.size > 0) %]use Types::Standard qw/[% method.type_list.join(' ') %]/;[% END %]
+
+  [% FOREACH parameter = method.parameters %]
+  has [% parameter.name %] => (is => 'ro', isa => [% parameter.perl_type %][% IF (parameter.required) %],required => 1[% END %]);
+  [% END %]
+
+  sub _url_params { [
+  [% FOREACH parameter = method.url_params %]
+    { name => '[% parameter.name %]' },
+  [% END %]
+  ] }
+
+  sub _query_params { [
+  [% FOREACH parameter = method.query_params %]
+    { name => '[% parameter.name %]' },
+  [% END %]
+  ] }
+
+  sub _url { '[% method.url %]' }
+  sub _method { '[% method.method %]' }
+1;

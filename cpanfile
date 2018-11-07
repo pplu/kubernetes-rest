@@ -10,3 +10,11 @@ on test => sub {
   requires 'Test::More';
   requires 'Test::Exception';
 };
+
+on develop => sub {
+  requires 'Moose';
+  requires 'Template';
+  requires 'Swagger::Schema';
+  requires 'namespace::autoclean';
+  requires 'Path::Class';
+}
