@@ -124,7 +124,11 @@ package KubeBuilder;
   sub build {
     my $self = shift;
 
-    
+    $self->process_template(
+      'main_module',
+      { builder => $self },
+    );
+
     foreach my $m_name (sort keys %{ $self->methods }){
       my $method = $self->methods->{ $m_name };
       $self->log->info("Generating method for definition $m_name");

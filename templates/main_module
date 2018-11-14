@@ -29,21 +29,11 @@ package Kubernetes::REST;
     return $self->result_parser->result2return($result);
   }
 
-  sub GetCoreAPIVersions {
+  [% FOREACH method = builder.method_list %]
+  sub [% method.call_classname %] {
     my ($self, @params) = @_;
-    $self->_invoke('GetCoreAPIVersions', [ @params ]);
+    $self->_invoke('[% method.call_classname %]', [ @params ]);
   }
-
-  sub GetNamespaces {
-    my ($self, @params) = @_;
-    $self->_invoke('GetNamespaces', [ @params ]);
-  }
-
-  sub GetNamespace {
-    my ($self, @params) = @_;
-    $self->_invoke('GetNamespace', [ @params ]);
-  }
-
-
+  [% END %]
 
 1;
