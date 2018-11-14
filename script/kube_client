@@ -1,0 +1,26 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+package T {
+  use Moo;
+  use Types::Standard qw/Str/;
+  has token => (is => 'ro', isa => Str, required => 1);
+}
+
+
+use Kubernetes::REST;
+
+my $method = shift @ARGV;
+die "Usage $0 method param1 param1value ... paramN paramNvalue" if (not defined $method);
+
+my $client = Kubernetes::REST->new(
+  credentials => T->new(token => ''),
+  server => 'https://192.168.99.100:8443',
+);
+
+my $result = $client->$method;
+
+use Data::Dumper;
+print Dumper($result);
