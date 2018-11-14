@@ -110,7 +110,7 @@ package KubeBuilder;
               root_schema => $self,
               name => $method_name,
               url => $path,
-              method => $method,
+              method => uc($method),
               (defined $common_parameters) ? (common_parameters => $common_parameters) : (),
             );
         }
