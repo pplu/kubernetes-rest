@@ -2,6 +2,7 @@
 
 use strict;
 use warnings;
+use ARGV::Struct;
 
 package T {
   use Moo;
@@ -9,18 +10,19 @@ package T {
   has token => (is => 'ro', isa => Str, required => 1);
 }
 
-
 use Kubernetes::REST;
 
 my $method = shift @ARGV;
 die "Usage $0 method param1 param1value ... paramN paramNvalue" if (not defined $method);
+
+my $params = ARGV::Struct->new(argv => [ '{', @ARGV, '}' ])->parse;
 
 my $client = Kubernetes::REST->new(
   credentials => T->new(token => ''),
   server => 'https://192.168.99.100:8443',
 );
 
-my $result = $client->$method;
+my $result = $client->$method(%$params);
 
 use Data::Dumper;
 print Dumper($result);
