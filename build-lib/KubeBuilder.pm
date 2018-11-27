@@ -84,14 +84,15 @@ package KubeBuilder;
     }
   );
 
+  has method_list => (is => 'ro', isa => 'ArrayRef[KubeBuilder::Method]', lazy => 1, default => sub {
+    my $self = shift;
+    [ map { $self->methods->{ $_ } } sort keys %{ $self->methods } ];
+  });
+
   has methods => (
     is => 'ro',
     isa => 'HashRef[KubeBuilder::Method]',
     lazy => 1,
-    traits => [ 'Hash' ],
-    handles => {
-      method_list => 'values',
-    },
     default => sub {
       my $self = shift;
       my %methods => ();
