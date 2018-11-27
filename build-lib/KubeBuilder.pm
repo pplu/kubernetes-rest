@@ -129,6 +129,11 @@ package KubeBuilder;
       { builder => $self },
     );
 
+    $self->process_template(
+      'result2object',
+      { builder => $self },
+    );
+
     foreach my $m_name (sort keys %{ $self->methods }){
       my $method = $self->methods->{ $m_name };
       $self->log->info("Generating method for definition $m_name");

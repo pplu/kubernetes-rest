@@ -12,15 +12,17 @@ package Kubernetes::REST::Result2Object;
       return $self->process_error($response);
     } else {
       return 1 if (not defined $response->content);
-      return $self->process_response($response);
+      return $self->process_response($call, $response);
     } 
   }
 
   sub process_response {
-    my ($self, $response) = @_;
+    my ($self, $call, $response) = @_;
     
+    my $return_class = $self->method_map->{ $call->method };
+    die "No return object" if (not defined $return_class);
     my $object = eval {
-      $self->parser->json_to_object("", $response->content);
+      $self->parser->json_to_object($return_class, $response->content);
     };
     Kubernetes::REST::Error->throw(
       type => 'UnparseableResponse',
@@ -52,5 +54,11 @@ package Kubernetes::REST::Result2Object;
       message => "$struct->{ message }: $struct->{ reason }",
     );
   }
+
+  has method_map => (is => 'ro', default => sub { {
+  [% FOREACH method = builder.method_list %]
+    [% IF (method.return_object_ref) %][% method.call_classname %] => '[% method.return_object.fully_namespaced %]',[% END %]
+  [%- END %]
+  } });
 
 1;
