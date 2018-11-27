@@ -1,6 +1,7 @@
 package Kubernetes::REST;
   use Moo;
   use Types::Standard qw/HasMethods Str/;
+  use Kubernetes::REST::CallContext;
 
   our $VERSION = '0.01';
 
@@ -24,15 +25,21 @@ package Kubernetes::REST;
 
   sub _invoke {
     my ($self, $method, $params) = @_;
-    my $req = $self->param_converter->params2request($method, $self->server, $self->credentials, $params);
-    my $result = $self->io->call($req);
-    return $self->result_parser->result2return($result);
+    my $call = Kubernetes::REST::CallContext->new(
+      method => $method,
+      params => $params,
+      server => $self->server,
+      credentials => $self->credentials,
+    );
+    my $req = $self->param_converter->params2request($call);
+    my $result = $self->io->call($call, $req);
+    return $self->result_parser->result2return($call, $req, $result);
   }
 
   [% FOREACH method = builder.method_list %]
   sub [% method.call_classname %] {
     my ($self, @params) = @_;
-    $self->_invoke('[% method.call_classname %]', [ @params ]);
+    $self->_invoke('[% method.call_classname %]', \@params);
   }
   [% END %]
 

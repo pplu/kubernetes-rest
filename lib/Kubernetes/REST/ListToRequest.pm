@@ -16,9 +16,11 @@ package Kubernetes::REST::ListToRequest;
   }
 
   sub params2request {
-    my ($self, $call, $base_url, $auth, $user_params) = @_;
+    my ($self, $call_ctx) = @_;
 
-    my $call_object = eval { $self->callinfo_class($call)->new(@$user_params) };
+    my $call = $call_ctx->method;
+
+    my $call_object = eval { $self->callinfo_class($call)->new(@{ $call_ctx->params }) };
     if ($@) {
       my $msg = $@;
       Kubernetes::REST::Error->throw(
@@ -72,6 +74,8 @@ package Kubernetes::REST::ListToRequest;
 
     my $req = Kubernetes::REST::HTTPRequest->new;
     $req->method($call_object->_method);
+    my $base_url = $call_ctx->server;
+    my $auth = $call_ctx->credentials;
     $req->url(
       (defined $qstring) ? "${base_url}${url}?$qstring" : "${base_url}${url}",
     );

@@ -6,7 +6,7 @@ package Kubernetes::REST::Result2Hash;
   has parser => (is => 'ro', default => sub { JSON::MaybeXS->new });
 
   sub result2return {
-    my ($self, $response) = @_;
+    my ($self, $call, $req, $response) = @_;
 
     if ($response->status >= 400) {
       return $self->process_error($response);
@@ -31,7 +31,7 @@ package Kubernetes::REST::Result2Hash;
   }
 
   sub process_error {
-    my ($self, $response) = @_;
+    my ($self, $call, $result, $response) = @_;
 
     my $struct = eval {
       $self->parser->decode($response->content);

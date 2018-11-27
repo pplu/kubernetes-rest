@@ -17,7 +17,7 @@ package Kubernetes::REST::HTTPTinyIO;
   });
 
   sub call {
-    my ($self, $req) = @_;
+    my ($self, $call, $req) = @_;
 
     my $res = $self->ua->request(
       $req->method,

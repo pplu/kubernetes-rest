@@ -6,7 +6,7 @@ package Kubernetes::REST::Result2Object;
   has parser => (is => 'ro', default => sub { IO::K8s->new });
 
   sub result2return {
-    my ($self, $response) = @_;
+    my ($self, $call, $req, $response) = @_;
 
     if ($response->status >= 400) {
       return $self->process_error($response);
@@ -20,7 +20,7 @@ package Kubernetes::REST::Result2Object;
     my ($self, $response) = @_;
     
     my $object = eval {
-      $self->parser->json_to_object($response->content);
+      $self->parser->json_to_object("", $response->content);
     };
     Kubernetes::REST::Error->throw(
       type => 'UnparseableResponse',
