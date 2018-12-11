@@ -75,12 +75,11 @@ package KubeBuilder::Method;
   has parameters => (is => 'ro', isa => 'ArrayRef[HashRef]', lazy => 1, default => sub {
     my $self = shift;
     my @params;
-    return [] if (not defined $self->operation->parameters);
 
-use Data::Dumper;
-print Dumper($self->fullyqualified_methodname, $self->common_parameters);
+    my @parameters = (defined $self->operation->parameters) ? @{ $self->operation->parameters } : ();
+    my @common_parameters = (defined $self->common_parameters) ? @{ $self->common_parameters } : ();
 
-    foreach my $param (@{ $self->operation->parameters }, @{ $self->common_parameters }) {
+    foreach my $param (@parameters, @common_parameters) {
       push @params, {
         name => $param->{ name },
         required => $param->{ required },

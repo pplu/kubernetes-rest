@@ -97,7 +97,8 @@ package KubeBuilder;
       my $self = shift;
       my %methods => ();
 
-      foreach my $path (sort keys %{ $self->schema->paths }){
+
+      foreach my $path (sort keys %{ $self->schema->paths }) {
         my $common_parameters = $self->schema->paths->{ $path }->parameters;
 
         foreach my $method (qw/get post put delete options head patch/) {
