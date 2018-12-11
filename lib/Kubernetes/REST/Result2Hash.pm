@@ -31,7 +31,7 @@ package Kubernetes::REST::Result2Hash;
   }
 
   sub process_error {
-    my ($self, $call, $result, $response) = @_;
+    my ($self, $response) = @_;
 
     my $struct = eval {
       $self->parser->decode($response->content);
