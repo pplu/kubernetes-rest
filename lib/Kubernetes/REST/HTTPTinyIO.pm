@@ -3,16 +3,25 @@ package Kubernetes::REST::HTTPTinyIO;
   use HTTP::Tiny;
   use IO::Socket::SSL;
   use Kubernetes::REST::HTTPResponse;
+  use Types::Standard qw/Bool/;
 
-  has ua => (is => 'ro', default => sub {
-    HTTP::Tiny->new(
+  has ssl_verify_server => (is => 'ro', isa => Bool, default => 1);
+  has ssl_cert_file => (is => 'ro');
+  has ssl_key_file => (is => 'ro');
+  has ssl_ca_file => (is => 'ro');
+
+  has ua => (is => 'ro', lazy => 1, default => sub {
+    my $self = shift;
+
+    my %options;
+    $options{ SSL_verify_mode } = SSL_VERIFY_PEER if ($self->ssl_verify_server);
+    $options{ SSL_cert_file } = $self->ssl_cert_file if (defined $self->ssl_cert_file);
+    $options{ SSL_key_file } = $self->ssl_key_file if (defined $self->ssl_key_file);
+    $options{ SSL_ca_file } = $self->ssl_ca_file if (defined $self->ssl_ca_file);
+  
+    return HTTP::Tiny->new(
       agent => 'Kubernetes::REST Perl Client ' . $Kubernetes::REST::VERSION,
-      SSL_options => {
-        SSL_cert_file => "$ENV{HOME}/.minikube/client.crt",
-        SSL_key_file => "$ENV{HOME}/.minikube/client.key",
-        SSL_verify_mode => SSL_VERIFY_PEER,
-        SSL_ca_file => "$ENV{HOME}/.minikube/ca.crt",
-      },
+      SSL_options => \%options,
     );
   });
 
