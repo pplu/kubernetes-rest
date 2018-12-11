@@ -21,7 +21,13 @@ my $params = ARGV::Struct->new(argv => [ '{', @ARGV, '}' ])->parse;
 my $client = Kubernetes::REST->new(
   result_parser => Kubernetes::REST::Result2Object->new,
   credentials => T->new(token => ''),
-  server => 'https://192.168.99.100:8443',
+  server => {
+    endpoint => 'https://192.168.99.100:8443',
+    ssl_verify_server => 1,
+    ssl_cert_file => "$ENV{HOME}/.minikube/client.crt",
+    ssl_key_file => "$ENV{HOME}/.minikube/client.key",
+    ssl_ca_file => "$ENV{HOME}/.minikube/ca.crt",
+  },
 );
 
 my $result = $client->$method(%$params);
