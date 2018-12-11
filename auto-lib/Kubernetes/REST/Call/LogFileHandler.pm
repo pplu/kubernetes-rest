@@ -1,10 +1,14 @@
 package Kubernetes::REST::Call::LogFileHandler;
   use Moo;
-  
+  use Types::Standard qw/Str/;
 
+  
+  has logpath => (is => 'ro', isa => Str,required => 1);
   
 
   sub _url_params { [
+  
+    { name => 'logpath' },
   
   ] }
 
