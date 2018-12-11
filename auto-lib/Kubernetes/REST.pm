@@ -1,7 +1,8 @@
 package Kubernetes::REST;
   use Moo;
-  use Types::Standard qw/HasMethods Str/;
+  use Types::Standard qw/HasMethods Str InstanceOf/;
   use Kubernetes::REST::CallContext;
+  use Kubernetes::REST::Server;
 
   our $VERSION = '0.01';
 
@@ -9,16 +10,29 @@ package Kubernetes::REST;
     require Kubernetes::REST::ListToRequest;
     Kubernetes::REST::ListToRequest->new;  
   });
-  has io => (is => 'ro', isa => HasMethods['call'], default => sub {
-    require Kubernetes::REST::HTTPTinyIO;  
-    Kubernetes::REST::HTTPTinyIO->new;
+  has io => (is => 'ro', isa => HasMethods['call'], lazy => 1, default => sub {
+    my $self = shift;
+    require Kubernetes::REST::HTTPTinyIO;
+    Kubernetes::REST::HTTPTinyIO->new(
+      ssl_verify_server => $self->server->ssl_verify_server,
+      ssl_cert_file => $self->server->ssl_cert_file,
+      ssl_key_file => $self->server->ssl_key_file,
+      ssl_ca_file => $self->server->ssl_ca_file,
+    );
   });
   has result_parser => (is => 'ro', isa => HasMethods['result2return'], default => sub {
     require Kubernetes::REST::Result2Hash;
     Kubernetes::REST::Result2Hash->new
   });
 
-  has server => (is => 'ro', isa => Str, required => 1);
+  has server => (
+    is => 'ro',
+    isa => InstanceOf['Kubernetes::REST::Server'], 
+    required => 1,
+    coerce => sub {
+      Kubernetes::REST::Server->new(@_);
+    },
+  );
   #TODO: decide the interface for the credentials object. For now, it if has a token method,
   #      it will use it
   has credentials => (is => 'ro', required => 1);

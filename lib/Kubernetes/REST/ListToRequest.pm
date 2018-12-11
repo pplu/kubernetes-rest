@@ -74,7 +74,7 @@ package Kubernetes::REST::ListToRequest;
 
     my $req = Kubernetes::REST::HTTPRequest->new;
     $req->method($call_object->_method);
-    my $base_url = $call_ctx->server;
+    my $base_url = $call_ctx->server->endpoint;
     my $auth = $call_ctx->credentials;
     $req->url(
       (defined $qstring) ? "${base_url}${url}?$qstring" : "${base_url}${url}",
