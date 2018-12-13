@@ -3,7 +3,7 @@
 use v5.10;
 
 use FindBin;
-use lib "$FindBin::Bin/../build-lib";
+use lib "$FindBin::Bin/../kubernetes-builder/lib/";
 
 use strict;
 use warnings;
@@ -14,4 +14,23 @@ $|=1;
 my $builder = KubeBuilder->new(
   schema_file => 'spec/swagger.json'
 );
-$builder->build;
+
+$builder->process_template(
+  'main_module',
+  { builder => $builder },
+);
+
+$builder->process_template(
+  'result2object',
+  { builder => $builder },
+);
+
+foreach my $m_name (sort keys %{ $builder->methods }){
+  my $method = $builder->methods->{ $m_name };
+  $builder->log->info("Generating method for definition $m_name");
+  $builder->process_template(
+    'method',
+    { method => $method },
+  );
+}
+
