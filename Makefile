@@ -5,6 +5,10 @@ gen-classes:
 	rm -rf auto-lib
 	carton exec build-bin/build-kubernetes-api
 
+reset-autolib:
+	rm -rf auto-lib
+	git checkout auto-lib
+
 test:
 	carton exec -- prove -v -I lib -I auto-lib t/
 

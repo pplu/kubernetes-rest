@@ -3,6 +3,7 @@ package Kubernetes::REST;
   use Types::Standard qw/HasMethods Str InstanceOf/;
   use Kubernetes::REST::CallContext;
   use Kubernetes::REST::Server;
+  use Module::Runtime qw/require_module/;
 
   our $VERSION = '0.01';
 
@@ -37,8 +38,29 @@ package Kubernetes::REST;
   #      it will use it
   has credentials => (is => 'ro', required => 1);
 
+  has api_version => (is => 'ro', isa => Str, default => sub { 'v1' });
+
+  sub _get_group {
+    my ($self, $g) = @_;
+    my $group = "Kubernetes::REST::$g";
+    require_module $group;
+    return $group->new(
+      param_converter => $self->param_converter,
+      io => $self->io,
+      result_parser => $self->result_parser,
+      server => $self->server,
+      credentials => $self->credentials,
+      api_version => $self->api_version,
+    );
+  }
+
+  [% FOREACH group = builder.method_groups_list %]
+  sub [% group.name %] { shift->_get_group('[% group.name %]') }
+  [% END %]
+
   sub _invoke {
     my ($self, $method, $params) = @_;
+
     my $call = Kubernetes::REST::CallContext->new(
       method => $method,
       params => $params,
@@ -50,7 +72,7 @@ package Kubernetes::REST;
     return $self->result_parser->result2return($call, $req, $result);
   }
 
-  [% FOREACH method = builder.method_list %]
+  [% FOREACH method = builder.methodungrouped_list %]
   sub [% method.call_classname %] {
     my ($self, @params) = @_;
     $self->_invoke('[% method.call_classname %]', \@params);
