@@ -116,6 +116,9 @@ package Kubernetes::REST;
     return $self->result_parser->result2return($call, $req, $result);
   }
 
-  
+  sub GetAllAPIVersions {
+    my ($self, @params) = @_;
+    $self->_invoke('GetAllAPIVersions', \@params);
+  }
 
 1;

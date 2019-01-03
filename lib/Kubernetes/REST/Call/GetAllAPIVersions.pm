@@ -1,4 +1,4 @@
-package Kubernetes::REST::Call::GetCoreAPIVersions;
+package Kubernetes::REST::Call::GetAllAPIVersions;
   use Moo;
 
   sub _url { '/' }

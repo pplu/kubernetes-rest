@@ -72,11 +72,9 @@ package Kubernetes::REST;
     return $self->result_parser->result2return($call, $req, $result);
   }
 
-  [% FOREACH method = builder.methodungrouped_list %]
-  sub [% method.call_classname %] {
+  sub GetAllAPIVersions {
     my ($self, @params) = @_;
-    $self->_invoke('[% method.call_classname %]', \@params);
+    $self->_invoke('GetAllAPIVersions', \@params);
   }
-  [% END %]
 
 1;
