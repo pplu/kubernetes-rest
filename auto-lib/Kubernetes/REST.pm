@@ -145,3 +145,235 @@ package Kubernetes::REST;
   }
 
 1;
+### main pod documentation begin ###
+
+=encoding UTF-8
+
+=head1 NAME
+
+Kubernetes::REST - A Perl REST Client for the Kubernetes API
+
+=head1 SYNOPSIS
+
+  use Kubernetes::REST;
+  my $api = Kubernetes::REST->new(
+    credentials => { },
+    server => {
+      endpoint => 'https://..../',
+      ssl_cert_file => '',
+      ssl_key_file => '',
+      ssl_ca_file => ''
+    },
+  );
+
+  my $result = $api->Core->ListPodForAllNamespaces;
+  use Data::Dumper;
+  print Dumper($result); # hashref with the result for
+
+=head1 DESCRIPTION
+
+This module implements the Kubernetes REST API
+
+=head1 STATUS
+
+These are very first versions, so please take into account that this
+module is subject to change. Review the Changes file in the dists
+to see what has changed or has been explicitly broken
+
+=head1 ORGANIZATION
+
+The root C<Kubernetes::REST> module sets up the data needed to connect
+to the Kubernetes server
+
+=head1 ATTRIBUTES
+
+Attributes can be set in the constructor
+
+=head2 server
+
+Is a L<Kubernetes::REST::Server> object. If you pass a HashRef with it's
+attributes it will be coerced into the object for you.
+
+  server => { endpoint => '...', ... }
+
+=head3 endpoint
+
+A string containing the URL to the Kubernetes API
+
+=head3 ssl_verify_server
+
+Configures the client to verify SSL properties. Defaults to 1.
+
+=head3 ssl_cert_file
+
+If ssl_verify_server is true, path to the client certificate to use
+
+=head3 ssl_key_file
+
+If ssl_verify_server is true, path to the client certificate key
+
+=head3 ssl_ca_file
+
+If ssl_verify_server is true, path to the CA file
+
+=head2 credentials
+
+  credentials => { token => '' }
+
+This can be any object with a C<token> method. The token will be used
+as the Bearer token to the Kubernetes API. You can also pass a hashref
+with a C<token> key.
+
+=head2 api_version
+
+This controls the API version of Kuberntes that the client is using. By
+default it is C<v1>, but you can set it to C<v1alpha1>, for example to
+access v1 methods in alpha stage.
+
+=head1 METHODS
+
+The C<Kubernetes::REST> object give you access to grouped method calls, 
+following the API groups of Kubernetes.
+
+  my $api = Kubernetes::REST->new(...);
+  $api->Core->ListNamespacedPod(...);
+
+
+=head2 Admissionregistration
+
+Access to the Admissionregistration group of API calls. See L<Kubernetes::REST::Admissionregistration>
+for more info.
+
+=head2 Apiextensions
+
+Access to the Apiextensions group of API calls. See L<Kubernetes::REST::Apiextensions>
+for more info.
+
+=head2 Apiregistration
+
+Access to the Apiregistration group of API calls. See L<Kubernetes::REST::Apiregistration>
+for more info.
+
+=head2 Apis
+
+Access to the Apis group of API calls. See L<Kubernetes::REST::Apis>
+for more info.
+
+=head2 Apps
+
+Access to the Apps group of API calls. See L<Kubernetes::REST::Apps>
+for more info.
+
+=head2 Auditregistration
+
+Access to the Auditregistration group of API calls. See L<Kubernetes::REST::Auditregistration>
+for more info.
+
+=head2 Authentication
+
+Access to the Authentication group of API calls. See L<Kubernetes::REST::Authentication>
+for more info.
+
+=head2 Authorization
+
+Access to the Authorization group of API calls. See L<Kubernetes::REST::Authorization>
+for more info.
+
+=head2 Autoscaling
+
+Access to the Autoscaling group of API calls. See L<Kubernetes::REST::Autoscaling>
+for more info.
+
+=head2 Batch
+
+Access to the Batch group of API calls. See L<Kubernetes::REST::Batch>
+for more info.
+
+=head2 Certificates
+
+Access to the Certificates group of API calls. See L<Kubernetes::REST::Certificates>
+for more info.
+
+=head2 Coordination
+
+Access to the Coordination group of API calls. See L<Kubernetes::REST::Coordination>
+for more info.
+
+=head2 Core
+
+Access to the Core group of API calls. See L<Kubernetes::REST::Core>
+for more info.
+
+=head2 Events
+
+Access to the Events group of API calls. See L<Kubernetes::REST::Events>
+for more info.
+
+=head2 Extensions
+
+Access to the Extensions group of API calls. See L<Kubernetes::REST::Extensions>
+for more info.
+
+=head2 Logs
+
+Access to the Logs group of API calls. See L<Kubernetes::REST::Logs>
+for more info.
+
+=head2 Networking
+
+Access to the Networking group of API calls. See L<Kubernetes::REST::Networking>
+for more info.
+
+=head2 Policy
+
+Access to the Policy group of API calls. See L<Kubernetes::REST::Policy>
+for more info.
+
+=head2 RbacAuthorization
+
+Access to the RbacAuthorization group of API calls. See L<Kubernetes::REST::RbacAuthorization>
+for more info.
+
+=head2 Scheduling
+
+Access to the Scheduling group of API calls. See L<Kubernetes::REST::Scheduling>
+for more info.
+
+=head2 Settings
+
+Access to the Settings group of API calls. See L<Kubernetes::REST::Settings>
+for more info.
+
+=head2 Storage
+
+Access to the Storage group of API calls. See L<Kubernetes::REST::Storage>
+for more info.
+
+=head2 Version
+
+Access to the Version group of API calls. See L<Kubernetes::REST::Version>
+for more info.
+
+
+=head1 AUTHOR
+
+    Jose Luis Martinez
+    CPAN ID: JLMARTIN
+    CAPSiDE
+    jlmartinez@capside.com
+
+=head1 SEE ALSO
+
+L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.13/>
+
+=head1 BUGS and SOURCE
+
+The source code is located here: L<https://github.com/pplu/kubernetes-rest>
+
+Please report bugs to: L<https://github.com/pplu/kubernetes-rest/issues>
+
+=head1 COPYRIGHT and LICENSE
+
+Copyright (c) 2018 by CAPSiDE
+
+This code is distributed under the Apache 2 License. The full text of the license can be found in the LICENSE file included with this module.
