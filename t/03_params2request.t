@@ -5,22 +5,18 @@ use warnings;
 
 use Test::More;
 use Kubernetes::REST::CallContext;
+use Kubernetes::REST::Server;
+use Kubernetes::REST::AuthToken;
 use Kubernetes::REST::ListToRequest;
-
-my $server = 'https://localhost:9999/';
-package FakeCreds {
-  use Moo;
-  sub token { 'FakeToken' }
-}
 
 my $l2r = Kubernetes::REST::ListToRequest->new;
 
 {
   my $call = Kubernetes::REST::CallContext->new(
-    method => 'GetCoreAPIVersions',
+    method => 'GetAllAPIVersions',
     params => [ ],
-    server => 'http://example.com',
-    credentials => FakeCreds->new,
+    server => Kubernetes::REST::Server->new(endpoint => 'http://example.com'),
+    credentials => Kubernetes::REST::AuthToken->new(token => 'FakeToken'),
   );
 
   my $req = $l2r->params2request($call);
