@@ -3,6 +3,7 @@ package Kubernetes::REST;
   use Types::Standard qw/HasMethods Str InstanceOf/;
   use Kubernetes::REST::CallContext;
   use Kubernetes::REST::Server;
+  use Kubernetes::REST::AuthToken;
   use Module::Runtime qw/require_module/;
 
   our $VERSION = '0.01';
@@ -36,7 +37,14 @@ package Kubernetes::REST;
   );
   #TODO: decide the interface for the credentials object. For now, it if has a token method,
   #      it will use it
-  has credentials => (is => 'ro', required => 1);
+  has credentials => (
+    is => 'ro',
+    required => 1,
+    coerce => sub {
+      return Kubernetes::REST::AuthToken->new($_[0]) if (ref($_[0]) eq 'HASH');
+      return $_[0];
+    }
+  );
 
   has api_version => (is => 'ro', isa => Str, default => sub { 'v1' });
 
