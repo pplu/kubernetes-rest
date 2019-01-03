@@ -116,6 +116,21 @@ package Kubernetes::REST;
     return $self->result_parser->result2return($call, $req, $result);
   }
 
+  sub invoke_raw {
+    my ($self, $req) = @_;
+    if (not $req->isa('Kubernetes::REST::HTTPRequest')) {
+      die "invoke_raw expects a Kubernetes::REST::HTTPRequest object";
+    }
+
+    my $call = Kubernetes::REST::CallContext->new(
+      method => "",
+      params => [],
+      server => $self->server,
+      credentials => $self->credentials,
+    );
+    return $self->io->call($call, $req);
+  }
+
   sub GetAllAPIVersions {
     my ($self, @params) = @_;
     $self->_invoke('GetAllAPIVersions', \@params);

@@ -28,6 +28,8 @@ package Kubernetes::REST::HTTPTinyIO;
   sub call {
     my ($self, $call, $req) = @_;
 
+    $req->authenticate if (defined $req->credentials);
+
     my $res = $self->ua->request(
       $req->method,
       $req->url,
