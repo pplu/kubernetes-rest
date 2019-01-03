@@ -72,17 +72,15 @@ package Kubernetes::REST::ListToRequest;
     }
     my $qstring = HTTP::Tiny->www_form_urlencode($params) if (defined $params);
 
-    my $req = Kubernetes::REST::HTTPRequest->new;
-    $req->method($call_object->_method);
-    my $base_url = $call_ctx->server->endpoint;
-    my $auth = $call_ctx->credentials;
-    $req->url(
-      (defined $qstring) ? "${base_url}${url}?$qstring" : "${base_url}${url}",
+    my $req = Kubernetes::REST::HTTPRequest->new(
+      server => $call_ctx->server,
+      credentials => $call_ctx->credentials,
     );
+    $req->method($call_object->_method);
+    $req->uri((defined $qstring) ? "${url}?$qstring" : "${url}");
     $req->headers({
       (defined $body_struct) ? ('Content-Type' => 'application/json') : (),
       Accept => 'application/json',
-      (defined $auth->token) ? (Authorization => 'Bearer ' . $auth->token) : (),
     });
     $req->content($self->_json->encode($body_struct)) if (defined $body_struct);
 

@@ -12,9 +12,5 @@ on test => sub {
 };
 
 on develop => sub {
-  requires 'Moose';
-  requires 'Template';
-  requires 'Swagger::Schema';
-  requires 'namespace::autoclean';
-  requires 'Path::Class';
+  requires 'KubeBuilder', '>= 0.02';
 }

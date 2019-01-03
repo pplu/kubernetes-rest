@@ -22,10 +22,18 @@ my $auth = Signer::AWSv4::EKS->new(
 
 my $api = Kubernetes::REST->new(
   credentials => $auth,
-  server => $server,
+  server => { endpoint => $server },
 );
 
-my $result = $api->GetCoreAPIVersions;
-
 use Data::Dumper;
+my $result;
+
+$result = $api->Core->GetCoreAPIVersions;
 print Dumper($result);
+
+$result = $api->Core->ListNamespace;
+print Dumper($result);
+
+$result = $api->GetAllAPIVersions;
+print Dumper($result);
+
