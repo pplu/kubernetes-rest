@@ -3,7 +3,6 @@
 use v5.10;
 
 use FindBin;
-use lib "$FindBin::Bin/../kubernetes-builder/lib/";
 
 use strict;
 use warnings;
