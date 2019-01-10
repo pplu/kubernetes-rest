@@ -19,7 +19,7 @@ my $k = Kubernetes::REST->new(
 
 my $r = $k->Core->ListNamespace;
 use Data::Dumper;
-print Dumper($r->metadata);
+print Dumper($r);
 
 foreach my $i (1..100) {
   $k->Core->CreateNamespace(
