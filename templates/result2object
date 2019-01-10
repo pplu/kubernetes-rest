@@ -20,7 +20,7 @@ package Kubernetes::REST::Result2Object;
     my ($self, $call, $response) = @_;
     
     my $return_class = $self->method_map->{ $call->method };
-    die "No return object" if (not defined $return_class);
+    die "No return object for " . $call->method if (not defined $return_class);
     my $object = eval {
       $self->parser->json_to_object($return_class, $response->content);
     };
@@ -57,7 +57,7 @@ package Kubernetes::REST::Result2Object;
 
   has method_map => (is => 'ro', default => sub { {
   [% FOREACH method = builder.method_list %]
-    [% IF (method.return_object_ref) %][% method.call_classname %] => '[% method.return_object.fully_namespaced %]',[% END %]
+    [% IF (method.return_object_ref) %]'[% method.version_namespace %]::[% method.group %]::[% method.call_classname %]' => '[% method.return_object.fully_namespaced %]',[% END %]
   [%- END %]
   } });
 

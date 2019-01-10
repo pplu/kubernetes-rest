@@ -1,3 +1,0 @@
-[submodule "kubernetes-builder"]
-	path = kubernetes-builder
-	url = git@github.com:pplu/kubernetes-builder.git
