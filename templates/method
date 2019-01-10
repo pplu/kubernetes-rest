@@ -6,11 +6,13 @@ package [% method.fullyqualified_methodname %];
   has [% parameter.name %] => (is => 'ro', isa => [% parameter.perl_type %][% IF (parameter.required) %],required => 1[% END %]);
   [% END %]
 
+  [%- IF (method.body_params.size > 0) -%]
   sub _body_params { [
   [% FOREACH parameter = method.body_params %]
     { name => '[% parameter.name %]' },
   [% END %]
   ] }
+  [%- END -%]
 
   sub _url_params { [
   [% FOREACH parameter = method.url_params %]
