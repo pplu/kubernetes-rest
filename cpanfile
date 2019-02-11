@@ -5,6 +5,7 @@ requires 'Type::Tiny';
 requires 'Throwable::Error';
 requires 'JSON::MaybeXS';
 requires 'Module::Runtime';
+requires 'IO::K8s';
 
 on test => sub {
   requires 'Test::More';
