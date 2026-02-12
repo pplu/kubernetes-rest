@@ -1,0 +1,42 @@
+{
+  "apiVersion": "v1",
+  "kind": "NamespaceList",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "default",
+        "uid": "mock-default-uid"
+      },
+      "spec": {},
+      "status": {
+        "phase": "Active"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "kube-system",
+        "uid": "mock-kube-system-uid"
+      },
+      "spec": {},
+      "status": {
+        "phase": "Active"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "kube-public",
+        "uid": "mock-kube-public-uid"
+      },
+      "spec": {},
+      "status": {
+        "phase": "Active"
+      }
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "my-app",
+    "namespace": "perl-test",
+    "uid": "mock-my-app-deploy-uid",
+    "resourceVersion": "10015",
+    "creationTimestamp": "2024-01-15T10:00:04Z",
+    "generation": 2
+  },
+  "spec": {
+    "replicas": 3,
+    "selector": {
+      "matchLabels": {
+        "app": "my-app"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "my-app"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "my-app",
+            "image": "my-app:1.0.0",
+            "ports": [
+              {
+                "containerPort": 8080,
+                "protocol": "TCP"
+              }
+            ],
+            "env": [
+              {
+                "name": "APP_ENV",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "name": "app-config",
+                    "key": "APP_ENV"
+                  }
+                }
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              },
+              "limits": {
+                "cpu": "500m",
+                "memory": "256Mi"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "status": {
+    "observedGeneration": 2,
+    "replicas": 3,
+    "updatedReplicas": 3,
+    "readyReplicas": 2,
+    "availableReplicas": 2,
+    "conditions": [
+      {
+        "type": "Available",
+        "status": "True",
+        "lastUpdateTime": "2024-01-15T10:00:30Z",
+        "lastTransitionTime": "2024-01-15T10:00:30Z",
+        "reason": "MinimumReplicasAvailable",
+        "message": "Deployment has minimum availability."
+      },
+      {
+        "type": "Progressing",
+        "status": "True",
+        "lastUpdateTime": "2024-01-15T10:01:00Z",
+        "lastTransitionTime": "2024-01-15T10:01:00Z",
+        "reason": "ReplicaSetUpdated",
+        "message": "Updated replica set \"my-app-6d4f5b7c8\" to 3 replicas."
+      }
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: staticwebsites.homelab.example.com
+spec:
+  group: homelab.example.com
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - domain
+                - image
+              properties:
+                domain:
+                  type: string
+                  description: The domain name for the website
+                image:
+                  type: string
+                  description: Container image serving the static content
+                replicas:
+                  type: integer
+                  description: Number of replicas
+                  default: 1
+                  minimum: 1
+                tls:
+                  type: boolean
+                  description: Whether to enable TLS
+                  default: false
+            status:
+              type: object
+              properties:
+                readyReplicas:
+                  type: integer
+                url:
+                  type: string
+      subresources:
+        status: {}
+  scope: Namespaced
+  names:
+    plural: staticwebsites
+    singular: staticwebsite
+    kind: StaticWebSite
+    shortNames:
+      - sw
+      - sweb

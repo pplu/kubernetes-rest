@@ -1,0 +1,19 @@
+{
+  "apiVersion": "homelab.example.com/v1",
+  "kind": "StaticWebSite",
+  "metadata": {
+    "name": "my-blog",
+    "namespace": "perl-test",
+    "uid": "mock-my-blog-sw-uid",
+    "resourceVersion": "20001",
+    "creationTimestamp": "2024-01-15T12:00:01Z",
+    "generation": 1
+  },
+  "spec": {
+    "domain": "blog.example.com",
+    "image": "nginx:1.27-alpine",
+    "replicas": 2,
+    "tls": true
+  },
+  "status": {}
+}

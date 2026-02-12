@@ -1,5 +1,22 @@
-0.02 2019-02-11
+Revision history for Kubernetes-REST
+
+{{$NEXT}}
+ - Complete rewrite for v1 API
+ - Now uses IO::K8s for Kubernetes resource classes
+ - Simplified API: list(), get(), create(), update(), delete()
+ - Automatic URL building from IO::K8s class metadata
+ - Custom Resource Definition (CRD) support: use your own CRD classes with the standard API
+ - _build_path supports resource_plural from CRD classes for custom plural names
+ - Backwards compatibility via deprecated v0 API wrappers (Apps->ListNamespacedPod, etc)
+ - Resource map for short class names (Pod -> Core::V1::Pod)
+ - Resource map '+' prefix for external classes ('+My::CRD' uses class as-is)
+ - Dynamic resource map loading from cluster (/openapi/v2)
+ - Deprecation stubs for removed classes (backwards compatibility)
+ - Comprehensive documentation and examples in Kubernetes::REST::Example
+ - Updated maintainer to GETTY
+
+0.02     2019-02-11 00:00:00Z
  - Fix all calls that have a body parameter: Create*, Patch*, Replace*, etc..
 
-0.01 2019-01-03
+0.01     2019-01-03 00:00:00Z
  - First release into an unsuspecting world

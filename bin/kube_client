@@ -1,0 +1,138 @@
+#!/usr/bin/env perl
+# PODNAME: kube_client
+# ABSTRACT: Kubernetes CLI client using Kubernetes::REST
+
+use strict;
+use warnings;
+
+use Kubernetes::REST::CLI;
+
+Kubernetes::REST::CLI->new_with_cmd;
+
+__END__
+
+=head1 NAME
+
+kube_client - Kubernetes CLI client using Kubernetes::REST
+
+=head1 SYNOPSIS
+
+    # List all pods in default namespace
+    kube_client get Pod
+
+    # Get specific pod
+    kube_client get Pod nginx
+
+    # List pods in specific namespace
+    kube_client get Pod -n kube-system
+
+    # Output as YAML
+    kube_client get Pod -o yaml
+
+    # Output only names
+    kube_client get Pod -o name
+
+    # Create resource from file
+    kube_client create -f pod.yaml
+
+    # Create resource from stdin
+    cat pod.json | kube_client create
+
+    # Delete resource
+    kube_client delete Pod nginx -n default
+
+    # Use different context
+    kube_client -c production get Pod
+
+    # Use different kubeconfig
+    kube_client --kubeconfig /path/to/config get Pod
+
+    # Raw API call
+    kube_client raw CoreV1 ListNamespace
+    kube_client raw CoreV1 ReadNamespacedPod namespace=default name=nginx
+
+=head1 DESCRIPTION
+
+B<kube_client> is a command-line tool for interacting with Kubernetes clusters
+using the L<Kubernetes::REST> Perl library. It reads cluster configuration from
+your kubeconfig file (typically F<~/.kube/config>).
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--kubeconfig>=PATH
+
+Path to kubeconfig file. Defaults to F<~/.kube/config>.
+
+=item B<-c>, B<--context>=NAME
+
+Kubernetes context to use. Defaults to current-context from kubeconfig.
+
+=item B<-n>, B<--namespace>=NAME
+
+Namespace for namespaced resources. Defaults to C<default>.
+
+=item B<-o>, B<--output>=FORMAT
+
+Output format: C<json> (default), C<yaml>, or C<name>.
+
+=back
+
+=head1 COMMANDS
+
+=head2 get
+
+    kube_client get <Kind> [name]
+
+Get one or more resources. If C<name> is provided, fetches that specific
+resource. Otherwise lists all resources of that kind.
+
+    kube_client get Pod
+    kube_client get Pod nginx
+    kube_client get Deployment -n production
+    kube_client get Node -o yaml
+
+=head2 create
+
+    kube_client create -f <file>
+
+Create a resource from a JSON or YAML file. Use C<-f -> to read from stdin.
+
+    kube_client create -f deployment.yaml
+    cat pod.json | kube_client create
+
+=head2 delete
+
+    kube_client delete <Kind> <name>
+
+Delete a resource by kind and name.
+
+    kube_client delete Pod nginx
+    kube_client delete Namespace test
+
+=head2 raw
+
+    kube_client raw <Group> <Method> [key=value ...]
+
+Make a raw API call using Kubernetes::REST method groups.
+
+    kube_client raw CoreV1 ListNamespace
+    kube_client raw CoreV1 ReadNamespacedPod namespace=default name=nginx
+    kube_client raw AppsV1 ListNamespacedDeployment namespace=default
+
+=head1 ENVIRONMENT
+
+=over 4
+
+=item C<HOME>
+
+Used to locate the default kubeconfig at F<~/.kube/config>.
+
+=back
+
+=head1 SEE ALSO
+
+L<Kubernetes::REST>, L<Kubernetes::REST::CLI>, L<IO::K8s>
+
+=cut

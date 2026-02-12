@@ -1,0 +1,16 @@
+{
+  "apiVersion": "v1",
+  "kind": "ConfigMap",
+  "metadata": {
+    "name": "app-config",
+    "namespace": "perl-test",
+    "uid": "mock-app-config-cm-uid",
+    "resourceVersion": "10002",
+    "creationTimestamp": "2024-01-15T10:00:01Z"
+  },
+  "data": {
+    "database.host": "postgres.perl-test.svc.cluster.local",
+    "database.port": "5432",
+    "app.debug": "true"
+  }
+}

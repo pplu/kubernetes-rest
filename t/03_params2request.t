@@ -4,49 +4,46 @@ use strict;
 use warnings;
 
 use Test::More;
-use Kubernetes::REST::CallContext;
+use Kubernetes::REST;
 use Kubernetes::REST::Server;
 use Kubernetes::REST::AuthToken;
-use Kubernetes::REST::ListToRequest;
-use JSON::MaybeXS;
 
-my $l2r = Kubernetes::REST::ListToRequest->new;
-
+# Test _build_path functionality
 {
-  my $call = Kubernetes::REST::CallContext->new(
-    method => 'GetAllAPIVersions',
-    params => [ ],
-    server => Kubernetes::REST::Server->new(endpoint => 'http://example.com'),
-    credentials => Kubernetes::REST::AuthToken->new(token => 'FakeToken'),
-  );
+    my $api = Kubernetes::REST->new(
+        server => Kubernetes::REST::Server->new(endpoint => 'http://example.com'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'FakeToken'),
+        resource_map_from_cluster => 0,  # Use IO::K8s defaults for testing
+    );
 
-  my $req = $l2r->params2request($call);
-  cmp_ok($req->method, 'eq', 'GET');
-  cmp_ok($req->url, 'eq', 'http://example.com/');
+    # Test expand_class with short names
+    is($api->expand_class('Pod'), 'IO::K8s::Api::Core::V1::Pod', 'Pod expands correctly');
+    is($api->expand_class('Deployment'), 'IO::K8s::Api::Apps::V1::Deployment', 'Deployment expands correctly');
+    is($api->expand_class('Node'), 'IO::K8s::Api::Core::V1::Node', 'Node expands correctly');
+
+    # Test with relative path
+    is($api->expand_class('Api::Core::V1::Pod'), 'IO::K8s::Api::Core::V1::Pod', 'Relative path expands');
+
+    # Test extension API via resource_map
+    is($api->expand_class('CustomResourceDefinition'),
+       'IO::K8s::ApiextensionsApiserver::Pkg::Apis::Apiextensions::V1::CustomResourceDefinition',
+       'CustomResourceDefinition expands to full path');
 }
 
+# Test resource_map customization
 {
-  my $body = {
-          'apiVersion' => 'v1',
-          'kind' => 'Namespace',
-          'metadata' => {
-                          'name' => 'nsX'
-                        }
-  };
+    my $custom_map = {
+        Pod => 'Api::Core::V1::Pod',
+        MyCustomResource => 'Api::Custom::V1::MyCustomResource',
+    };
 
-  my $call = Kubernetes::REST::CallContext->new(
-    method => 'v1::Core::CreateNamespace',
-    params => [ body => $body ],
-    server => Kubernetes::REST::Server->new(endpoint => 'http://example.com'),
-    credentials => Kubernetes::REST::AuthToken->new(token => 'FakeToken'),
-  );
+    my $api = Kubernetes::REST->new(
+        server => Kubernetes::REST::Server->new(endpoint => 'http://example.com'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'FakeToken'),
+        resource_map => $custom_map,
+    );
 
-  my $req = $l2r->params2request($call);
-
-  cmp_ok($req->method, 'eq', 'POST');
-  cmp_ok($req->url, 'eq', 'http://example.com/api/v1/namespaces?');
-  is_deeply(decode_json($req->content), $body, 'The body of the requests contains the JSON in the body parameter');
+    is($api->expand_class('MyCustomResource'), 'IO::K8s::Api::Custom::V1::MyCustomResource', 'Custom resource map works');
 }
-
 
 done_testing;

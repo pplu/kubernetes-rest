@@ -20,7 +20,7 @@ package Kubernetes::REST::HTTPTinyIO;
     $options{ SSL_ca_file } = $self->ssl_ca_file if (defined $self->ssl_ca_file);
   
     return HTTP::Tiny->new(
-      agent => 'Kubernetes::REST Perl Client ' . $Kubernetes::REST::VERSION,
+      agent => 'Kubernetes::REST Perl Client ' . ($Kubernetes::REST::VERSION // 'dev'),
       SSL_options => \%options,
     );
   });
@@ -46,3 +46,44 @@ package Kubernetes::REST::HTTPTinyIO;
   }
 
 1;
+
+=encoding UTF-8
+
+=head1 NAME
+
+Kubernetes::REST::HTTPTinyIO - HTTP client using HTTP::Tiny
+
+=head1 SYNOPSIS
+
+    use Kubernetes::REST::HTTPTinyIO;
+
+    my $io = Kubernetes::REST::HTTPTinyIO->new(
+        ssl_verify_server => 1,
+        ssl_ca_file => '/path/to/ca.crt',
+    );
+
+=head1 DESCRIPTION
+
+HTTP client implementation using L<HTTP::Tiny> for making Kubernetes API requests.
+
+=attr ssl_verify_server
+
+Boolean. Whether to verify the server's SSL certificate. Defaults to true.
+
+=attr ssl_cert_file
+
+Optional. Path to client certificate file for mTLS authentication.
+
+=attr ssl_key_file
+
+Optional. Path to client key file for mTLS authentication.
+
+=attr ssl_ca_file
+
+Optional. Path to CA certificate file for verifying the server certificate.
+
+=method call($call, $req)
+
+Execute an HTTP request. Returns a L<Kubernetes::REST::HTTPResponse>.
+
+=cut

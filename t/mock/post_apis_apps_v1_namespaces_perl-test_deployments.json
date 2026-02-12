@@ -1,0 +1,79 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "my-app",
+    "namespace": "perl-test",
+    "uid": "mock-my-app-deploy-uid",
+    "resourceVersion": "10005",
+    "creationTimestamp": "2024-01-15T10:00:04Z",
+    "generation": 1
+  },
+  "spec": {
+    "replicas": 2,
+    "selector": {
+      "matchLabels": {
+        "app": "my-app"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "my-app"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "my-app",
+            "image": "my-app:1.0.0",
+            "ports": [
+              {
+                "containerPort": 8080,
+                "protocol": "TCP"
+              }
+            ],
+            "env": [
+              {
+                "name": "APP_ENV",
+                "valueFrom": {
+                  "configMapKeyRef": {
+                    "name": "app-config",
+                    "key": "APP_ENV"
+                  }
+                }
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              },
+              "limits": {
+                "cpu": "500m",
+                "memory": "256Mi"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "status": {
+    "observedGeneration": 1,
+    "replicas": 2,
+    "updatedReplicas": 2,
+    "readyReplicas": 0,
+    "availableReplicas": 0,
+    "conditions": [
+      {
+        "type": "Progressing",
+        "status": "True",
+        "lastUpdateTime": "2024-01-15T10:00:04Z",
+        "lastTransitionTime": "2024-01-15T10:00:04Z",
+        "reason": "NewReplicaSetCreated",
+        "message": "Created new replica set \"my-app-6d4f5b7c8\""
+      }
+    ]
+  }
+}

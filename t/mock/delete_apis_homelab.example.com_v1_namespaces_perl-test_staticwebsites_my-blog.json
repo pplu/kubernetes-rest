@@ -1,0 +1,11 @@
+{
+  "apiVersion": "v1",
+  "kind": "Status",
+  "metadata": {},
+  "status": "Success",
+  "details": {
+    "name": "my-blog",
+    "group": "homelab.example.com",
+    "kind": "staticwebsites"
+  }
+}

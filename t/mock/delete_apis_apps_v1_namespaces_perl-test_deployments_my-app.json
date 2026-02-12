@@ -1,0 +1,12 @@
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Success",
+  "details": {
+    "name": "my-app",
+    "group": "apps",
+    "kind": "deployments",
+    "uid": "mock-my-app-deploy-uid"
+  }
+}
