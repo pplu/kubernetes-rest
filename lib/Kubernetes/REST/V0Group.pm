@@ -7,6 +7,30 @@ has api => (is => 'ro', required => 1);
 has group => (is => 'ro', required => 1);
 has version => (is => 'ro', default => sub { 'v1' });
 
+# ============================================================================
+# BACKWARDS COMPATIBILITY LAYER (v0 API → v1 API)
+#
+# The original Kubernetes::REST (v0.01/v0.02, by JLMARTIN) used method names
+# like $api->Core->ListNamespacedPod(...) with dedicated Call classes in
+# lib/Kubernetes/REST/Call/v1/Core/ListNamespacedPod.pm (978 classes total).
+#
+# Our v1 rewrite simplified this to $api->list('Pod', namespace => ...).
+#
+# AUTOLOAD catches the old method names (e.g. "ListNamespacedPod"), parses
+# them into action + resource, and dispatches to the new API. Each call
+# emits a deprecation warning showing the new equivalent call.
+#
+# Subclasses (Kubernetes::REST::Core, ::Apps, ::Batch, etc.) only set the
+# 'group' attribute. AUTOLOAD + _parse_method + _dispatch handle the rest.
+#
+# Pattern: {Action}{Namespaced?}{Resource}{ForAllNamespaces?}
+#   Actions: List, Read, Create, Replace, Patch, Delete, Watch
+#   Example: ListNamespacedPod → list('IO::K8s::Api::Core::V1::Pod', ...)
+#
+# The old Call classes are now deprecation stubs (warn + return 1).
+# This entire layer can be removed once no downstream code uses the old API.
+# ============================================================================
+
 our $AUTOLOAD;
 
 sub AUTOLOAD {
@@ -102,6 +126,12 @@ sub _warn_deprecated {
     } elsif ($action eq 'delete') {
         my $ns = $params->{namespace} ? ", namespace => '$params->{namespace}'" : '';
         $new_call = "\$api->delete('$class', name => '$params->{name}'$ns)";
+    } elsif ($action eq 'patch') {
+        my $ns = $params->{namespace} ? ", namespace => '$params->{namespace}'" : '';
+        $new_call = "\$api->patch('$class', name => '$params->{name}'$ns, patch => \\%patch)";
+    } elsif ($action eq 'watch') {
+        my $ns = $params->{namespace} ? ", namespace => '$params->{namespace}'" : '';
+        $new_call = "\$api->watch('$class'$ns, on_event => sub { ... })";
     } else {
         $new_call = "\$api->$action('$class', ...)";
     }
@@ -127,9 +157,9 @@ sub _dispatch {
     } elsif ($action eq 'delete') {
         return $api->delete($class, %$params);
     } elsif ($action eq 'patch') {
-        croak "patch not yet implemented in new API";
+        return $api->patch($class, %$params);
     } elsif ($action eq 'watch') {
-        croak "watch not yet implemented in new API";
+        return $api->watch($class, %$params);
     } else {
         croak "Unknown action: $action";
     }
@@ -190,9 +220,9 @@ and translates them to the new API. The following actions are supported:
 
 =item * Delete -> delete()
 
-=item * Patch -> not yet implemented
+=item * Patch -> patch()
 
-=item * Watch -> not yet implemented
+=item * Watch -> watch()
 
 =back
 

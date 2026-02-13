@@ -539,6 +539,65 @@ Fetch a resource, modify it, send it back:
     $pod->metadata->labels($labels);
     $api->update($pod);
 
+=head1 PATCHING RESOURCES
+
+C<patch()> modifies specific fields without fetching and replacing the
+entire object. This avoids conflicts when multiple clients update the
+same resource.
+
+=head2 Strategic Merge Patch (default)
+
+The Kubernetes-native patch type. Arrays are merged intelligently
+based on the field's merge strategy.
+
+    # Add a label without touching other labels
+    my $patched = $api->patch('Pod', 'my-pod',
+        namespace => 'perl-test',
+        patch     => {
+            metadata => { labels => { environment => 'staging' } },
+        },
+    );
+
+    # Scale a deployment (one field only)
+    $api->patch('Deployment', 'my-app',
+        namespace => 'perl-test',
+        patch     => { spec => { replicas => 5 } },
+    );
+
+=head2 JSON Merge Patch
+
+Simple merge where C<null> deletes a key. Arrays are replaced entirely.
+
+    # Remove an annotation
+    use JSON::PP ();
+    $api->patch('Pod', 'my-pod',
+        namespace => 'perl-test',
+        type      => 'merge',
+        patch     => {
+            metadata => { annotations => { 'old-key' => JSON::PP::null } },
+        },
+    );
+
+=head2 JSON Patch (RFC 6902)
+
+An array of precise operations for surgical edits.
+
+    $api->patch('Deployment', 'my-app',
+        namespace => 'perl-test',
+        type      => 'json',
+        patch     => [
+            { op => 'replace', path => '/spec/replicas', value => 3 },
+            { op => 'add', path => '/metadata/labels/version', value => '2.0' },
+        ],
+    );
+
+=head2 Patch vs Update
+
+Use C<patch()> when you only need to change a few fields - it's safer
+because it won't overwrite changes made by other clients between your
+C<get()> and C<update()>. Use C<update()> when you need to replace the
+entire spec.
+
 =head1 WAITING FOR READINESS
 
 Kubernetes operations are asynchronous. Poll the API to wait for a
@@ -628,6 +687,87 @@ Every L<IO::K8s> object can be serialized to JSON or YAML:
     # Round-trip: hashref -> object
     my $pod2 = $api->inflate($pod->TO_JSON);
     say $pod2->metadata->name;
+
+=head1 WATCHING FOR CHANGES
+
+The Watch API streams events as resources are added, modified, or deleted.
+This is the foundation for building Kubernetes controllers.
+
+=head2 Basic watch
+
+    $api->watch('Pod',
+        namespace => 'default',
+        timeout   => 60,
+        on_event  => sub {
+            my ($event) = @_;
+            printf "%-10s %s\n",
+                $event->type,
+                $event->object->metadata->name;
+        },
+    );
+
+=head2 Resumable watch loop
+
+    # Watch indefinitely, surviving timeouts and disconnects
+    my $rv;
+    while (1) {
+        $rv = eval {
+            $api->watch('Pod',
+                namespace       => 'default',
+                resourceVersion => $rv,
+                on_event        => sub {
+                    my ($event) = @_;
+                    say $event->type . ": " . $event->object->metadata->name;
+                },
+            );
+        };
+        if ($@ && $@ =~ /410 Gone/) {
+            # resourceVersion too old, re-list to get fresh state
+            warn "Watch expired, re-listing...\n";
+            $api->list('Pod', namespace => 'default');
+            $rv = undef;
+        } elsif ($@) {
+            warn "Watch error: $@\n";
+            sleep 5;
+        }
+        # Normal timeout, just restart the watch
+    }
+
+=head2 Watch with selectors
+
+    $api->watch('Pod',
+        namespace     => 'default',
+        labelSelector => 'app=web',
+        fieldSelector => 'status.phase=Running',
+        on_event      => sub {
+            my ($event) = @_;
+            say $event->type . ": " . $event->object->metadata->name;
+        },
+    );
+
+=head2 Watch any resource type
+
+    # Watch deployments
+    $api->watch('Deployment',
+        namespace => 'default',
+        on_event  => sub {
+            my ($event) = @_;
+            my $deploy = $event->object;
+            printf "%s %s: %d/%d ready\n",
+                $event->type,
+                $deploy->metadata->name,
+                $deploy->status->readyReplicas // 0,
+                $deploy->spec->replicas // 0;
+        },
+    );
+
+    # Watch namespaces (cluster-scoped)
+    $api->watch('Namespace',
+        on_event => sub {
+            my ($event) = @_;
+            say $event->type . ": " . $event->object->metadata->name;
+        },
+    );
 
 =head1 DELETING RESOURCES
 

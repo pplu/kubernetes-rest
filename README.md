@@ -16,7 +16,6 @@ cpanm Kubernetes::REST
 
 ```perl
 use Kubernetes::REST;
-use IO::K8s::Api::Core::V1::Pod;
 
 my $api = Kubernetes::REST->new(
     server => { endpoint => 'https://kubernetes.local:6443' },
@@ -38,13 +37,66 @@ my $new_pod = $api->create($pod_object);
 # Update a pod
 my $updated = $api->update($pod);
 
+# Patch a pod (partial update)
+my $patched = $api->patch('Pod', 'my-pod',
+    namespace => 'default',
+    patch     => { metadata => { labels => { env => 'staging' } } },
+);
+
 # Delete a pod
 $api->delete($pod);
+
+# Watch for changes
+my $rv = $api->watch('Pod',
+    namespace => 'default',
+    on_event  => sub {
+        my ($event) = @_;
+        say $event->type . ': ' . $event->object->metadata->name;
+    },
+);
+```
+
+## CLI Tools
+
+### kube_client
+
+Interactive CLI for Kubernetes CRUD operations:
+
+```bash
+kube_client get Pod -n default
+kube_client get Pod my-pod -n default
+kube_client create -f pod.json
+kube_client delete Pod my-pod -n default
+```
+
+### kube_watch
+
+Watch Kubernetes resources for changes in real-time:
+
+```bash
+# Watch all pods across all namespaces
+kube_watch Pod
+
+# Watch pods in a specific namespace
+kube_watch Pod -n default
+
+# Filter by event type
+kube_watch Pod -T ADDED,DELETED
+
+# Filter by label
+kube_watch Deployment -n production -l app=web
+
+# JSON output for piping
+kube_watch Pod -o json | jq '.object.metadata.name'
+
+# Custom timestamp format
+kube_watch Pod -F time      # 14:23:01
+kube_watch Pod -F iso       # 2025-02-12T14:23:01+0100
 ```
 
 ## Custom Resource Definitions (CRDs)
 
-Register your own CRD classes and use them with the same CRUD API:
+Register your own CRD classes and use them with the same API:
 
 ```perl
 use My::StaticWebSite;
@@ -67,12 +119,15 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 
 ## Features
 
-- **Simple API**: Just 5 main methods: `list()`, `get()`, `create()`, `update()`, `delete()`
+- **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `delete()`, `watch()`
+- **Patch support**: Strategic merge patch, JSON merge patch (RFC 7396), JSON patch (RFC 6902)
+- **Watch API**: Stream resource changes with resumable watches via resourceVersion tracking
 - **Automatic URL building**: Uses IO::K8s class metadata to construct proper API endpoints
-- **CRD support**: Use custom resource classes with the standard CRUD API
+- **CRD support**: Use custom resource classes with the standard API
 - **Short class names**: Use `'Pod'` instead of `'IO::K8s::Api::Core::V1::Pod'`
 - **Type safety**: All objects are strongly typed using IO::K8s classes
-- **Backwards compatibility**: Deprecated v0 API still works (with warnings)
+- **CLI tools**: `kube_client` for CRUD, `kube_watch` for live event streaming
+- **Backwards compatibility**: Deprecated pre-v1 API still works (with warnings)
 
 ## Links
 
@@ -88,5 +143,4 @@ Apache 2.0
 ## Authors
 
 - Torsten Raudssus (GETTY) - Current maintainer
-- Jose Luis Martinez - Original author
-
+- Jose Luis Martinez Torres (JLMARTIN) - Original author

@@ -4,23 +4,9 @@ package Kubernetes::REST::CLI;
 use Moo;
 use MooX::Options;
 use MooX::Cmd;
-use Kubernetes::REST;
-use Kubernetes::REST::Kubeconfig;
 use JSON::MaybeXS;
 
-option kubeconfig => (
-    is => 'ro',
-    format => 's',
-    doc => 'Path to kubeconfig file',
-    default => sub { "$ENV{HOME}/.kube/config" },
-);
-
-option context => (
-    is => 'ro',
-    format => 's',
-    short => 'c',
-    doc => 'Kubernetes context to use',
-);
+with 'Kubernetes::REST::CLI::Role::Connection';
 
 option namespace => (
     is => 'ro',
@@ -36,18 +22,6 @@ option output => (
     short => 'o',
     default => sub { 'json' },
     doc => 'Output format: json, yaml, name',
-);
-
-has api => (
-    is => 'lazy',
-    builder => sub {
-        my $self = shift;
-        my $kc = Kubernetes::REST::Kubeconfig->new(
-            kubeconfig_path => $self->kubeconfig,
-            ($self->context ? (context_name => $self->context) : ()),
-        );
-        return $kc->api;
-    },
 );
 
 has json => (
@@ -95,6 +69,7 @@ sub execute {
     print "  delete <Kind> <name>  Delete resource\n";
     print "  raw <Group> <Method>  Raw API call\n";
     print "\nRun 'kube_client --help' for options.\n";
+    print "See also: kube_watch <Kind> for live event streaming.\n";
     return 0;
 }
 

@@ -11,6 +11,7 @@ use Kubernetes::REST::HTTPTinyIO;
 use Kubernetes::REST::HTTPRequest;
 use IO::K8s;
 use IO::K8s::List;
+use Kubernetes::REST::WatchEvent;
 
 has server => (
     is => 'ro',
@@ -287,23 +288,129 @@ sub _build_path {
     return $path;
 }
 
-sub _request {
-    my ($self, $method, $path, $body) = @_;
+# ============================================================================
+# REQUEST / RESPONSE PIPELINE
+#
+# The API methods (list, get, create, etc.) are built on a 3-step pipeline:
+#
+#   1. _prepare_request  - builds an HTTPRequest (method, url, headers, body)
+#   2. io->call          - executes the request (pluggable: HTTP::Tiny, async, mock)
+#   3. _check_response / _inflate_object / _inflate_list - processes the response
+#
+# This separation allows different IO backends (sync, async, mock) to slot in
+# at step 2 without touching request preparation or response processing.
+# ============================================================================
+
+sub _prepare_request {
+    my ($self, $method, $path, %opts) = @_;
 
     my $url = $self->server->endpoint . $path;
+    my $content_type = $opts{content_type} // 'application/json';
+    my $body = $opts{body};
+    my $parameters = $opts{parameters};
 
-    my $req = Kubernetes::REST::HTTPRequest->new(
+    # Append query parameters to URL
+    if ($parameters && %$parameters) {
+        my @pairs;
+        for my $key (sort keys %$parameters) {
+            my $val = $parameters->{$key};
+            push @pairs, "$key=$val" if defined $val;
+        }
+        if (@pairs) {
+            $url .= ($url =~ /\?/ ? '&' : '?') . join('&', @pairs);
+        }
+    }
+
+    return Kubernetes::REST::HTTPRequest->new(
         method => $method,
         url => $url,
         headers => {
             'Authorization' => 'Bearer ' . $self->credentials->token,
-            'Content-Type' => 'application/json',
+            'Content-Type' => $content_type,
             'Accept' => 'application/json',
         },
         ($body ? (content => $self->_json->encode($body)) : ()),
     );
+}
 
-    return $self->io->call(undef, $req);
+sub _check_response {
+    my ($self, $response, $context) = @_;
+    if ($response->status >= 400) {
+        croak "Kubernetes API error ($context): "
+            . $response->status . " " . ($response->content // '');
+    }
+    return $response;
+}
+
+sub _inflate_object {
+    my ($self, $class, $response) = @_;
+    return $self->k8s->json_to_object($class, $response->content);
+}
+
+sub _inflate_list {
+    my ($self, $class, $response) = @_;
+    my $struct = $self->_json->decode($response->content);
+    my @objects;
+    for my $item (@{$struct->{items} // []}) {
+        my $obj = eval { $self->k8s->struct_to_object($class, $item) };
+        push @objects, $obj if $obj;
+    }
+    return IO::K8s::List->new(items => \@objects, item_class => $class);
+}
+
+sub _process_watch_chunk {
+    my ($self, $class, $buffer_ref, $chunk) = @_;
+    $$buffer_ref .= $chunk;
+
+    my @events;
+    while ($$buffer_ref =~ s/^([^\n]*)\n//) {
+        my $line = $1;
+        next unless length $line;
+
+        my $data = eval { $self->_json->decode($line) };
+        next unless $data;
+
+        my $type = $data->{type} // '';
+        my $raw_object = $data->{object} // {};
+
+        # Track resourceVersion for resumability
+        my $rv;
+        if ($raw_object->{metadata} && $raw_object->{metadata}{resourceVersion}) {
+            $rv = $raw_object->{metadata}{resourceVersion};
+        }
+
+        # Inflate the object (ERROR events stay as hashrefs)
+        my $object;
+        if ($type eq 'ERROR') {
+            $object = $raw_object;
+        } else {
+            $object = eval { $self->k8s->struct_to_object($class, $raw_object) }
+                // $raw_object;
+        }
+
+        push @events, {
+            event => Kubernetes::REST::WatchEvent->new(
+                type   => $type,
+                object => $object,
+                raw    => $raw_object,
+            ),
+            resourceVersion => $rv,
+            is_error        => ($type eq 'ERROR' ? 1 : 0),
+            error_code      => ($type eq 'ERROR' ? ($raw_object->{code} // 0) : 0),
+        };
+    }
+
+    return @events;
+}
+
+# Convenience: prepare + call in one step (used by sync CRUD methods)
+sub _request {
+    my ($self, $method, $path, $body, %opts) = @_;
+    my $req = $self->_prepare_request($method, $path,
+        body => $body,
+        %opts,
+    );
+    return $self->io->call($req);
 }
 
 sub list {
@@ -312,19 +419,9 @@ sub list {
     my $class = $self->expand_class($short_class);
     my $path = $self->_build_path($class, %args);
     my $response = $self->_request('GET', $path);
+    $self->_check_response($response, "list $short_class");
 
-    if ($response->status >= 400) {
-        croak "Kubernetes API error: " . $response->status . " " . ($response->content // '');
-    }
-
-    my $struct = $self->_json->decode($response->content);
-    my @objects;
-    for my $item (@{$struct->{items} // []}) {
-        my $obj = eval { $self->k8s->struct_to_object($class, $item) };
-        push @objects, $obj if $obj;
-    }
-
-    return IO::K8s::List->new(items => \@objects, item_class => $class);
+    return $self->_inflate_list($class, $response);
 }
 
 sub get {
@@ -350,12 +447,9 @@ sub get {
 
     my $path = $self->_build_path($class, %args);
     my $response = $self->_request('GET', $path);
+    $self->_check_response($response, "get $short_class");
 
-    if ($response->status >= 400) {
-        croak "Kubernetes API error: " . $response->status . " " . ($response->content // '');
-    }
-
-    return $self->k8s->json_to_object($class, $response->content);
+    return $self->_inflate_object($class, $response);
 }
 
 sub create {
@@ -368,12 +462,9 @@ sub create {
 
     my $path = $self->_build_path($class, namespace => $namespace);
     my $response = $self->_request('POST', $path, $object->TO_JSON);
+    $self->_check_response($response, "create " . ref($object));
 
-    if ($response->status >= 400) {
-        croak "Kubernetes API error: " . $response->status . " " . ($response->content // '');
-    }
-
-    return $self->k8s->json_to_object($class, $response->content);
+    return $self->_inflate_object($class, $response);
 }
 
 sub update {
@@ -386,12 +477,60 @@ sub update {
 
     my $path = $self->_build_path($class, name => $name, namespace => $namespace);
     my $response = $self->_request('PUT', $path, $object->TO_JSON);
+    $self->_check_response($response, "update " . ref($object));
 
-    if ($response->status >= 400) {
-        croak "Kubernetes API error: " . $response->status . " " . ($response->content // '');
+    return $self->_inflate_object($class, $response);
+}
+
+my %PATCH_TYPES = (
+    strategic => 'application/strategic-merge-patch+json',
+    merge     => 'application/merge-patch+json',
+    json      => 'application/json-patch+json',
+);
+
+sub patch {
+    my ($self, $class_or_object, @rest) = @_;
+
+    my ($class, $name, $namespace, $patch, $patch_type);
+
+    if (ref($class_or_object) && blessed($class_or_object)) {
+        # Object passed: patch($object, patch => {...})
+        my $object = $class_or_object;
+        $class = ref($object);
+        my $metadata = $object->metadata or croak "object must have metadata";
+        $name = $metadata->name or croak "object must have metadata.name";
+        $namespace = $metadata->namespace;
+        my %args = @rest;
+        $patch = $args{patch} // croak "patch requires 'patch' parameter";
+        $patch_type = $args{type} // 'strategic';
+    } else {
+        # Class + name: patch('Pod', 'name', namespace => 'ns', patch => {...})
+        my %args;
+        if (@rest >= 1 && !ref($rest[0]) && $rest[0] !~ /^(name|namespace|patch|type)$/) {
+            $args{name} = shift @rest;
+            %args = (%args, @rest);
+        } elsif (@rest % 2 == 0) {
+            %args = @rest;
+        } else {
+            croak "Invalid arguments to patch()";
+        }
+
+        $class = $self->expand_class($class_or_object);
+        $name = $args{name} or croak "name required for patch";
+        $namespace = $args{namespace};
+        $patch = $args{patch} // croak "patch requires 'patch' parameter";
+        $patch_type = $args{type} // 'strategic';
     }
 
-    return $self->k8s->json_to_object($class, $response->content);
+    my $content_type = $PATCH_TYPES{$patch_type}
+        // croak "Unknown patch type '$patch_type' (use: strategic, merge, json)";
+
+    my $path = $self->_build_path($class, name => $name, namespace => $namespace);
+    my $response = $self->_request('PATCH', $path, $patch,
+        content_type => $content_type);
+    $self->_check_response($response, "patch $class");
+
+    return $self->_inflate_object($class, $response);
 }
 
 sub delete {
@@ -429,12 +568,55 @@ sub delete {
 
     my $path = $self->_build_path($class, name => $name, namespace => $namespace);
     my $response = $self->_request('DELETE', $path);
-
-    if ($response->status >= 400) {
-        croak "Kubernetes API error: " . $response->status . " " . ($response->content // '');
-    }
+    $self->_check_response($response, "delete $class");
 
     return 1;
+}
+
+sub watch {
+    my ($self, $short_class, %args) = @_;
+
+    my $on_event = delete $args{on_event}
+        or croak "watch requires 'on_event' callback";
+    my $timeout          = delete $args{timeout} // 300;
+    my $resource_version = delete $args{resourceVersion};
+    my $label_selector   = delete $args{labelSelector};
+    my $field_selector   = delete $args{fieldSelector};
+
+    my $class = $self->expand_class($short_class);
+    my $path = $self->_build_path($class, %args);
+
+    my %params = (
+        watch          => 'true',
+        timeoutSeconds => $timeout,
+    );
+    $params{resourceVersion} = $resource_version if defined $resource_version;
+    $params{labelSelector}   = $label_selector   if defined $label_selector;
+    $params{fieldSelector}   = $field_selector   if defined $field_selector;
+
+    my $req = $self->_prepare_request('GET', $path, parameters => \%params);
+
+    my $buffer = '';
+    my $last_rv = $resource_version;
+    my $got_410 = 0;
+
+    my $data_callback = sub {
+        my ($chunk) = @_;
+        for my $result ($self->_process_watch_chunk($class, \$buffer, $chunk)) {
+            $last_rv = $result->{resourceVersion} if $result->{resourceVersion};
+            $got_410 = 1 if $result->{error_code} == 410;
+            $on_event->($result->{event});
+        }
+    };
+
+    my $response = $self->io->call_streaming($req, $data_callback);
+
+    $self->_check_response($response, "watch $short_class");
+
+    croak "Watch expired (410 Gone): resourceVersion too old, re-list to get a fresh resourceVersion"
+        if $got_410;
+
+    return $last_rv;
 }
 
 1;
@@ -485,9 +667,15 @@ Kubernetes::REST - A Perl REST Client for the Kubernetes API
         ));
     }
 
-    # Update a resource
+    # Update a resource (full replacement)
     $pod->metadata->labels({ app => 'updated' });
     my $updated = $api->update($pod);
+
+    # Patch a resource (partial update)
+    my $patched = $api->patch('Pod', 'my-pod',
+        namespace => 'default',
+        patch     => { metadata => { labels => { env => 'staging' } } },
+    );
 
     # Delete a resource
     $api->delete($pod);
@@ -511,8 +699,8 @@ This version has been completely rewritten. Key changes that may affect your cod
 =item * B<New simplified API>
 
 The old method-per-operation API (e.g., C<< $api->Core->ListNamespacedPod(...) >>)
-has been replaced with a simple CRUD API: C<list>, C<get>, C<create>, C<update>,
-C<delete>.
+has been replaced with a simple API: C<list>, C<get>, C<create>, C<update>,
+C<patch>, C<delete>, C<watch>.
 
 =item * B<Old API still works but deprecated>
 
@@ -557,7 +745,17 @@ object.
 
 =head2 io
 
-Optional. HTTP client for making requests. Defaults to L<Kubernetes::REST::HTTPTinyIO>.
+Optional. HTTP backend for making requests. Must consume the
+L<Kubernetes::REST::Role::IO> role (i.e. implement C<call($req)> and
+C<call_streaming($req, $callback)>). Defaults to L<Kubernetes::REST::HTTPTinyIO>.
+
+To use an async event loop, provide your own IO backend:
+
+    my $api = Kubernetes::REST->new(
+        server      => ...,
+        credentials => ...,
+        io          => My::AsyncIO->new(loop => $loop),
+    );
 
 =head2 k8s
 
@@ -621,12 +819,170 @@ Update an existing resource.
 
     my $updated = $api->update($pod);
 
+=head2 patch($class_or_object, %args)
+
+Partially update a resource. Unlike C<update()> which replaces the entire
+object, C<patch()> only modifies the fields you specify.
+
+    # Add a label (strategic merge patch - default)
+    my $patched = $api->patch('Pod', 'my-pod',
+        namespace => 'default',
+        patch     => { metadata => { labels => { env => 'staging' } } },
+    );
+
+    # Same thing with an object reference
+    my $patched = $api->patch($pod,
+        patch => { metadata => { labels => { env => 'staging' } } },
+    );
+
+    # Explicit patch type
+    my $patched = $api->patch('Deployment', 'my-app',
+        namespace => 'default',
+        type      => 'merge',
+        patch     => { spec => { replicas => 5 } },
+    );
+
+B<Required arguments:>
+
+=over 4
+
+=item patch
+
+A hashref (or arrayref for JSON Patch) describing the changes to apply.
+
+=item name
+
+The resource name (when using class name, not object reference).
+
+=back
+
+B<Optional arguments:>
+
+=over 4
+
+=item type
+
+The patch strategy. One of:
+
+=over 4
+
+=item C<strategic> (default)
+
+Strategic Merge Patch. The Kubernetes-native patch type that understands
+array merge semantics (e.g., adding a container to a pod spec without
+removing existing containers).
+
+=item C<merge>
+
+JSON Merge Patch (RFC 7396). Simple recursive merge where C<null> values
+delete keys. Arrays are replaced entirely.
+
+=item C<json>
+
+JSON Patch (RFC 6902). An array of operations:
+
+    patch => [
+        { op => 'replace', path => '/spec/replicas', value => 3 },
+        { op => 'add', path => '/metadata/labels/env', value => 'prod' },
+    ]
+
+=back
+
+=item namespace
+
+For namespaced resources, the namespace.
+
+=back
+
+Returns the full updated object from the server.
+
 =head2 delete($class_or_object, %args)
 
 Delete a resource.
 
     $api->delete($pod);
     $api->delete('Pod', name => 'my-pod', namespace => 'default');
+
+=head2 watch($class, %args)
+
+Watch for changes to resources. Uses the Kubernetes Watch API with chunked
+transfer encoding to stream events. The call blocks until the server-side
+timeout expires.
+
+    my $last_rv = $api->watch('Pod',
+        namespace       => 'default',
+        on_event        => sub {
+            my ($event) = @_;
+            say $event->type;                    # ADDED, MODIFIED, DELETED
+            say $event->object->metadata->name;  # inflated IO::K8s object
+        },
+        timeout         => 300,           # server-side timeout (default: 300)
+        resourceVersion => '12345',       # resume from this version
+        labelSelector   => 'app=web',     # optional label filter
+        fieldSelector   => 'status.phase=Running',  # optional field filter
+    );
+
+    # $last_rv is the last resourceVersion seen - use it to resume watching
+
+B<Required arguments:>
+
+=over 4
+
+=item on_event
+
+Callback called for each watch event with a L<Kubernetes::REST::WatchEvent>
+object.
+
+=back
+
+B<Optional arguments:>
+
+=over 4
+
+=item timeout
+
+Server-side timeout in seconds (default: 300). The API server will close
+the connection after this many seconds.
+
+=item resourceVersion
+
+Resume watching from a specific resource version. Use the return value from
+a previous C<watch()> call to avoid missing events.
+
+=item labelSelector
+
+Filter by label selector (e.g., C<'app=web,env=prod'>).
+
+=item fieldSelector
+
+Filter by field selector (e.g., C<'status.phase=Running'>).
+
+=item namespace
+
+For namespaced resources, the namespace to watch.
+
+=back
+
+B<Resumable watch pattern:>
+
+    my $rv;
+    while (1) {
+        $rv = eval {
+            $api->watch('Pod',
+                namespace       => 'default',
+                resourceVersion => $rv,
+                on_event        => \&handle_event,
+            );
+        };
+        if ($@ && $@ =~ /410 Gone/) {
+            # resourceVersion expired, re-list to get fresh version
+            my $list = $api->list('Pod', namespace => 'default');
+            $rv = undef;  # start fresh
+        }
+    }
+
+Returns the last C<resourceVersion> seen. Croaks on 410 Gone with a
+message to re-list.
 
 =head2 fetch_resource_map()
 
@@ -635,8 +991,30 @@ Returns a hashref mapping short resource names (e.g., "Pod") to full IO::K8s
 class paths. This method is called automatically if C<resource_map_from_cluster>
 is enabled.
 
+=head1 PLUGGABLE IO ARCHITECTURE
+
+The HTTP transport is decoupled from request preparation and response
+processing. This makes it possible to swap L<HTTP::Tiny> for an async
+backend (e.g. L<Net::Async::HTTP>) without changing any API logic.
+
+The pipeline for each API call:
+
+    1. _prepare_request()    - builds HTTPRequest (method, url, headers, body)
+    2. io->call()            - executes request (pluggable backend)
+    3. _check_response()     - validates HTTP status
+    4. _inflate_object/list  - decodes JSON + inflates IO::K8s objects
+
+For watch, step 2 uses C<io-E<gt>call_streaming()> and step 4 uses
+C<_process_watch_chunk()> which parses NDJSON and inflates each event.
+
+To implement a custom IO backend, consume L<Kubernetes::REST::Role::IO>
+and implement C<call($req)> and C<call_streaming($req, $callback)>.
+See L<Kubernetes::REST::HTTPTinyIO> for the reference implementation.
+
 =head1 SEE ALSO
 
-L<IO::K8s>, L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/>
+L<Kubernetes::REST::WatchEvent>, L<Kubernetes::REST::Role::IO>,
+L<Kubernetes::REST::HTTPTinyIO>, L<IO::K8s>,
+L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/>
 
 =cut

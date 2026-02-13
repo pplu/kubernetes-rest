@@ -14,5 +14,8 @@ use_ok('Kubernetes::REST::Kubeconfig');
 use_ok('Kubernetes::REST::Error');
 use_ok('Kubernetes::REST::HTTPTinyIO');
 use_ok('Kubernetes::REST::HTTPRequest');
+use_ok('Kubernetes::REST::Role::IO');
+use_ok('Kubernetes::REST::WatchEvent');
+use_ok('Kubernetes::REST::CLI::Watch');
 
 done_testing;

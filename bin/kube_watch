@@ -1,0 +1,120 @@
+#!/usr/bin/env perl
+# PODNAME: kube_watch
+# ABSTRACT: Watch Kubernetes resources for changes
+
+use strict;
+use warnings;
+
+use Kubernetes::REST::CLI::Watch;
+
+my $watcher = Kubernetes::REST::CLI::Watch->new_with_options;
+$watcher->run(shift @ARGV);
+
+__END__
+
+=encoding UTF-8
+
+=head1 NAME
+
+kube_watch - Watch Kubernetes resources for changes
+
+=head1 SYNOPSIS
+
+    # Watch all pods in a namespace
+    kube_watch Pod -n default
+
+    # Watch only deletions
+    kube_watch Pod -n kube-system -T DELETED
+
+    # Watch deployments with a label selector
+    kube_watch Deployment -n production -l app=web
+
+    # Filter by name regex
+    kube_watch Pod -n default -N 'nginx.*'
+
+    # JSON output for piping
+    kube_watch Pod -o json | jq '.object.metadata.name'
+
+    # Watch cluster-scoped resources
+    kube_watch Node
+    kube_watch Namespace
+
+=head1 DESCRIPTION
+
+B<kube_watch> connects to a Kubernetes cluster and watches for changes
+to resources of a given type. Events are printed as they arrive in
+real-time. The watch automatically restarts when the server-side
+timeout expires, and handles 410 Gone errors by re-listing.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-n>, B<--namespace>=NAME
+
+Watch resources in this namespace. Omit for cluster-scoped resources.
+
+=item B<-l>, B<--label>=SELECTOR
+
+Label selector to filter resources (e.g., C<app=web,env=prod>).
+
+=item B<-f>, B<--field>=SELECTOR
+
+Field selector to filter resources (e.g., C<status.phase=Running>).
+
+=item B<-T>, B<--event_type>=TYPES
+
+Comma-separated list of event types to show. Valid types: C<ADDED>,
+C<MODIFIED>, C<DELETED>, C<BOOKMARK>, C<ERROR>. By default all types
+are shown.
+
+=item B<-N>, B<--names>=REGEX
+
+Perl regex to filter by resource name. Only events for resources whose
+name matches will be printed.
+
+=item B<-t>, B<--timeout>=SECONDS
+
+Server-side timeout per watch cycle in seconds. Default: 300.
+The watch automatically restarts after each cycle.
+
+=item B<-o>, B<--output>=FORMAT
+
+Output format: C<text> (default), C<json>, or C<yaml>.
+
+C<text> prints a human-readable line per event. C<json> prints one
+JSON object per line (NDJSON), useful for piping to C<jq>.
+
+=item B<-F>, B<--timestamp_format>=FORMAT
+
+Timestamp format for text output. Options:
+
+  datetime  2025-02-12 14:23:01  (default)
+  date      2025-02-12
+  time      14:23:01
+  epoch     1707745381
+  iso       2025-02-12T14:23:01+0100
+
+=item B<-c>, B<--context>=NAME
+
+Kubernetes context to use from the kubeconfig.
+
+=item B<--kubeconfig>=PATH
+
+Path to kubeconfig file. Defaults to F<~/.kube/config>.
+
+=back
+
+=head1 TEXT OUTPUT FORMAT
+
+    TIMESTAMP            TYPE        NAME                                                STATUS
+    2025-02-12 14:23:01  ADDED       default/nginx-abc123                                Running
+    2025-02-12 14:23:01  MODIFIED    default/nginx-abc123                                Succeeded
+    2025-02-12 14:23:05  DELETED     default/nginx-abc123
+
+=head1 SEE ALSO
+
+L<Kubernetes::REST>, L<Kubernetes::REST/watch>,
+L<Kubernetes::REST::CLI::Watch>, L<kube_client>
+
+=cut

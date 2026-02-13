@@ -66,14 +66,29 @@ sub load_response {
 # Mock IO class that returns recorded responses
 package Test::Kubernetes::Mock::IO;
 use Moo;
+with 'Kubernetes::REST::Role::IO';
 
 has responses => (
     is => 'ro',
     default => sub { {} },
 );
 
+has watch_events => (
+    is => 'ro',
+    default => sub { {} },
+);
+
+sub add_response {
+    my ($self, $method, $path, $data) = @_;
+    my $key = lc($method) . $path;
+    $key =~ s{/}{_}g;
+    $key =~ s{_+}{_}g;
+    $key =~ s{^_}{};
+    $self->responses->{$key} = $data;
+}
+
 sub call {
-    my ($self, $undef, $req) = @_;
+    my ($self, $req) = @_;
 
     # Generate key from method + uri
     my $method = $req->method // 'GET';
@@ -87,7 +102,8 @@ sub call {
 
     warn "MOCK: Looking for key '$key' (method=$method, path=$path)\n" if $ENV{MOCK_DEBUG};
 
-    my $data = Test::Kubernetes::Mock::load_response($key);
+    # Check programmatic responses first, then file-based
+    my $data = $self->responses->{$key} // Test::Kubernetes::Mock::load_response($key);
 
     if ($data) {
         return Test::Kubernetes::Mock::Response->new(
@@ -100,6 +116,39 @@ sub call {
     return Test::Kubernetes::Mock::Response->new(
         status => 404,
         content => '{"kind":"Status","status":"Failure","message":"not found in mock"}',
+    );
+}
+
+sub add_watch_events {
+    my ($self, $path, $events) = @_;
+    $self->watch_events->{$path} = $events;
+}
+
+sub call_streaming {
+    my ($self, $req, $callback) = @_;
+
+    my $path = $req->url // '';
+    $path =~ s{^https?://[^/]+}{};
+    # Strip query parameters for key lookup
+    $path =~ s{\?.*}{};
+
+    my $events = $self->watch_events->{$path};
+
+    unless ($events) {
+        return Test::Kubernetes::Mock::Response->new(
+            status => 404,
+            content => '{"kind":"Status","status":"Failure","message":"no watch events for path"}',
+        );
+    }
+
+    my $json = JSON::MaybeXS->new;
+    for my $event (@$events) {
+        my $line = $json->encode($event) . "\n";
+        $callback->($line, undef);
+    }
+
+    return Test::Kubernetes::Mock::Response->new(
+        status => 200,
     );
 }
 

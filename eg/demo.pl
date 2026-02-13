@@ -501,10 +501,42 @@ for my $pod ($pods->items->@*) {
 say "  Total nginx pods: $nginx_count";
 
 # ============================================================
-# 13. Rolling Update
+# 13. Patch (partial update)
 # ============================================================
 say "\n" . "=" x 60;
-say "  13. ROLLING UPDATE";
+say "  13. PATCH (partial update)";
+say "=" x 60;
+
+say "\n--- Adding label via strategic merge patch ---";
+my $patched = $api->patch('Deployment', 'demo-nginx',
+    namespace => $NS,
+    patch     => {
+        metadata => { labels => { patched_by => 'perl', version => '2' } },
+    },
+);
+my $labels = $patched->metadata->labels // {};
+say "  Labels after patch:";
+for my $key (sort keys %$labels) {
+    say "    $key = $labels->{$key}";
+}
+
+say "\n--- Adding annotation via merge patch ---";
+$patched = $api->patch('Deployment', 'demo-nginx',
+    namespace => $NS,
+    type      => 'merge',
+    patch     => {
+        metadata => {
+            annotations => { 'demo.perl/patched' => 'true' },
+        },
+    },
+);
+say "  annotation demo.perl/patched = " . ($patched->metadata->annotations->{'demo.perl/patched'} // '?');
+
+# ============================================================
+# 14. Rolling Update
+# ============================================================
+say "\n" . "=" x 60;
+say "  14. ROLLING UPDATE";
 say "=" x 60;
 
 say "\n--- Updating image to nginx:1.27-bookworm ---";
@@ -531,10 +563,10 @@ wait_for("rolling update to complete", sub {
 }, 90);
 
 # ============================================================
-# 14. Job
+# 15. Job
 # ============================================================
 say "\n" . "=" x 60;
-say "  14. JOB (run to completion)";
+say "  15. JOB (run to completion)";
 say "=" x 60;
 
 say "\n--- Creating Job ---";
@@ -580,10 +612,10 @@ say "  Succeeded: " . ($j->status->succeeded // 0);
 say "  Completion: " . ($j->status->completionTime // 'pending');
 
 # ============================================================
-# 15. CronJob
+# 16. CronJob
 # ============================================================
 say "\n" . "=" x 60;
-say "  15. CRONJOB";
+say "  16. CRONJOB";
 say "=" x 60;
 
 say "\n--- Creating CronJob (every minute) ---";
@@ -621,10 +653,10 @@ say "  CronJob: " . $cron->metadata->name;
 say "  Schedule: " . $cron->spec->schedule;
 
 # ============================================================
-# 16. Second ConfigMap Pod (busybox utility)
+# 17. Second ConfigMap Pod (busybox utility)
 # ============================================================
 say "\n" . "=" x 60;
-say "  16. UTILITY POD";
+say "  17. UTILITY POD";
 say "=" x 60;
 
 say "\n--- Creating utility pod with all config ---";
@@ -706,10 +738,10 @@ wait_for("utility pod to be running", sub {
 }, 60);
 
 # ============================================================
-# 17. Full namespace inventory
+# 18. Full namespace inventory
 # ============================================================
 say "\n" . "=" x 60;
-say "  17. NAMESPACE INVENTORY";
+say "  18. NAMESPACE INVENTORY";
 say "=" x 60;
 
 say "\n--- All resources in '$NS' ---";
@@ -729,10 +761,10 @@ for my $kind (qw(ConfigMap Secret ServiceAccount Pod Deployment Service Job Cron
 }
 
 # ============================================================
-# 18. Serialization demo
+# 19. Serialization demo
 # ============================================================
 say "\n" . "=" x 60;
-say "  18. SERIALIZATION";
+say "  19. SERIALIZATION";
 say "=" x 60;
 
 my $dep_fresh = $api->get('Deployment', 'demo-nginx', namespace => $NS);
@@ -768,10 +800,10 @@ say "  Kind: " . $inflated->kind;
 say "  Match: " . ($inflated->metadata->uid eq $dep_fresh->metadata->uid ? "YES" : "NO");
 
 # ============================================================
-# 19. Quota usage check
+# 20. Quota usage check
 # ============================================================
 say "\n" . "=" x 60;
-say "  19. QUOTA USAGE";
+say "  20. QUOTA USAGE";
 say "=" x 60;
 
 my $q = $api->get('ResourceQuota', 'namespace-quota', namespace => $NS);
@@ -783,10 +815,40 @@ for my $key (sort keys %$hard) {
 }
 
 # ============================================================
-# 20. Cleanup
+# 21. Watch API
 # ============================================================
 say "\n" . "=" x 60;
-say "  20. CLEANUP";
+say "  21. WATCH API";
+say "=" x 60;
+
+say "\n--- Watching pods in '$NS' (5s timeout) ---";
+my $watch_count = 0;
+my $last_rv = eval {
+    $api->watch('Pod',
+        namespace => $NS,
+        timeout   => 5,
+        on_event  => sub {
+            my ($event) = @_;
+            $watch_count++;
+            printf "  [%s] %-40s %s\n",
+                $event->type,
+                $event->object->metadata->name,
+                $event->object->status->phase // '?';
+        },
+    );
+};
+if ($@) {
+    say "  Watch error: $@";
+} else {
+    say "  Received $watch_count events";
+    say "  Last resourceVersion: $last_rv" if $last_rv;
+}
+
+# ============================================================
+# 22. Cleanup
+# ============================================================
+say "\n" . "=" x 60;
+say "  22. CLEANUP";
 say "=" x 60;
 
 say "\n--- Deleting all resources ---";
