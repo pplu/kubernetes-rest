@@ -1,6 +1,9 @@
 #!/usr/bin/env perl
 # demo.pl - Comprehensive Kubernetes::REST + IO::K8s demo
 #
+# This demo is idempotent: it handles AlreadyExists errors gracefully,
+# so you can run it multiple times without cleanup in between.
+#
 # Prerequisites:
 #   minikube start    (or any running K8s cluster with kubeconfig)
 #   cpanm Kubernetes::REST
@@ -18,6 +21,21 @@ use JSON::MaybeXS;
 use MIME::Base64 qw(encode_base64);
 
 my $NS = 'perl-k8s-demo';
+
+# ============================================================
+# Helper: create or fetch existing resource
+# ============================================================
+sub create_or_get {
+    my ($api, $kind, $name, $object, %get_args) = @_;
+    my $created = eval { $api->create($object) };
+    return $created if $created;
+    my $err = $@;
+    if ($err =~ /AlreadyExists|already exists/i) {
+        say "  (already exists, fetching)";
+        return $api->get($kind, $name, %get_args);
+    }
+    die $err;
+}
 
 # ============================================================
 # Helper to wait for a condition
@@ -94,18 +112,24 @@ say "  2. NAMESPACE SETUP";
 say "=" x 60;
 
 say "\n--- Creating namespace '$NS' ---";
-my $ns_obj = eval {
-    $api->create($api->new_object(Namespace =>
+# If the namespace is Terminating from a previous run, wait for it
+my $existing_ns = eval { $api->get('Namespace', $NS) };
+if ($existing_ns && ($existing_ns->status->phase // '') eq 'Terminating') {
+    say "  Namespace is Terminating, waiting for deletion...";
+    for (1..120) {
+        last unless eval { $api->get('Namespace', $NS) };
+        sleep 1;
+    }
+}
+
+my $ns_obj = create_or_get($api, 'Namespace', $NS,
+    $api->new_object(Namespace =>
         metadata => {
             name   => $NS,
             labels => { project => 'perl-k8s-demo', managed_by => 'perl' },
         },
-    ));
-};
-if ($@) {
-    say "  (already exists, fetching)";
-    $ns_obj = $api->get('Namespace', $NS);
-}
+    ),
+);
 say "  Created: " . $ns_obj->metadata->name . " (uid: " . $ns_obj->metadata->uid . ")";
 
 # ============================================================
@@ -116,25 +140,28 @@ say "  3. LIMIT RANGE";
 say "=" x 60;
 
 say "\n--- Creating LimitRange ---";
-my $lr = $api->create($api->new_object(LimitRange =>
-    metadata => {
-        name      => 'default-limits',
-        namespace => $NS,
-    },
-    spec => {
-        limits => [{
-            type => 'Container',
-            default => {
-                cpu    => '200m',
-                memory => '128Mi',
-            },
-            defaultRequest => {
-                cpu    => '50m',
-                memory => '64Mi',
-            },
-        }],
-    },
-));
+my $lr = create_or_get($api, 'LimitRange', 'default-limits',
+    $api->new_object(LimitRange =>
+        metadata => {
+            name      => 'default-limits',
+            namespace => $NS,
+        },
+        spec => {
+            limits => [{
+                type => 'Container',
+                default => {
+                    cpu    => '200m',
+                    memory => '128Mi',
+                },
+                defaultRequest => {
+                    cpu    => '50m',
+                    memory => '64Mi',
+                },
+            }],
+        },
+    ),
+    namespace => $NS,
+);
 say "  LimitRange: " . $lr->metadata->name;
 say "  Default CPU: 200m, Memory: 128Mi";
 
@@ -146,25 +173,28 @@ say "  4. RESOURCE QUOTA";
 say "=" x 60;
 
 say "\n--- Creating ResourceQuota ---";
-my $quota = $api->create($api->new_object(ResourceQuota =>
-    metadata => {
-        name      => 'namespace-quota',
-        namespace => $NS,
-    },
-    spec => {
-        hard => {
-            pods                    => '20',
-            'requests.cpu'          => '2',
-            'requests.memory'       => '1Gi',
-            'limits.cpu'            => '4',
-            'limits.memory'         => '2Gi',
-            persistentvolumeclaims  => '5',
-            services                => '10',
-            secrets                 => '10',
-            configmaps              => '10',
+my $quota = create_or_get($api, 'ResourceQuota', 'namespace-quota',
+    $api->new_object(ResourceQuota =>
+        metadata => {
+            name      => 'namespace-quota',
+            namespace => $NS,
         },
-    },
-));
+        spec => {
+            hard => {
+                pods                    => '20',
+                'requests.cpu'          => '2',
+                'requests.memory'       => '1Gi',
+                'limits.cpu'            => '4',
+                'limits.memory'         => '2Gi',
+                persistentvolumeclaims  => '5',
+                services                => '10',
+                secrets                 => '10',
+                configmaps              => '10',
+            },
+        },
+    ),
+    namespace => $NS,
+);
 say "  ResourceQuota: " . $quota->metadata->name;
 my $hard = $quota->spec->hard;
 say "  Limits: pods=$hard->{pods}, cpu=$hard->{'limits.cpu'}, memory=$hard->{'limits.memory'}";
@@ -177,31 +207,34 @@ say "  5. CONFIGMAP";
 say "=" x 60;
 
 say "\n--- Creating ConfigMap ---";
-my $cm = $api->create($api->new_object(ConfigMap =>
-    metadata => {
-        name      => 'app-config',
-        namespace => $NS,
-        labels    => { app => 'demo-app' },
-    },
-    data => {
-        'app.env'      => 'staging',
-        'app.debug'    => 'true',
-        'app.log_level' => 'info',
-        'nginx.conf'   => join("\n",
-            'server {',
-            '    listen 80;',
-            '    server_name localhost;',
-            '    location / {',
-            '        root /usr/share/nginx/html;',
-            '        index index.html;',
-            '    }',
-            '    location /health {',
-            '        return 200 "ok\n";',
-            '    }',
-            '}',
-        ),
-    },
-));
+my $cm = create_or_get($api, 'ConfigMap', 'app-config',
+    $api->new_object(ConfigMap =>
+        metadata => {
+            name      => 'app-config',
+            namespace => $NS,
+            labels    => { app => 'demo-app' },
+        },
+        data => {
+            'app.env'      => 'staging',
+            'app.debug'    => 'true',
+            'app.log_level' => 'info',
+            'nginx.conf'   => join("\n",
+                'server {',
+                '    listen 80;',
+                '    server_name localhost;',
+                '    location / {',
+                '        root /usr/share/nginx/html;',
+                '        index index.html;',
+                '    }',
+                '    location /health {',
+                '        return 200 "ok\n";',
+                '    }',
+                '}',
+            ),
+        },
+    ),
+    namespace => $NS,
+);
 say "  ConfigMap: " . $cm->metadata->name;
 say "  Keys: " . join(', ', sort keys %{$cm->data});
 
@@ -213,19 +246,22 @@ say "  6. SECRET";
 say "=" x 60;
 
 say "\n--- Creating Secret (Opaque) ---";
-my $secret = $api->create($api->new_object(Secret =>
-    metadata => {
-        name      => 'db-credentials',
-        namespace => $NS,
-        labels    => { app => 'demo-app' },
-    },
-    type => 'Opaque',
-    data => {
-        username => encode_base64('demo_user', ''),
-        password => encode_base64('s3cret!p4ss', ''),
-        host     => encode_base64('postgres.example.com', ''),
-    },
-));
+my $secret = create_or_get($api, 'Secret', 'db-credentials',
+    $api->new_object(Secret =>
+        metadata => {
+            name      => 'db-credentials',
+            namespace => $NS,
+            labels    => { app => 'demo-app' },
+        },
+        type => 'Opaque',
+        data => {
+            username => encode_base64('demo_user', ''),
+            password => encode_base64('s3cret!p4ss', ''),
+            host     => encode_base64('postgres.example.com', ''),
+        },
+    ),
+    namespace => $NS,
+);
 say "  Secret: " . $secret->metadata->name . " (type: " . $secret->type . ")";
 say "  Keys: " . join(', ', sort keys %{$secret->data});
 
@@ -237,51 +273,60 @@ say "  7. SERVICEACCOUNT + RBAC";
 say "=" x 60;
 
 say "\n--- Creating ServiceAccount ---";
-my $sa = $api->create($api->new_object(ServiceAccount =>
-    metadata => {
-        name      => 'demo-sa',
-        namespace => $NS,
-        labels    => { app => 'demo-app' },
-    },
-));
+my $sa = create_or_get($api, 'ServiceAccount', 'demo-sa',
+    $api->new_object(ServiceAccount =>
+        metadata => {
+            name      => 'demo-sa',
+            namespace => $NS,
+            labels    => { app => 'demo-app' },
+        },
+    ),
+    namespace => $NS,
+);
 say "  ServiceAccount: " . $sa->metadata->name;
 
 say "\n--- Creating Role ---";
-my $role = $api->create($api->new_object(Role =>
-    metadata => {
-        name      => 'demo-role',
-        namespace => $NS,
-    },
-    rules => [{
-        apiGroups => [''],
-        resources => ['pods', 'services', 'configmaps'],
-        verbs     => ['get', 'list', 'watch'],
-    }, {
-        apiGroups => ['apps'],
-        resources => ['deployments'],
-        verbs     => ['get', 'list'],
-    }],
-));
+my $role = create_or_get($api, 'Role', 'demo-role',
+    $api->new_object(Role =>
+        metadata => {
+            name      => 'demo-role',
+            namespace => $NS,
+        },
+        rules => [{
+            apiGroups => [''],
+            resources => ['pods', 'services', 'configmaps'],
+            verbs     => ['get', 'list', 'watch'],
+        }, {
+            apiGroups => ['apps'],
+            resources => ['deployments'],
+            verbs     => ['get', 'list'],
+        }],
+    ),
+    namespace => $NS,
+);
 say "  Role: " . $role->metadata->name;
 say "  Rules: " . scalar($role->rules->@*) . " rules defined";
 
 say "\n--- Creating RoleBinding ---";
-my $rb = $api->create($api->new_object(RoleBinding =>
-    metadata => {
-        name      => 'demo-role-binding',
-        namespace => $NS,
-    },
-    roleRef => {
-        apiGroup => 'rbac.authorization.k8s.io',
-        kind     => 'Role',
-        name     => 'demo-role',
-    },
-    subjects => [{
-        kind      => 'ServiceAccount',
-        name      => 'demo-sa',
-        namespace => $NS,
-    }],
-));
+my $rb = create_or_get($api, 'RoleBinding', 'demo-role-binding',
+    $api->new_object(RoleBinding =>
+        metadata => {
+            name      => 'demo-role-binding',
+            namespace => $NS,
+        },
+        roleRef => {
+            apiGroup => 'rbac.authorization.k8s.io',
+            kind     => 'Role',
+            name     => 'demo-role',
+        },
+        subjects => [{
+            kind      => 'ServiceAccount',
+            name      => 'demo-sa',
+            namespace => $NS,
+        }],
+    ),
+    namespace => $NS,
+);
 say "  RoleBinding: " . $rb->metadata->name;
 
 # ============================================================
@@ -292,19 +337,22 @@ say "  8. PERSISTENT VOLUME CLAIM";
 say "=" x 60;
 
 say "\n--- Creating PVC ---";
-my $pvc = $api->create($api->new_object(PersistentVolumeClaim =>
-    metadata => {
-        name      => 'demo-storage',
-        namespace => $NS,
-        labels    => { app => 'demo-app' },
-    },
-    spec => {
-        accessModes => ['ReadWriteOnce'],
-        resources => {
-            requests => { storage => '100Mi' },
+my $pvc = create_or_get($api, 'PersistentVolumeClaim', 'demo-storage',
+    $api->new_object(PersistentVolumeClaim =>
+        metadata => {
+            name      => 'demo-storage',
+            namespace => $NS,
+            labels    => { app => 'demo-app' },
         },
-    },
-));
+        spec => {
+            accessModes => ['ReadWriteOnce'],
+            resources => {
+                requests => { storage => '100Mi' },
+            },
+        },
+    ),
+    namespace => $NS,
+);
 say "  PVC: " . $pvc->metadata->name;
 say "  Access: ReadWriteOnce, Size: 100Mi";
 
@@ -316,91 +364,94 @@ say "  9. DEPLOYMENT";
 say "=" x 60;
 
 say "\n--- Creating Deployment (nginx, 2 replicas) ---";
-my $deploy = $api->create($api->new_object(Deployment =>
-    metadata => {
-        name      => 'demo-nginx',
-        namespace => $NS,
-        labels    => { app => 'demo-app', component => 'web' },
-    },
-    spec => {
-        replicas => 2,
-        selector => {
-            matchLabels => { app => 'demo-app', component => 'web' },
+my $deploy = create_or_get($api, 'Deployment', 'demo-nginx',
+    $api->new_object(Deployment =>
+        metadata => {
+            name      => 'demo-nginx',
+            namespace => $NS,
+            labels    => { app => 'demo-app', component => 'web' },
         },
-        template => {
-            metadata => {
-                labels => {
-                    app       => 'demo-app',
-                    component => 'web',
-                },
-                annotations => {
-                    'perl-managed' => 'true',
-                },
+        spec => {
+            replicas => 2,
+            selector => {
+                matchLabels => { app => 'demo-app', component => 'web' },
             },
-            spec => {
-                serviceAccountName => 'demo-sa',
-                containers => [{
-                    name  => 'nginx',
-                    image => 'nginx:1.27-alpine',
-                    ports => [{ containerPort => 80 }],
-                    env => [{
-                        name => 'APP_ENV',
-                        valueFrom => {
-                            configMapKeyRef => {
-                                name => 'app-config',
-                                key  => 'app.env',
+            template => {
+                metadata => {
+                    labels => {
+                        app       => 'demo-app',
+                        component => 'web',
+                    },
+                    annotations => {
+                        'perl-managed' => 'true',
+                    },
+                },
+                spec => {
+                    serviceAccountName => 'demo-sa',
+                    containers => [{
+                        name  => 'nginx',
+                        image => 'nginx:1.27-alpine',
+                        ports => [{ containerPort => 80 }],
+                        env => [{
+                            name => 'APP_ENV',
+                            valueFrom => {
+                                configMapKeyRef => {
+                                    name => 'app-config',
+                                    key  => 'app.env',
+                                },
                             },
-                        },
-                    }, {
-                        name => 'DB_USER',
-                        valueFrom => {
-                            secretKeyRef => {
-                                name => 'db-credentials',
-                                key  => 'username',
+                        }, {
+                            name => 'DB_USER',
+                            valueFrom => {
+                                secretKeyRef => {
+                                    name => 'db-credentials',
+                                    key  => 'username',
+                                },
                             },
-                        },
-                    }],
-                    volumeMounts => [{
-                        name      => 'config-volume',
-                        mountPath => '/etc/nginx/conf.d',
-                    }, {
-                        name      => 'data-volume',
-                        mountPath => '/data',
-                    }],
-                    resources => {
-                        requests => { cpu => '50m',  memory => '32Mi' },
-                        limits   => { cpu => '100m', memory => '64Mi' },
-                    },
-                    livenessProbe => {
-                        httpGet => { path => '/', port => 80 },
-                        initialDelaySeconds => 5,
-                        periodSeconds => 10,
-                    },
-                    readinessProbe => {
-                        httpGet => { path => '/', port => 80 },
-                        initialDelaySeconds => 3,
-                        periodSeconds => 5,
-                    },
-                }],
-                volumes => [{
-                    name => 'config-volume',
-                    configMap => {
-                        name => 'app-config',
-                        items => [{
-                            key  => 'nginx.conf',
-                            path => 'default.conf',
                         }],
-                    },
-                }, {
-                    name => 'data-volume',
-                    persistentVolumeClaim => {
-                        claimName => 'demo-storage',
-                    },
-                }],
+                        volumeMounts => [{
+                            name      => 'config-volume',
+                            mountPath => '/etc/nginx/conf.d',
+                        }, {
+                            name      => 'data-volume',
+                            mountPath => '/data',
+                        }],
+                        resources => {
+                            requests => { cpu => '50m',  memory => '32Mi' },
+                            limits   => { cpu => '100m', memory => '64Mi' },
+                        },
+                        livenessProbe => {
+                            httpGet => { path => '/', port => 80 },
+                            initialDelaySeconds => 5,
+                            periodSeconds => 10,
+                        },
+                        readinessProbe => {
+                            httpGet => { path => '/', port => 80 },
+                            initialDelaySeconds => 3,
+                            periodSeconds => 5,
+                        },
+                    }],
+                    volumes => [{
+                        name => 'config-volume',
+                        configMap => {
+                            name => 'app-config',
+                            items => [{
+                                key  => 'nginx.conf',
+                                path => 'default.conf',
+                            }],
+                        },
+                    }, {
+                        name => 'data-volume',
+                        persistentVolumeClaim => {
+                            claimName => 'demo-storage',
+                        },
+                    }],
+                },
             },
         },
-    },
-));
+    ),
+    namespace => $NS,
+);
 say "  Deployment: " . $deploy->metadata->name;
 say "  Replicas: " . $deploy->spec->replicas;
 say "  Image: nginx:1.27-alpine";
@@ -422,23 +473,26 @@ say "  10. SERVICE";
 say "=" x 60;
 
 say "\n--- Creating Service (NodePort) ---";
-my $svc = $api->create($api->new_object(Service =>
-    metadata => {
-        name      => 'demo-nginx',
-        namespace => $NS,
-        labels    => { app => 'demo-app' },
-    },
-    spec => {
-        type     => 'NodePort',
-        selector => { app => 'demo-app', component => 'web' },
-        ports => [{
-            name       => 'http',
-            port       => 80,
-            targetPort => 80,
-            protocol   => 'TCP',
-        }],
-    },
-));
+my $svc = create_or_get($api, 'Service', 'demo-nginx',
+    $api->new_object(Service =>
+        metadata => {
+            name      => 'demo-nginx',
+            namespace => $NS,
+            labels    => { app => 'demo-app' },
+        },
+        spec => {
+            type     => 'NodePort',
+            selector => { app => 'demo-app', component => 'web' },
+            ports => [{
+                name       => 'http',
+                port       => 80,
+                targetPort => 80,
+                protocol   => 'TCP',
+            }],
+        },
+    ),
+    namespace => $NS,
+);
 say "  Service: " . $svc->metadata->name;
 say "  Type: " . $svc->spec->type;
 my $node_port = $svc->spec->ports->[0]->nodePort // 'pending';
@@ -475,10 +529,17 @@ say "  12. SCALING";
 say "=" x 60;
 
 say "\n--- Scaling deployment to 3 replicas ---";
-my $dep = $api->get('Deployment', 'demo-nginx', namespace => $NS);
-say "  Current replicas: " . $dep->spec->replicas;
-$dep->spec->replicas(3);
-my $scaled = $api->update($dep);
+my $scaled;
+for my $attempt (1..5) {
+    my $dep = $api->get('Deployment', 'demo-nginx', namespace => $NS);
+    say "  Current replicas: " . $dep->spec->replicas if $attempt == 1;
+    $dep->spec->replicas(3);
+    $scaled = eval { $api->update($dep) };
+    last if $scaled;
+    say "  Attempt $attempt conflict, retrying...";
+    sleep 1;
+}
+die "Failed to scale deployment after 5 attempts\n" unless $scaled;
 say "  Updated replicas: " . $scaled->spec->replicas;
 
 wait_for("3rd pod to start", sub {
@@ -540,18 +601,25 @@ say "  14. ROLLING UPDATE";
 say "=" x 60;
 
 say "\n--- Updating image to nginx:1.27-bookworm ---";
-$dep = $api->get('Deployment', 'demo-nginx', namespace => $NS);
-my $old_image = $dep->spec->template->spec->containers->[0]->image;
-say "  Old image: $old_image";
+my $rolled;
+for my $attempt (1..5) {
+    my $dep = $api->get('Deployment', 'demo-nginx', namespace => $NS);
+    my $old_image = $dep->spec->template->spec->containers->[0]->image;
+    say "  Old image: $old_image" if $attempt == 1;
 
-# Update the container image
-$dep->spec->template->spec->containers->[0]->image('nginx:1.27-bookworm');
-# Add annotation to track the change
-my $tpl_annotations = $dep->spec->template->metadata->annotations // {};
-$tpl_annotations->{'kubernetes.io/change-cause'} = 'Updated nginx to bookworm variant via Perl';
-$dep->spec->template->metadata->annotations($tpl_annotations);
+    # Update the container image
+    $dep->spec->template->spec->containers->[0]->image('nginx:1.27-bookworm');
+    # Add annotation to track the change
+    my $tpl_annotations = $dep->spec->template->metadata->annotations // {};
+    $tpl_annotations->{'kubernetes.io/change-cause'} = 'Updated nginx to bookworm variant via Perl';
+    $dep->spec->template->metadata->annotations($tpl_annotations);
 
-my $rolled = $api->update($dep);
+    $rolled = eval { $api->update($dep) };
+    last if $rolled;
+    say "  Attempt $attempt conflict, retrying...";
+    sleep 1;
+}
+die "Failed to update deployment after 5 attempts\n" unless $rolled;
 say "  New image: " . $rolled->spec->template->spec->containers->[0]->image;
 
 wait_for("rolling update to complete", sub {
@@ -570,36 +638,39 @@ say "  15. JOB (run to completion)";
 say "=" x 60;
 
 say "\n--- Creating Job ---";
-my $job = $api->create($api->new_object(Job =>
-    metadata => {
-        name      => 'demo-job',
-        namespace => $NS,
-        labels    => { app => 'demo-app', type => 'batch' },
-    },
-    spec => {
-        backoffLimit          => 2,
-        ttlSecondsAfterFinished => 300,
-        template => {
-            spec => {
-                restartPolicy => 'Never',
-                containers => [{
-                    name    => 'worker',
-                    image   => 'busybox:latest',
-                    command => ['sh', '-c',
-                        'echo "Job started at $(date)"; '
-                        . 'echo "Processing items..."; '
-                        . 'for i in 1 2 3 4 5; do echo "  Item $i done"; sleep 1; done; '
-                        . 'echo "Job completed at $(date)"'
-                    ],
-                    resources => {
-                        requests => { cpu => '25m', memory => '16Mi' },
-                        limits   => { cpu => '50m', memory => '32Mi' },
-                    },
-                }],
+my $job = create_or_get($api, 'Job', 'demo-job',
+    $api->new_object(Job =>
+        metadata => {
+            name      => 'demo-job',
+            namespace => $NS,
+            labels    => { app => 'demo-app', type => 'batch' },
+        },
+        spec => {
+            backoffLimit          => 2,
+            ttlSecondsAfterFinished => 300,
+            template => {
+                spec => {
+                    restartPolicy => 'Never',
+                    containers => [{
+                        name    => 'worker',
+                        image   => 'busybox:latest',
+                        command => ['sh', '-c',
+                            'echo "Job started at $(date)"; '
+                            . 'echo "Processing items..."; '
+                            . 'for i in 1 2 3 4 5; do echo "  Item $i done"; sleep 1; done; '
+                            . 'echo "Job completed at $(date)"'
+                        ],
+                        resources => {
+                            requests => { cpu => '25m', memory => '16Mi' },
+                            limits   => { cpu => '50m', memory => '32Mi' },
+                        },
+                    }],
+                },
             },
         },
-    },
-));
+    ),
+    namespace => $NS,
+);
 say "  Job: " . $job->metadata->name;
 
 wait_for("job to complete", sub {
@@ -619,117 +690,123 @@ say "  16. CRONJOB";
 say "=" x 60;
 
 say "\n--- Creating CronJob (every minute) ---";
-my $cron = $api->create($api->new_object(CronJob =>
-    metadata => {
-        name      => 'demo-cronjob',
-        namespace => $NS,
-        labels    => { app => 'demo-app', type => 'scheduled' },
-    },
-    spec => {
-        schedule                   => '*/1 * * * *',
-        successfulJobsHistoryLimit => 2,
-        failedJobsHistoryLimit     => 1,
-        jobTemplate => {
-            spec => {
-                template => {
-                    spec => {
-                        restartPolicy => 'OnFailure',
-                        containers => [{
-                            name    => 'cron-worker',
-                            image   => 'busybox:latest',
-                            command => ['sh', '-c', 'echo "Cron tick at $(date)"'],
-                            resources => {
-                                requests => { cpu => '10m', memory => '8Mi' },
-                                limits   => { cpu => '25m', memory => '16Mi' },
-                            },
-                        }],
+my $cron = create_or_get($api, 'CronJob', 'demo-cronjob',
+    $api->new_object(CronJob =>
+        metadata => {
+            name      => 'demo-cronjob',
+            namespace => $NS,
+            labels    => { app => 'demo-app', type => 'scheduled' },
+        },
+        spec => {
+            schedule                   => '*/1 * * * *',
+            successfulJobsHistoryLimit => 2,
+            failedJobsHistoryLimit     => 1,
+            jobTemplate => {
+                spec => {
+                    template => {
+                        spec => {
+                            restartPolicy => 'OnFailure',
+                            containers => [{
+                                name    => 'cron-worker',
+                                image   => 'busybox:latest',
+                                command => ['sh', '-c', 'echo "Cron tick at $(date)"'],
+                                resources => {
+                                    requests => { cpu => '10m', memory => '8Mi' },
+                                    limits   => { cpu => '25m', memory => '16Mi' },
+                                },
+                            }],
+                        },
                     },
                 },
             },
         },
-    },
-));
+    ),
+    namespace => $NS,
+);
 say "  CronJob: " . $cron->metadata->name;
 say "  Schedule: " . $cron->spec->schedule;
 
 # ============================================================
-# 17. Second ConfigMap Pod (busybox utility)
+# 17. Utility Pod
 # ============================================================
 say "\n" . "=" x 60;
 say "  17. UTILITY POD";
 say "=" x 60;
 
 say "\n--- Creating utility pod with all config ---";
-my $util_pod = $api->create($api->new_object(Pod =>
-    metadata => {
-        name      => 'demo-utility',
-        namespace => $NS,
-        labels    => { app => 'demo-app', component => 'utility' },
-        annotations => {
-            'purpose' => 'Demonstrates ConfigMap + Secret access from a pod',
-        },
-    },
-    spec => {
-        serviceAccountName => 'demo-sa',
-        restartPolicy => 'Never',
-        containers => [{
-            name    => 'util',
-            image   => 'busybox:latest',
-            command => ['sh', '-c', join('; ',
-                'echo "=== Environment ==="',
-                'echo "APP_ENV=$APP_ENV"',
-                'echo "LOG_LEVEL=$LOG_LEVEL"',
-                'echo "DB_HOST=$DB_HOST"',
-                'echo ""',
-                'echo "=== Config Files ==="',
-                'echo "nginx.conf:"',
-                'cat /config/nginx.conf',
-                'echo ""',
-                'echo "=== Persistent Storage ==="',
-                'echo "Hello from Perl" > /data/test.txt',
-                'cat /data/test.txt',
-                'echo ""',
-                'echo "=== Service Account ==="',
-                'ls /var/run/secrets/kubernetes.io/serviceaccount/',
-                'sleep 120',
-            )],
-            env => [{
-                name => 'APP_ENV',
-                valueFrom => {
-                    configMapKeyRef => { name => 'app-config', key => 'app.env' },
-                },
-            }, {
-                name => 'LOG_LEVEL',
-                valueFrom => {
-                    configMapKeyRef => { name => 'app-config', key => 'app.log_level' },
-                },
-            }, {
-                name => 'DB_HOST',
-                valueFrom => {
-                    secretKeyRef => { name => 'db-credentials', key => 'host' },
-                },
-            }],
-            volumeMounts => [{
-                name      => 'config',
-                mountPath => '/config',
-            }, {
-                name      => 'data',
-                mountPath => '/data',
-            }],
-            resources => {
-                requests => { cpu => '10m', memory => '8Mi' },
-                limits   => { cpu => '25m', memory => '16Mi' },
+my $util_pod = create_or_get($api, 'Pod', 'demo-utility',
+    $api->new_object(Pod =>
+        metadata => {
+            name      => 'demo-utility',
+            namespace => $NS,
+            labels    => { app => 'demo-app', component => 'utility' },
+            annotations => {
+                'purpose' => 'Demonstrates ConfigMap + Secret access from a pod',
             },
-        }],
-        volumes => [{
-            name => 'config',
-            configMap => { name => 'app-config' },
-        }, {
-            name => 'data',
-            persistentVolumeClaim => { claimName => 'demo-storage' },
-        }],
-    },
-));
+        },
+        spec => {
+            serviceAccountName => 'demo-sa',
+            restartPolicy => 'Never',
+            containers => [{
+                name    => 'util',
+                image   => 'busybox:latest',
+                command => ['sh', '-c', join('; ',
+                    'echo "=== Environment ==="',
+                    'echo "APP_ENV=$APP_ENV"',
+                    'echo "LOG_LEVEL=$LOG_LEVEL"',
+                    'echo "DB_HOST=$DB_HOST"',
+                    'echo ""',
+                    'echo "=== Config Files ==="',
+                    'echo "nginx.conf:"',
+                    'cat /config/nginx.conf',
+                    'echo ""',
+                    'echo "=== Persistent Storage ==="',
+                    'echo "Hello from Perl" > /data/test.txt',
+                    'cat /data/test.txt',
+                    'echo ""',
+                    'echo "=== Service Account ==="',
+                    'ls /var/run/secrets/kubernetes.io/serviceaccount/',
+                    'sleep 120',
+                )],
+                env => [{
+                    name => 'APP_ENV',
+                    valueFrom => {
+                        configMapKeyRef => { name => 'app-config', key => 'app.env' },
+                    },
+                }, {
+                    name => 'LOG_LEVEL',
+                    valueFrom => {
+                        configMapKeyRef => { name => 'app-config', key => 'app.log_level' },
+                    },
+                }, {
+                    name => 'DB_HOST',
+                    valueFrom => {
+                        secretKeyRef => { name => 'db-credentials', key => 'host' },
+                    },
+                }],
+                volumeMounts => [{
+                    name      => 'config',
+                    mountPath => '/config',
+                }, {
+                    name      => 'data',
+                    mountPath => '/data',
+                }],
+                resources => {
+                    requests => { cpu => '10m', memory => '8Mi' },
+                    limits   => { cpu => '25m', memory => '16Mi' },
+                },
+            }],
+            volumes => [{
+                name => 'config',
+                configMap => { name => 'app-config' },
+            }, {
+                name => 'data',
+                persistentVolumeClaim => { claimName => 'demo-storage' },
+            }],
+        },
+    ),
+    namespace => $NS,
+);
 say "  Utility Pod: " . $util_pod->metadata->name;
 
 wait_for("utility pod to be running", sub {

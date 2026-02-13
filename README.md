@@ -6,6 +6,8 @@ A Perl REST Client for the Kubernetes API
 
 Kubernetes::REST provides a simple, object-oriented interface to the Kubernetes API using IO::K8s resource classes. The IO::K8s classes know their own metadata (API version, kind, whether they're namespaced), so URL building is automatic.
 
+For async applications, see [Net::Async::Kubernetes](https://metacpan.org/pod/Net::Async::Kubernetes) which builds on top of Kubernetes::REST and IO::K8s with IO::Async.
+
 ## Installation
 
 ```bash
@@ -56,6 +58,66 @@ my $rv = $api->watch('Pod',
 );
 ```
 
+## Using kubeconfig
+
+```perl
+use Kubernetes::REST::Kubeconfig;
+
+# Use default ~/.kube/config and current context
+my $api = Kubernetes::REST::Kubeconfig->new->api;
+
+# Use a specific kubeconfig and context
+my $api = Kubernetes::REST::Kubeconfig->new(
+    kubeconfig_path => '/path/to/kubeconfig',
+    context_name    => 'my-cluster',
+)->api;
+```
+
+Supports token auth, client certificates (file and inline base64), and exec credential plugins.
+
+## HTTP Debugging
+
+The default HTTP backend uses LWP::UserAgent, which supports LWP::ConsoleLogger for inspecting HTTP traffic:
+
+```perl
+use LWP::ConsoleLogger::Easy qw(debug_ua);
+
+my $api = Kubernetes::REST->new(
+    server      => { endpoint => 'https://kubernetes.local:6443' },
+    credentials => { token => $token },
+);
+
+# Attach logger to see all HTTP requests/responses
+debug_ua($api->io->ua);
+
+$api->list('Pod', namespace => 'default');  # now shows HTTP traffic
+```
+
+To use HTTP::Tiny instead:
+
+```perl
+use Kubernetes::REST::HTTPTinyIO;
+
+my $api = Kubernetes::REST->new(
+    server      => ...,
+    credentials => ...,
+    io          => Kubernetes::REST::HTTPTinyIO->new,
+);
+```
+
+## Pluggable IO Architecture
+
+The HTTP transport is decoupled via `Kubernetes::REST::Role::IO`. Implement `call($req)` and `call_streaming($req, $callback)` to plug in any HTTP backend (async, testing, etc.):
+
+```perl
+package My::AsyncIO;
+use Moo;
+with 'Kubernetes::REST::Role::IO';
+
+sub call { ... }
+sub call_streaming { ... }
+```
+
 ## CLI Tools
 
 ### kube_client
@@ -102,7 +164,8 @@ Register your own CRD classes and use them with the same API:
 use My::StaticWebSite;
 
 my $api = Kubernetes::REST->new(
-    kubeconfig   => "$ENV{HOME}/.kube/config",
+    server      => ...,
+    credentials => ...,
     resource_map => {
         StaticWebSite => '+My::StaticWebSite',
     },
@@ -120,6 +183,9 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 ## Features
 
 - **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `delete()`, `watch()`
+- **Kubeconfig support**: Token auth, client certs, exec credential plugins
+- **Pluggable HTTP backend**: LWP::UserAgent (default), HTTP::Tiny, or custom
+- **HTTP debugging**: LWP::ConsoleLogger support out of the box
 - **Patch support**: Strategic merge patch, JSON merge patch (RFC 7396), JSON patch (RFC 6902)
 - **Watch API**: Stream resource changes with resumable watches via resourceVersion tracking
 - **Automatic URL building**: Uses IO::K8s class metadata to construct proper API endpoints
@@ -129,11 +195,15 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 - **CLI tools**: `kube_client` for CRUD, `kube_watch` for live event streaming
 - **Backwards compatibility**: Deprecated pre-v1 API still works (with warnings)
 
+## See Also
+
+- [Net::Async::Kubernetes](https://metacpan.org/pod/Net::Async::Kubernetes) - Async Kubernetes client for IO::Async
+- [IO::K8s](https://metacpan.org/pod/IO::K8s) - Kubernetes resource classes
+- [LWP::ConsoleLogger](https://metacpan.org/pod/LWP::ConsoleLogger) - HTTP traffic debugging
+
 ## Links
 
 - [CPAN](https://metacpan.org/pod/Kubernetes::REST)
-- [GitHub Repository](https://github.com/pplu/kubernetes-rest)
-- [Issue Tracker](https://github.com/pplu/kubernetes-rest/issues)
 - [Kubernetes API Documentation](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/)
 
 ## License

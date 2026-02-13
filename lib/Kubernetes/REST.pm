@@ -7,7 +7,7 @@ use Module::Runtime qw(require_module);
 use JSON::MaybeXS ();
 use Kubernetes::REST::Server;
 use Kubernetes::REST::AuthToken;
-use Kubernetes::REST::HTTPTinyIO;
+use Kubernetes::REST::LWPIO;
 use Kubernetes::REST::HTTPRequest;
 use IO::K8s;
 use IO::K8s::List;
@@ -39,7 +39,7 @@ has io => (
     lazy => 1,
     default => sub {
         my $self = shift;
-        Kubernetes::REST::HTTPTinyIO->new(
+        Kubernetes::REST::LWPIO->new(
             ssl_verify_server => $self->server->ssl_verify_server,
             ssl_cert_file => $self->server->ssl_cert_file,
             ssl_key_file => $self->server->ssl_key_file,
@@ -747,7 +747,19 @@ object.
 
 Optional. HTTP backend for making requests. Must consume the
 L<Kubernetes::REST::Role::IO> role (i.e. implement C<call($req)> and
-C<call_streaming($req, $callback)>). Defaults to L<Kubernetes::REST::HTTPTinyIO>.
+C<call_streaming($req, $callback)>). Defaults to L<Kubernetes::REST::LWPIO>
+(L<LWP::UserAgent>), which supports L<LWP::ConsoleLogger> for HTTP debugging.
+
+To use the lighter L<HTTP::Tiny> backend instead:
+
+    use Kubernetes::REST::HTTPTinyIO;
+    my $api = Kubernetes::REST->new(
+        server      => ...,
+        credentials => ...,
+        io          => Kubernetes::REST::HTTPTinyIO->new(
+            ssl_verify_server => 1,
+        ),
+    );
 
 To use an async event loop, provide your own IO backend:
 
@@ -994,8 +1006,9 @@ is enabled.
 =head1 PLUGGABLE IO ARCHITECTURE
 
 The HTTP transport is decoupled from request preparation and response
-processing. This makes it possible to swap L<HTTP::Tiny> for an async
-backend (e.g. L<Net::Async::HTTP>) without changing any API logic.
+processing. This makes it possible to swap the default L<LWP::UserAgent>
+backend for L<HTTP::Tiny> or an async backend (e.g. L<Net::Async::HTTP>)
+without changing any API logic.
 
 The pipeline for each API call:
 
@@ -1009,12 +1022,22 @@ C<_process_watch_chunk()> which parses NDJSON and inflates each event.
 
 To implement a custom IO backend, consume L<Kubernetes::REST::Role::IO>
 and implement C<call($req)> and C<call_streaming($req, $callback)>.
-See L<Kubernetes::REST::HTTPTinyIO> for the reference implementation.
+See L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> for
+reference implementations.
 
 =head1 SEE ALSO
 
+L<Net::Async::Kubernetes> - async Kubernetes client for L<IO::Async>
+(uses Kubernetes::REST and IO::K8s under the hood)
+
+L<IO::K8s> - Kubernetes resource classes
+
 L<Kubernetes::REST::WatchEvent>, L<Kubernetes::REST::Role::IO>,
-L<Kubernetes::REST::HTTPTinyIO>, L<IO::K8s>,
+L<Kubernetes::REST::LWPIO>, L<Kubernetes::REST::HTTPTinyIO>,
+L<Kubernetes::REST::Kubeconfig>
+
+L<LWP::ConsoleLogger> - attach to the LWPIO backend for HTTP debugging
+
 L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/>
 
 =cut
