@@ -1,6 +1,6 @@
 package Kubernetes::REST::CLI;
 # ABSTRACT: CLI base class for Kubernetes::REST command-line tools
-
+our $VERSION = '1.001';
 use Moo;
 use MooX::Options;
 use MooX::Cmd;
@@ -190,6 +190,7 @@ Default execute method. Prints usage information.
 1;
 
 package Kubernetes::REST::CLI::Cmd::Get;
+our $VERSION = '1.001';
 use Moo;
 use MooX::Cmd;
 
@@ -218,6 +219,7 @@ sub execute {
 1;
 
 package Kubernetes::REST::CLI::Cmd::Create;
+our $VERSION = '1.001';
 use Moo;
 use MooX::Options;
 use MooX::Cmd;
@@ -254,6 +256,7 @@ sub execute {
 1;
 
 package Kubernetes::REST::CLI::Cmd::Delete;
+our $VERSION = '1.001';
 use Moo;
 use MooX::Cmd;
 
@@ -276,6 +279,7 @@ sub execute {
 1;
 
 package Kubernetes::REST::CLI::Cmd::Raw;
+our $VERSION = '1.001';
 use Moo;
 use MooX::Cmd;
 

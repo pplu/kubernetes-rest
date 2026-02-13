@@ -1,4 +1,5 @@
 package Kubernetes::REST::Error;
+our $VERSION = '1.001';
 # ABSTRACT: DEPRECATED - v0 error classes
   use Moo;
   use Types::Standard qw/Str/;
@@ -47,6 +48,7 @@ Returns the full error message as a string, including detail if available.
 =cut
 
 package Kubernetes::REST::RemoteError;
+our $VERSION = '1.001';
 # ABSTRACT: DEPRECATED - v0 remote error class
   use Moo;
   use Types::Standard qw/Int/;

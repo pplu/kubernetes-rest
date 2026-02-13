@@ -1,4 +1,5 @@
 package Kubernetes::REST::Certificates;
+our $VERSION = '1.001';
 # ABSTRACT: DEPRECATED - v0 API group for Certificates resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';

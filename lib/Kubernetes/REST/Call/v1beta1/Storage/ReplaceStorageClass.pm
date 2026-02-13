@@ -1,4 +1,5 @@
 package Kubernetes::REST::Call::v1beta1::Storage::ReplaceStorageClass;
+our $VERSION = '1.001';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;

@@ -1,4 +1,5 @@
 package Kubernetes::REST::Batch;
+our $VERSION = '1.001';
 # ABSTRACT: DEPRECATED - v0 API group for Batch resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';
