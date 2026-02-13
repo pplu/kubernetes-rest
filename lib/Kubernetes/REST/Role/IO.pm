@@ -30,11 +30,11 @@ The default backend is L<Kubernetes::REST::LWPIO> (using L<LWP::UserAgent>). An 
 
 requires 'call';
 
-=requires call
+=method call
 
     my $response = $io->call($req);
 
-Execute an HTTP request. Receives a L<Kubernetes::REST::HTTPRequest> with C<method>, C<url>, C<headers>, and optionally C<content> already set.
+Required. Execute an HTTP request. Receives a L<Kubernetes::REST::HTTPRequest> with C<method>, C<url>, C<headers>, and optionally C<content> already set.
 
 Must return a L<Kubernetes::REST::HTTPResponse> with C<status> and C<content>.
 
@@ -42,11 +42,11 @@ Must return a L<Kubernetes::REST::HTTPResponse> with C<status> and C<content>.
 
 requires 'call_streaming';
 
-=requires call_streaming
+=method call_streaming
 
     my $response = $io->call_streaming($req, $data_callback);
 
-Execute an HTTP request with streaming response. The C<$data_callback> is called with each chunk of data as it arrives: C<< $data_callback->($chunk) >>.
+Required. Execute an HTTP request with streaming response. The C<$data_callback> is called with each chunk of data as it arrives: C<< $data_callback->($chunk) >>.
 
 Must return a L<Kubernetes::REST::HTTPResponse> when the stream ends.
 
