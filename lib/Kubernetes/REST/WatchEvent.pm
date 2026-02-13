@@ -3,20 +3,6 @@ package Kubernetes::REST::WatchEvent;
 use Moo;
 use Types::Standard qw(Str);
 
-has type => (is => 'ro', isa => Str, required => 1);
-has object => (is => 'ro', required => 1);
-has raw => (is => 'ro', required => 1);
-
-1;
-
-__END__
-
-=encoding UTF-8
-
-=head1 NAME
-
-Kubernetes::REST::WatchEvent - A single event from the Kubernetes Watch API
-
 =head1 SYNOPSIS
 
     $api->watch('Pod',
@@ -31,27 +17,44 @@ Kubernetes::REST::WatchEvent - A single event from the Kubernetes Watch API
 
 =head1 DESCRIPTION
 
-Represents a single watch event from the Kubernetes API. Watch events are
-streamed as newline-delimited JSON objects with a C<type> field and an
-C<object> field.
+Represents a single watch event from the Kubernetes API. Watch events are streamed as newline-delimited JSON objects with a C<type> field and an C<object> field.
+
+=cut
+
+has type => (is => 'ro', isa => Str, required => 1);
 
 =attr type
 
-The event type string. One of: C<ADDED>, C<MODIFIED>, C<DELETED>, C<ERROR>,
-or C<BOOKMARK>.
+The event type string. One of: C<ADDED>, C<MODIFIED>, C<DELETED>, C<ERROR>, or C<BOOKMARK>.
+
+=cut
+
+has object => (is => 'ro', required => 1);
 
 =attr object
 
-The inflated L<IO::K8s> object for the resource. For C<ERROR> events this
-is a hashref (the Kubernetes Status object).
+The inflated L<IO::K8s> object for the resource. For C<ERROR> events this is a hashref (the Kubernetes Status object).
+
+=cut
+
+has raw => (is => 'ro', required => 1);
 
 =attr raw
 
-The original hashref from the JSON before inflation. Useful for accessing
-fields that may not be mapped to the IO::K8s class.
+The original hashref from the JSON before inflation. Useful for accessing fields that may not be mapped to the L<IO::K8s> class.
 
-=head1 SEE ALSO
+=cut
 
-L<Kubernetes::REST/watch>, L<https://kubernetes.io/docs/reference/using-api/api-concepts/#efficient-detection-of-changes>
+1;
+
+=seealso
+
+=over
+
+=item * L<Kubernetes::REST/watch> - Watch API documentation
+
+=item * L<https://kubernetes.io/docs/reference/using-api/api-concepts/#efficient-detection-of-changes> - Kubernetes watch documentation
+
+=back
 
 =cut

@@ -2,19 +2,6 @@ package Kubernetes::REST::Role::IO;
 # ABSTRACT: Interface role for HTTP backends
 use Moo::Role;
 
-requires 'call';
-requires 'call_streaming';
-
-1;
-
-__END__
-
-=encoding UTF-8
-
-=head1 NAME
-
-Kubernetes::REST::Role::IO - Interface role for pluggable HTTP backends
-
 =head1 SYNOPSIS
 
     package My::AsyncIO;
@@ -35,34 +22,52 @@ Kubernetes::REST::Role::IO - Interface role for pluggable HTTP backends
 
 =head1 DESCRIPTION
 
-This role defines the interface that HTTP backends must implement.
-L<Kubernetes::REST> delegates all HTTP communication through this
-interface, making it possible to swap out the transport layer.
+This role defines the interface that HTTP backends must implement. L<Kubernetes::REST> delegates all HTTP communication through this interface, making it possible to swap out the transport layer.
 
-The default backend is L<Kubernetes::REST::HTTPTinyIO> (synchronous,
-using L<HTTP::Tiny>). To use an async event loop, implement this role
-with e.g. L<Net::Async::HTTP>.
+The default backend is L<Kubernetes::REST::LWPIO> (using L<LWP::UserAgent>). An alternative L<Kubernetes::REST::HTTPTinyIO> (using L<HTTP::Tiny>) is provided. To use an async event loop, implement this role with e.g. L<Net::Async::HTTP>.
 
-=head1 REQUIRED METHODS
+=cut
 
-=head2 call($req)
+requires 'call';
 
-Execute an HTTP request. Receives a L<Kubernetes::REST::HTTPRequest> with
-C<method>, C<url>, C<headers>, and optionally C<content> already set.
+=requires call
+
+    my $response = $io->call($req);
+
+Execute an HTTP request. Receives a L<Kubernetes::REST::HTTPRequest> with C<method>, C<url>, C<headers>, and optionally C<content> already set.
 
 Must return a L<Kubernetes::REST::HTTPResponse> with C<status> and C<content>.
 
-=head2 call_streaming($req, $data_callback)
+=cut
 
-Execute an HTTP request with streaming response. The C<$data_callback>
-is called with each chunk of data as it arrives: C<< $data_callback->($chunk) >>.
+requires 'call_streaming';
 
-Query parameters from C<< $req->parameters >> should be appended to the URL.
+=requires call_streaming
+
+    my $response = $io->call_streaming($req, $data_callback);
+
+Execute an HTTP request with streaming response. The C<$data_callback> is called with each chunk of data as it arrives: C<< $data_callback->($chunk) >>.
 
 Must return a L<Kubernetes::REST::HTTPResponse> when the stream ends.
 
-=head1 SEE ALSO
+=cut
 
-L<Kubernetes::REST::HTTPTinyIO>, L<Kubernetes::REST>
+1;
+
+=seealso
+
+=over
+
+=item * L<Kubernetes::REST> - Main API client
+
+=item * L<Kubernetes::REST::LWPIO> - LWP::UserAgent backend (default)
+
+=item * L<Kubernetes::REST::HTTPTinyIO> - HTTP::Tiny backend
+
+=item * L<Kubernetes::REST::HTTPRequest> - Request object
+
+=item * L<Kubernetes::REST::HTTPResponse> - Response object
+
+=back
 
 =cut

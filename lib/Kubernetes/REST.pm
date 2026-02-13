@@ -23,6 +23,16 @@ has server => (
     },
 );
 
+=attr server
+
+Required. L<Kubernetes::REST::Server> instance or hashref with server connection configuration.
+
+    server => { endpoint => 'https://kubernetes.local:6443' }
+
+Automatically coerces hashrefs to L<Kubernetes::REST::Server> objects.
+
+=cut
+
 has credentials => (
     is => 'ro',
     required => 1,
@@ -33,6 +43,16 @@ has credentials => (
         return $val;
     }
 );
+
+=attr credentials
+
+Required. Authentication credentials. Can be a hashref, L<Kubernetes::REST::AuthToken>, or any object with a C<token()> method.
+
+    credentials => { token => $bearer_token }
+
+Automatically coerces hashrefs to L<Kubernetes::REST::AuthToken> objects.
+
+=cut
 
 has io => (
     is => 'ro',
@@ -47,6 +67,22 @@ has io => (
         );
     },
 );
+
+=attr io
+
+HTTP backend for making requests. Must consume L<Kubernetes::REST::Role::IO>. Defaults to L<Kubernetes::REST::LWPIO> (L<LWP::UserAgent>).
+
+To use L<HTTP::Tiny> instead:
+
+    use Kubernetes::REST::HTTPTinyIO;
+    my $api = Kubernetes::REST->new(
+        ...,
+        io => Kubernetes::REST::HTTPTinyIO->new(...),
+    );
+
+See L</PLUGGABLE IO ARCHITECTURE> for custom backends.
+
+=cut
 
 has _json => (is => 'ro', default => sub { JSON::MaybeXS->new });
 
@@ -69,8 +105,24 @@ has k8s => (
     )],
 );
 
+=attr k8s
+
+L<IO::K8s> instance configured with the same resource map. Automatically created when needed.
+
+Provides delegated methods: C<new_object>, C<inflate>, C<json_to_object>, C<struct_to_object>, C<expand_class>.
+
+=cut
+
 # Set to 0 to use IO::K8s defaults instead of loading from cluster
 has resource_map_from_cluster => (is => 'ro', default => sub { 1 });
+
+=attr resource_map_from_cluster
+
+Boolean. If true, dynamically loads the resource map from the cluster's OpenAPI spec. Defaults to C<1>.
+
+Set to C<0> to use L<IO::K8s> built-in resource map instead (faster startup, but may not match your cluster version).
+
+=cut
 
 # Cluster version - fetched once per instance
 has cluster_version => (
@@ -85,6 +137,12 @@ has cluster_version => (
     },
 );
 
+=attr cluster_version
+
+Read-only. The Kubernetes cluster version string (e.g., C<v1.31.0>). Fetched automatically from the C</version> endpoint when first accessed.
+
+=cut
+
 # Resource map - loads from cluster by default, cached per instance (lazy)
 has resource_map => (
     is => 'ro',
@@ -96,9 +154,34 @@ has resource_map => (
     },
 );
 
+=attr resource_map
+
+Hashref mapping short resource names to L<IO::K8s> class paths. By default loads dynamically from the cluster (if C<resource_map_from_cluster> is true) or uses L<IO::K8s> built-in map.
+
+Override for custom resources:
+
+    resource_map => {
+        %{ IO::K8s->default_resource_map },
+        MyResource => '+My::K8s::V1::MyResource',
+    }
+
+The C<+> prefix tells L<IO::K8s> that this is a custom class (not in the IO::K8s:: namespace).
+
+=cut
+
 # Public method to fetch resource map from cluster's OpenAPI spec
 sub fetch_resource_map {
     my ($self) = @_;
+
+=method fetch_resource_map
+
+    my $map = $api->fetch_resource_map;
+
+Fetch the resource map from the cluster's OpenAPI spec (C</openapi/v2> endpoint). Returns a hashref mapping short resource names (e.g., C<Pod>) to full L<IO::K8s> class paths.
+
+Called automatically if C<resource_map_from_cluster> is enabled.
+
+=cut
 
     my $response = $self->_request('GET', '/openapi/v2');
 
@@ -166,6 +249,16 @@ has _openapi_spec => (
 sub schema_for {
     my ($self, $kind) = @_;
 
+=method schema_for
+
+    my $schema = $api->schema_for('Pod');
+
+Get the OpenAPI schema definition for a resource type from the cluster. Accepts short names (C<Pod>), full class names (C<IO::K8s::Api::Core::V1::Pod>), or OpenAPI definition names (C<io.k8s.api.core.v1.Pod>).
+
+Returns a hashref with the OpenAPI v2 schema definition.
+
+=cut
+
     my $spec = $self->_openapi_spec;
     my $defs = $spec->{definitions} // {};
 
@@ -193,6 +286,16 @@ sub schema_for {
 # Returns comparison result from IO::K8s::Resource->compare_to_schema
 sub compare_schema {
     my ($self, $kind) = @_;
+
+=method compare_schema
+
+    my $result = $api->compare_schema('Pod');
+
+Compare the local L<IO::K8s> class definition against the cluster's OpenAPI schema. Useful for detecting version skew between your L<IO::K8s> installation and the cluster.
+
+Returns the comparison result from C<< IO::K8s::Resource->compare_to_schema >>.
+
+=cut
 
     my $class = $self->expand_class($kind);
     require_module($class);
@@ -416,6 +519,16 @@ sub _request {
 sub list {
     my ($self, $short_class, %args) = @_;
 
+=method list
+
+    my $list = $api->list('Pod', namespace => 'default');
+
+List resources. Returns an L<IO::K8s::List> object.
+
+Accepts short class names (C<Pod>) or full class paths. For namespaced resources, pass C<namespace> parameter. Omit C<namespace> to list cluster-scoped resources.
+
+=cut
+
     my $class = $self->expand_class($short_class);
     my $path = $self->_build_path($class, %args);
     my $response = $self->_request('GET', $path);
@@ -426,6 +539,16 @@ sub list {
 
 sub get {
     my ($self, $short_class, @rest) = @_;
+
+=method get
+
+    my $pod = $api->get('Pod', name => 'my-pod', namespace => 'default');
+    # or shorthand:
+    my $pod = $api->get('Pod', 'my-pod', namespace => 'default');
+
+Get a single resource by name. Returns a typed L<IO::K8s> object.
+
+=cut
 
     # Support: get('Kind', 'name'), get('Kind', 'name', namespace => 'ns'),
     #          get('Kind', name => 'name'), get('Kind', name => 'name', namespace => 'ns')
@@ -455,6 +578,14 @@ sub get {
 sub create {
     my ($self, $object) = @_;
 
+=method create
+
+    my $created = $api->create($pod);
+
+Create a resource from an L<IO::K8s> object. Returns the created object with server-assigned fields (UID, resourceVersion, etc.).
+
+=cut
+
     my $class = ref($object);
     my $namespace = $object->can('metadata') && $object->metadata
         ? $object->metadata->namespace
@@ -469,6 +600,16 @@ sub create {
 
 sub update {
     my ($self, $object) = @_;
+
+=method update
+
+    my $updated = $api->update($pod);
+
+Update an existing resource. Replaces the entire object server-side. Returns the updated object.
+
+For partial updates, use L</patch> instead.
+
+=cut
 
     my $class = ref($object);
     my $metadata = $object->metadata or croak "object must have metadata";
@@ -490,6 +631,36 @@ my %PATCH_TYPES = (
 
 sub patch {
     my ($self, $class_or_object, @rest) = @_;
+
+=method patch
+
+    my $patched = $api->patch('Pod', 'my-pod',
+        namespace => 'default',
+        patch     => { metadata => { labels => { env => 'staging' } } },
+    );
+
+    # Or with an object:
+    my $patched = $api->patch($pod,
+        patch => { metadata => { labels => { env => 'staging' } } },
+    );
+
+Partially update a resource. Unlike C<update()> which replaces the entire object, C<patch()> only modifies specified fields.
+
+Supports three patch strategies via the C<type> parameter:
+
+=over 4
+
+=item C<strategic> (default) - Strategic Merge Patch (Kubernetes-native, understands array merge semantics)
+
+=item C<merge> - JSON Merge Patch (RFC 7396, simple recursive merge)
+
+=item C<json> - JSON Patch (RFC 6902, array of operations)
+
+=back
+
+See L<Kubernetes::REST/patch> for detailed examples.
+
+=cut
 
     my ($class, $name, $namespace, $patch, $patch_type);
 
@@ -536,6 +707,18 @@ sub patch {
 sub delete {
     my ($self, $class_or_object, @rest) = @_;
 
+=method delete
+
+    $api->delete($pod);
+    # or by name:
+    $api->delete('Pod', name => 'my-pod', namespace => 'default');
+    # or shorthand:
+    $api->delete('Pod', 'my-pod', namespace => 'default');
+
+Delete a resource. Returns true on success.
+
+=cut
+
     my ($class, $name, $namespace);
 
     if (ref($class_or_object)) {
@@ -575,6 +758,28 @@ sub delete {
 
 sub watch {
     my ($self, $short_class, %args) = @_;
+
+=method watch
+
+    my $last_rv = $api->watch('Pod',
+        namespace => 'default',
+        on_event  => sub {
+            my ($event) = @_;
+            say $event->type . ": " . $event->object->metadata->name;
+        },
+        timeout         => 300,
+        resourceVersion => '12345',
+        labelSelector   => 'app=web',
+        fieldSelector   => 'status.phase=Running',
+    );
+
+Watch for changes to resources. Uses the Kubernetes Watch API with chunked transfer encoding to stream events. The call blocks until the server-side timeout expires.
+
+Returns the last C<resourceVersion> seen. Croaks on 410 Gone (resourceVersion too old).
+
+See L<Kubernetes::REST/watch> for detailed documentation and resumable watch patterns.
+
+=cut
 
     my $on_event = delete $args{on_event}
         or croak "watch requires 'on_event' callback";
@@ -1025,19 +1230,76 @@ and implement C<call($req)> and C<call_streaming($req, $callback)>.
 See L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> for
 reference implementations.
 
-=head1 SEE ALSO
+=seealso
 
-L<Net::Async::Kubernetes> - async Kubernetes client for L<IO::Async>
-(uses Kubernetes::REST and IO::K8s under the hood)
+=head2 Related Modules
 
-L<IO::K8s> - Kubernetes resource classes
+=over
 
-L<Kubernetes::REST::WatchEvent>, L<Kubernetes::REST::Role::IO>,
-L<Kubernetes::REST::LWPIO>, L<Kubernetes::REST::HTTPTinyIO>,
-L<Kubernetes::REST::Kubeconfig>
+=item * L<IO::K8s> - Kubernetes resource classes (required dependency)
 
-L<LWP::ConsoleLogger> - attach to the LWPIO backend for HTTP debugging
+=item * L<Net::Async::Kubernetes> - Async Kubernetes client for L<IO::Async>
 
-L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/>
+=back
+
+=head2 Configuration and Authentication
+
+=over
+
+=item * L<Kubernetes::REST::Kubeconfig> - Load settings from kubeconfig
+
+=item * L<Kubernetes::REST::Server> - Server connection configuration
+
+=item * L<Kubernetes::REST::AuthToken> - Authentication credentials
+
+=back
+
+=head2 HTTP Backends
+
+=over
+
+=item * L<Kubernetes::REST::Role::IO> - IO interface role
+
+=item * L<Kubernetes::REST::LWPIO> - LWP::UserAgent backend (default)
+
+=item * L<Kubernetes::REST::HTTPTinyIO> - HTTP::Tiny backend
+
+=item * L<LWP::ConsoleLogger> - HTTP debugging for LWPIO
+
+=back
+
+=head2 Data Objects
+
+=over
+
+=item * L<Kubernetes::REST::WatchEvent> - Watch event object
+
+=item * L<Kubernetes::REST::HTTPRequest> - HTTP request object
+
+=item * L<Kubernetes::REST::HTTPResponse> - HTTP response object
+
+=back
+
+=head2 CLI Tools
+
+=over
+
+=item * L<Kubernetes::REST::CLI> - CLI base class
+
+=item * L<Kubernetes::REST::CLI::Watch> - kube_watch CLI tool
+
+=item * L<Kubernetes::REST::CLI::Role::Connection> - Shared CLI options
+
+=back
+
+=head2 Examples and Documentation
+
+=over
+
+=item * L<Kubernetes::REST::Example> - Comprehensive examples with Minikube/K3s
+
+=item * L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/> - Kubernetes API reference
+
+=back
 
 =cut

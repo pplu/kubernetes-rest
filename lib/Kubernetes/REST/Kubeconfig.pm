@@ -12,15 +12,71 @@ use Kubernetes::REST::Server;
 use Kubernetes::REST::AuthToken;
 use namespace::clean;
 
+=head1 SYNOPSIS
+
+    use Kubernetes::REST::Kubeconfig;
+
+    # Use default kubeconfig and current context
+    my $kc = Kubernetes::REST::Kubeconfig->new;
+    my $api = $kc->api;
+
+    # Specify kubeconfig and context
+    my $kc = Kubernetes::REST::Kubeconfig->new(
+        kubeconfig_path => '/path/to/kubeconfig',
+        context_name => 'my-cluster',
+    );
+
+    # List available contexts
+    my $contexts = $kc->contexts;
+
+    # Get API for specific context
+    my $api = $kc->api('production');
+
+=head1 DESCRIPTION
+
+Parses Kubernetes kubeconfig files (typically C<~/.kube/config>) and creates configured L<Kubernetes::REST> instances.
+
+Supports:
+
+=over 4
+
+=item * Multiple clusters and contexts
+
+=item * Token authentication
+
+=item * Client certificate authentication
+
+=item * Inline certificate data (base64 encoded)
+
+=item * External certificate files
+
+=item * Exec-based credential plugins
+
+=back
+
+=cut
+
 has kubeconfig_path => (
     is => 'ro',
     default => sub { "$ENV{HOME}/.kube/config" },
 );
 
+=attr kubeconfig_path
+
+Path to the kubeconfig file. Defaults to C<~/.kube/config>.
+
+=cut
+
 has context_name => (
     is => 'ro',
     predicate => 1,
 );
+
+=attr context_name
+
+Optional. The context name to use. If not specified, uses the current-context from the kubeconfig.
+
+=cut
 
 has _config => (
     is => 'lazy',
@@ -43,10 +99,26 @@ sub current_context_name {
     return $self->_config->{'current-context'};
 }
 
+=method current_context_name
+
+    my $name = $kc->current_context_name;
+
+Returns the current context name (either from C<context_name> attribute or from the kubeconfig's C<current-context>).
+
+=cut
+
 sub contexts {
     my $self = shift;
     return [ map { $_->{name} } @{$self->_config->{contexts} // []} ];
 }
+
+=method contexts
+
+    my $contexts = $kc->contexts;
+
+Returns an arrayref of all available context names from the kubeconfig.
+
+=cut
 
 sub _find_by_name {
     my ($self, $list, $name) = @_;
@@ -103,6 +175,29 @@ sub _resolve_data_or_file {
 sub api {
     my ($self, $context_name) = @_;
     $context_name //= $self->current_context_name;
+
+=method api
+
+    my $api = $kc->api;
+    my $api = $kc->api('production');
+
+Create a L<Kubernetes::REST> instance configured from the kubeconfig. If C<$context_name> is provided, uses that context; otherwise uses the current context.
+
+Automatically resolves:
+
+=over 4
+
+=item * Server endpoint and SSL settings
+
+=item * Authentication credentials (token or exec plugin)
+
+=item * Client certificates (from files or inline base64 data)
+
+=item * CA certificate for server verification
+
+=back
+
+=cut
 
     my $ctx = $self->context($context_name);
     my $cluster = $self->cluster($ctx->{cluster});
@@ -180,48 +275,15 @@ sub DEMOLISH {
 
 1;
 
-__END__
+=seealso
 
-=head1 SYNOPSIS
+=over
 
-    use Kubernetes::REST::Kubeconfig;
+=item * L<Kubernetes::REST> - Main API client
 
-    # Use default kubeconfig and current context
-    my $kc = Kubernetes::REST::Kubeconfig->new;
-    my $api = $kc->api;
+=item * L<Kubernetes::REST::Server> - Server configuration
 
-    # Specify kubeconfig and context
-    my $kc = Kubernetes::REST::Kubeconfig->new(
-        kubeconfig_path => '/path/to/kubeconfig',
-        context_name => 'my-cluster',
-    );
-
-    # List available contexts
-    my $contexts = $kc->contexts;
-
-    # Get API for specific context
-    my $api = $kc->api('production');
-
-=head1 DESCRIPTION
-
-Parses Kubernetes kubeconfig files (typically ~/.kube/config) and creates
-configured L<Kubernetes::REST> instances.
-
-Supports:
-
-=over 4
-
-=item * Multiple clusters and contexts
-
-=item * Token authentication
-
-=item * Client certificate authentication
-
-=item * Inline certificate data (base64 encoded)
-
-=item * External certificate files
-
-=item * Exec-based credential plugins
+=item * L<Kubernetes::REST::AuthToken> - Authentication credentials
 
 =back
 

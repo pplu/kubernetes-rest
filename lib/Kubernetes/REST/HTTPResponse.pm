@@ -1,17 +1,7 @@
 package Kubernetes::REST::HTTPResponse;
-  use Moo;
-  use Types::Standard qw/Str Int/;
-
-  has content => (is => 'ro', isa => Str);
-  has status => (is => 'ro', isa => Int);
-
-1;
-
-=encoding UTF-8
-
-=head1 NAME
-
-Kubernetes::REST::HTTPResponse - HTTP response object
+# ABSTRACT: HTTP response object
+use Moo;
+use Types::Standard qw/Str Int/;
 
 =head1 SYNOPSIS
 
@@ -26,12 +16,34 @@ Kubernetes::REST::HTTPResponse - HTTP response object
 
 Internal HTTP response object used by L<Kubernetes::REST>.
 
+=cut
+
+has content => (is => 'ro', isa => Str);
+
 =attr content
 
 The response body content.
 
+=cut
+
+has status => (is => 'ro', isa => Int);
+
 =attr status
 
 The HTTP status code (e.g., 200, 404, 500).
+
+=cut
+
+1;
+
+=seealso
+
+=over
+
+=item * L<Kubernetes::REST::HTTPRequest> - Request object
+
+=item * L<Kubernetes::REST::Role::IO> - IO interface
+
+=back
 
 =cut

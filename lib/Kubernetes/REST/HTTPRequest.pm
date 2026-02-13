@@ -1,36 +1,7 @@
 package Kubernetes::REST::HTTPRequest;
-  use Moo;
-  use Types::Standard qw/Str HashRef/;
-
-  has server => (is => 'ro');
-  has credentials => (is => 'ro');
-
-  sub authenticate {
-    my $self = shift;
-    my $auth = $self->credentials;
-    if (defined $auth) {
-      $self->headers->{ Authorization } = 'Bearer ' . $auth->token;
-    }
-  }
-
-  has uri => (is => 'rw', isa => Str);
-  has method => (is => 'rw', isa => Str);
-  has url => (is => 'rw', isa => Str, lazy => 1, default => sub {
-    my $self = shift;
-    return $self->server->endpoint . $self->uri if $self->server;
-    return '';
-  });
-  has headers => (is => 'rw', isa => HashRef, default => sub { {} });
-  has parameters => (is => 'rw', isa => HashRef);
-  has content => (is => 'rw', isa => Str);
-
-1;
-
-=encoding UTF-8
-
-=head1 NAME
-
-Kubernetes::REST::HTTPRequest - HTTP request object
+# ABSTRACT: HTTP request object
+use Moo;
+use Types::Standard qw/Str HashRef/;
 
 =head1 SYNOPSIS
 
@@ -46,40 +17,100 @@ Kubernetes::REST::HTTPRequest - HTTP request object
 
 Internal HTTP request object used by L<Kubernetes::REST>.
 
+=cut
+
+has server => (is => 'ro');
+
 =attr server
 
 Optional. L<Kubernetes::REST::Server> instance for building the full URL.
+
+=cut
+
+has credentials => (is => 'ro');
 
 =attr credentials
 
 Optional. L<Kubernetes::REST::AuthToken> instance for authentication.
 
+=cut
+
+sub authenticate {
+    my $self = shift;
+    my $auth = $self->credentials;
+    if (defined $auth) {
+      $self->headers->{ Authorization } = 'Bearer ' . $auth->token;
+    }
+}
+
+=method authenticate
+
+Add authentication header from the C<credentials> attribute.
+
+=cut
+
+has uri => (is => 'rw', isa => Str);
+
 =attr uri
 
 The URI path (e.g., C</api/v1/pods>).
 
+=cut
+
+has method => (is => 'rw', isa => Str);
+
 =attr method
 
-The HTTP method (GET, POST, PUT, DELETE, etc.).
+The HTTP method (GET, POST, PUT, DELETE, PATCH, etc.).
+
+=cut
+
+has url => (is => 'rw', isa => Str, lazy => 1, default => sub {
+    my $self = shift;
+    return $self->server->endpoint . $self->uri if $self->server;
+    return '';
+});
 
 =attr url
 
 The complete URL. If not provided, constructed from C<server> and C<uri>.
 
+=cut
+
+has headers => (is => 'rw', isa => HashRef, default => sub { {} });
+
 =attr headers
 
 Hashref of HTTP headers.
+
+=cut
+
+has parameters => (is => 'rw', isa => HashRef);
 
 =attr parameters
 
 Hashref of query parameters.
 
+=cut
+
+has content => (is => 'rw', isa => Str);
+
 =attr content
 
 The request body content (typically JSON).
 
-=method authenticate()
+=cut
 
-Add authentication header from the C<credentials> attribute.
+1;
+
+=seealso
+
+=over
+
+=item * L<Kubernetes::REST::HTTPResponse> - Response object
+
+=item * L<Kubernetes::REST::Role::IO> - IO interface
+
+=back
 
 =cut

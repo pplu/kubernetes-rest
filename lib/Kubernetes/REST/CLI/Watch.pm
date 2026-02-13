@@ -7,12 +7,33 @@ use POSIX qw(strftime);
 
 with 'Kubernetes::REST::CLI::Role::Connection';
 
+=head1 SYNOPSIS
+
+    use Kubernetes::REST::CLI::Watch;
+
+    my $watcher = Kubernetes::REST::CLI::Watch->new_with_options;
+    $watcher->run($ARGV[0]);
+
+=head1 DESCRIPTION
+
+L<MooX::Options>-based class that powers the L<kube_watch> CLI tool. Uses L<Kubernetes::REST::CLI::Role::Connection> for shared kubeconfig/auth handling.
+
+=cut
+
 option namespace => (
     is => 'ro',
     format => 's',
     short => 'n',
     doc => 'Namespace to watch',
 );
+
+=opt namespace
+
+Namespace to watch. Omit for cluster-scoped resources or to watch all namespaces.
+
+Short option: C<-n>
+
+=cut
 
 option output => (
     is => 'ro',
@@ -22,6 +43,14 @@ option output => (
     doc => 'Output format: text, json, yaml',
 );
 
+=opt output
+
+Output format: C<text> (default), C<json>, or C<yaml>.
+
+Short option: C<-o>
+
+=cut
+
 option timeout => (
     is => 'ro',
     format => 'i',
@@ -29,6 +58,14 @@ option timeout => (
     default => sub { 300 },
     doc => 'Server-side timeout per watch cycle (seconds)',
 );
+
+=opt timeout
+
+Server-side timeout per watch cycle in seconds. Default: 300.
+
+Short option: C<-t>
+
+=cut
 
 option event_type => (
     is => 'ro',
@@ -210,75 +247,16 @@ sub _print_text {
 
 1;
 
-__END__
+=seealso
 
-=encoding UTF-8
+=over
 
-=head1 NAME
+=item * L<Kubernetes::REST/watch> - Watch API documentation
 
-Kubernetes::REST::CLI::Watch - CLI for watching Kubernetes resources
+=item * L<Kubernetes::REST::CLI::Role::Connection> - Shared CLI options
 
-=head1 SYNOPSIS
-
-    use Kubernetes::REST::CLI::Watch;
-
-    my $watcher = Kubernetes::REST::CLI::Watch->new_with_options;
-    $watcher->run($ARGV[0]);
-
-=head1 DESCRIPTION
-
-MooX::Options-based class that powers the L<kube_watch> CLI tool. Uses
-L<Kubernetes::REST::CLI::Role::Connection> for shared kubeconfig/auth
-handling.
-
-=attr namespace
-
-Namespace to watch. Omit for cluster-scoped resources or to watch all namespaces.
-
-=attr output
-
-Output format: C<text> (default), C<json>, or C<yaml>.
-
-=attr timeout
-
-Server-side timeout per watch cycle in seconds. Default: 300.
-
-=attr event_type
-
-Comma-separated list of event types to show (e.g., C<ADDED,DELETED>).
-
-=attr label
-
-Label selector to filter resources.
-
-=attr field
-
-Field selector to filter resources.
-
-=attr names
-
-Perl regex to filter by resource name.
-
-=attr timestamp_format
-
-Timestamp format for text output. One of:
-
-=over 4
-
-=item C<datetime> (default) - C<2025-02-12 14:23:01>
-
-=item C<date> - C<2025-02-12>
-
-=item C<time> - C<14:23:01>
-
-=item C<epoch> - C<1707745381>
-
-=item C<iso> - C<2025-02-12T14:23:01+0100>
+=item * L<Kubernetes::REST::WatchEvent> - Watch event object
 
 =back
-
-=head1 SEE ALSO
-
-L<kube_watch>, L<Kubernetes::REST/watch>, L<Kubernetes::REST::CLI::Role::Connection>
 
 =cut

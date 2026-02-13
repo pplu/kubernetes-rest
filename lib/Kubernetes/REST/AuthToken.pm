@@ -1,17 +1,7 @@
 package Kubernetes::REST::AuthToken;
 # ABSTRACT: Kubernetes API authentication token
-  use Moo;
-  use Types::Standard qw/Str/;
-
-  has token => (is => 'ro', isa => Str, required => 1);
-
-1;
-
-=encoding UTF-8
-
-=head1 NAME
-
-Kubernetes::REST::AuthToken - Kubernetes API authentication token
+use Moo;
+use Types::Standard qw/Str/;
 
 =head1 SYNOPSIS
 
@@ -25,8 +15,26 @@ Kubernetes::REST::AuthToken - Kubernetes API authentication token
 
 Authentication credentials for Kubernetes API requests using bearer token authentication.
 
+=cut
+
+has token => (is => 'ro', isa => Str, required => 1);
+
 =attr token
 
 Required. The bearer token for API authentication.
+
+=cut
+
+1;
+
+=seealso
+
+=over
+
+=item * L<Kubernetes::REST> - Main API client
+
+=item * L<Kubernetes::REST::Kubeconfig> - Load token from kubeconfig
+
+=back
 
 =cut
