@@ -1,0 +1,12 @@
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Success",
+  "details": {
+    "name": "batch-job",
+    "group": "batch",
+    "kind": "jobs",
+    "uid": "mock-batch-job-uid"
+  }
+}

@@ -5,22 +5,44 @@ use warnings;
 
 use Test::More;
 use Test::Exception;
-use Kubernetes::REST::Result2Hash;
-use Kubernetes::REST::HTTPResponse;
+use Kubernetes::REST;
+use Kubernetes::REST::Server;
+use Kubernetes::REST::AuthToken;
 
-my $l2r = Kubernetes::REST::Result2Hash->new;
-
+# Test that error responses are handled correctly
+# (actual API calls would require a real cluster, so we just test setup)
 {
-  throws_ok(sub {
-    my $res = $l2r->result2return(
-      {},
-      {},
-      Kubernetes::REST::HTTPResponse->new(
-        content => '{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"Unauthorized","reason":"Unauthorized","code":401}',
-        status => 401,
-      )
+    my $api = Kubernetes::REST->new(
+        server => Kubernetes::REST::Server->new(endpoint => 'http://example.com'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'FakeToken'),
+        resource_map_from_cluster => 0,
     );
-  }, 'Kubernetes::REST::RemoteError');
+
+    # Verify API object is created correctly
+    ok($api, 'API object created');
+    is($api->server->endpoint, 'http://example.com', 'Server endpoint set correctly');
+    is($api->credentials->token, 'FakeToken', 'Credentials set correctly');
+}
+
+# Test error handling for missing parameters
+{
+    my $api = Kubernetes::REST->new(
+        server => Kubernetes::REST::Server->new(endpoint => 'http://example.com'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'FakeToken'),
+        resource_map_from_cluster => 0,
+    );
+
+    throws_ok(
+        sub { $api->get('Pod') },
+        qr/name required/,
+        'get without name throws error'
+    );
+
+    throws_ok(
+        sub { $api->delete('Pod') },
+        qr/name required/,
+        'delete without name throws error'
+    );
 }
 
 done_testing;

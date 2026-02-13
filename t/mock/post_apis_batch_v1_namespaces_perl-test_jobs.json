@@ -1,0 +1,51 @@
+{
+  "apiVersion": "batch/v1",
+  "kind": "Job",
+  "metadata": {
+    "name": "batch-job",
+    "namespace": "perl-test",
+    "uid": "mock-batch-job-uid",
+    "resourceVersion": "10007",
+    "creationTimestamp": "2024-01-15T10:00:06Z"
+  },
+  "spec": {
+    "backoffLimit": 3,
+    "completions": 1,
+    "parallelism": 1,
+    "template": {
+      "metadata": {
+        "labels": {
+          "job-name": "batch-job"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "batch-job",
+            "image": "my-app:1.0.0",
+            "command": [
+              "perl",
+              "-e",
+              "print \"Batch job completed\\n\""
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              },
+              "limits": {
+                "cpu": "500m",
+                "memory": "256Mi"
+              }
+            }
+          }
+        ],
+        "restartPolicy": "Never"
+      }
+    }
+  },
+  "status": {
+    "startTime": "2024-01-15T10:00:06Z",
+    "active": 1
+  }
+}

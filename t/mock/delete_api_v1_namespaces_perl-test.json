@@ -1,0 +1,41 @@
+{
+  "apiVersion": "v1",
+  "kind": "Namespace",
+  "metadata": {
+    "name": "perl-test",
+    "uid": "mock-perl-test-ns-uid",
+    "resourceVersion": "10050",
+    "creationTimestamp": "2024-01-15T10:00:00Z",
+    "deletionTimestamp": "2024-01-15T10:05:00Z",
+    "deletionGracePeriodSeconds": 0
+  },
+  "spec": {
+    "finalizers": []
+  },
+  "status": {
+    "phase": "Terminating",
+    "conditions": [
+      {
+        "type": "NamespaceDeletionDiscoveryFailure",
+        "status": "False",
+        "lastTransitionTime": "2024-01-15T10:05:00Z",
+        "reason": "ResourcesDiscovered",
+        "message": "All resources successfully discovered"
+      },
+      {
+        "type": "NamespaceDeletionContentFailure",
+        "status": "False",
+        "lastTransitionTime": "2024-01-15T10:05:00Z",
+        "reason": "ContentDeleted",
+        "message": "All content successfully deleted"
+      },
+      {
+        "type": "NamespaceContentRemaining",
+        "status": "False",
+        "lastTransitionTime": "2024-01-15T10:05:00Z",
+        "reason": "ContentRemoved",
+        "message": "All content successfully removed"
+      }
+    ]
+  }
+}

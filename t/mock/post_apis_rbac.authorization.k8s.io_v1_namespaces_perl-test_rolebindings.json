@@ -1,0 +1,23 @@
+{
+  "apiVersion": "rbac.authorization.k8s.io/v1",
+  "kind": "RoleBinding",
+  "metadata": {
+    "name": "read-pods",
+    "namespace": "perl-test",
+    "uid": "mock-read-pods-rb-uid",
+    "resourceVersion": "10010",
+    "creationTimestamp": "2024-01-15T10:00:09Z"
+  },
+  "subjects": [
+    {
+      "kind": "ServiceAccount",
+      "name": "default",
+      "namespace": "perl-test"
+    }
+  ],
+  "roleRef": {
+    "apiGroup": "rbac.authorization.k8s.io",
+    "kind": "Role",
+    "name": "pod-reader"
+  }
+}

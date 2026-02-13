@@ -1,0 +1,54 @@
+{
+  "apiVersion": "batch/v1",
+  "kind": "CronJob",
+  "metadata": {
+    "name": "scheduled-job",
+    "namespace": "perl-test",
+    "uid": "mock-scheduled-job-cj-uid",
+    "resourceVersion": "10008",
+    "creationTimestamp": "2024-01-15T10:00:07Z"
+  },
+  "spec": {
+    "schedule": "*/5 * * * *",
+    "concurrencyPolicy": "Forbid",
+    "successfulJobsHistoryLimit": 3,
+    "failedJobsHistoryLimit": 1,
+    "jobTemplate": {
+      "metadata": {},
+      "spec": {
+        "template": {
+          "metadata": {
+            "labels": {
+              "job-name": "scheduled-job"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "name": "scheduled-job",
+                "image": "my-app:1.0.0",
+                "command": [
+                  "perl",
+                  "-e",
+                  "print \"Scheduled task executed\\n\""
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "50m",
+                    "memory": "64Mi"
+                  },
+                  "limits": {
+                    "cpu": "200m",
+                    "memory": "128Mi"
+                  }
+                }
+              }
+            ],
+            "restartPolicy": "OnFailure"
+          }
+        }
+      }
+    }
+  },
+  "status": {}
+}

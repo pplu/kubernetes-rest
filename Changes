@@ -1,5 +1,33 @@
-0.02 2019-02-11
+Revision history for Kubernetes-REST
+
+{{$NEXT}}
+ - Updated original author email and copyright holder
+ - Complete rewrite for v1 API
+ - Now uses IO::K8s for Kubernetes resource classes
+ - Simplified API: list(), get(), create(), update(), patch(), delete(), watch()
+ - Default HTTP backend switched from HTTP::Tiny to LWP::UserAgent
+   (enables LWP::ConsoleLogger for HTTP traffic debugging)
+ - New Kubernetes::REST::LWPIO backend (HTTPTinyIO still available as alternative)
+ - Pluggable IO architecture via Kubernetes::REST::Role::IO
+ - Patch support: strategic-merge-patch, JSON merge patch (RFC 7396),
+   JSON patch (RFC 6902)
+ - Watch API: streaming resource changes via Kubernetes Watch API
+ - Resumable watches via resourceVersion tracking
+ - Label and field selector support for list() and watch()
+ - Automatic URL building from IO::K8s class metadata
+ - Custom Resource Definition (CRD) support with the standard API
+ - Resource map for short class names (Pod -> IO::K8s::Api::Core::V1::Pod)
+ - Resource map '+' prefix for external classes ('+My::CRD' uses class as-is)
+ - Dynamic resource map loading from cluster (/openapi/v2)
+ - Kubeconfig support (token auth, client certs, exec credential plugins)
+ - New kube_watch CLI tool for watching Kubernetes resource events
+ - Backwards compatibility via deprecated v0 API wrappers (with warnings)
+ - Updated maintainer to GETTY
+
+All pre-v1 releases by Jose Luis Martinez Torres (JLMARTIN)
+
+0.02     2019-02-11 00:00:00Z
  - Fix all calls that have a body parameter: Create*, Patch*, Replace*, etc..
 
-0.01 2019-01-03
+0.01     2019-01-03 00:00:00Z
  - First release into an unsuspecting world

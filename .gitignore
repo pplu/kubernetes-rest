@@ -1,3 +1,17 @@
+# Build artifacts
+Kubernetes-REST-*/
+Kubernetes-REST-*.tar.gz
+.build/
+
+# Carton / local libs
 cpanfile.snapshot
 local/
 dzil-local/
+
+# Test coverage
+cover_db/
+
+# Editor backups
+*~
+*.swp
+*.bak

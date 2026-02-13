@@ -1,0 +1,13 @@
+{
+  "apiVersion": "v1",
+  "kind": "Namespace",
+  "metadata": {
+    "name": "default",
+    "uid": "mock-default-uid",
+    "creationTimestamp": "2024-01-01T00:00:00Z"
+  },
+  "spec": {},
+  "status": {
+    "phase": "Active"
+  }
+}

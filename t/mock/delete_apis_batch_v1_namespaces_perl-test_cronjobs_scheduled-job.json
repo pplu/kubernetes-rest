@@ -1,0 +1,12 @@
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Success",
+  "details": {
+    "name": "scheduled-job",
+    "group": "batch",
+    "kind": "cronjobs",
+    "uid": "mock-scheduled-job-cj-uid"
+  }
+}

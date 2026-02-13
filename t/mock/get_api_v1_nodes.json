@@ -1,0 +1,22 @@
+{
+  "apiVersion": "v1",
+  "kind": "NodeList",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {
+        "name": "mock-node-1",
+        "uid": "mock-node-1-uid"
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True"
+          }
+        ]
+      }
+    }
+  ]
+}

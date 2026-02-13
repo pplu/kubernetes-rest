@@ -1,0 +1,26 @@
+{
+  "apiVersion": "v1",
+  "kind": "PersistentVolumeClaim",
+  "metadata": {
+    "name": "my-storage",
+    "namespace": "perl-test",
+    "uid": "mock-my-storage-pvc-uid",
+    "resourceVersion": "10011",
+    "creationTimestamp": "2024-01-15T10:00:10Z"
+  },
+  "spec": {
+    "accessModes": [
+      "ReadWriteOnce"
+    ],
+    "resources": {
+      "requests": {
+        "storage": "5Gi"
+      }
+    },
+    "storageClassName": "standard",
+    "volumeMode": "Filesystem"
+  },
+  "status": {
+    "phase": "Pending"
+  }
+}
