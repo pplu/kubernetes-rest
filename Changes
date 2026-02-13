@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.000     2026-02-13 05:38:17Z
  - Updated original author email and copyright holder
  - Complete rewrite for v1 API
  - Now uses IO::K8s for Kubernetes resource classes
