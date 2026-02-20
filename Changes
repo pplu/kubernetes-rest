@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.001     2026-02-20 05:03:44Z
  - Fix inline kubeconfig certificates (use IO::Socket::SSL::Utils for in-memory PEM)
  - Kubeconfig: respect KUBECONFIG environment variable
 
