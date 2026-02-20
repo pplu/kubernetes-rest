@@ -1,5 +1,5 @@
 package Kubernetes::REST::Logs;
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 # ABSTRACT: DEPRECATED - v0 compatibility stub
 use strict;
 use warnings;

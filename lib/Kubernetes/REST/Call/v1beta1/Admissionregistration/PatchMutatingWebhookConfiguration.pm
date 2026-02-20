@@ -1,5 +1,5 @@
 package Kubernetes::REST::Call::v1beta1::Admissionregistration::PatchMutatingWebhookConfiguration;
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;

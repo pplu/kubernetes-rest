@@ -1,5 +1,5 @@
 package Kubernetes::REST::Coordination;
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 # ABSTRACT: DEPRECATED - v0 API group for Coordination resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';
