@@ -33,28 +33,11 @@ Boolean. Whether to verify the server's SSL certificate. Defaults to true.
 =cut
 
 has ssl_cert_file => (is => 'ro');
-
-=attr ssl_cert_file
-
-Optional. Path to client certificate file for mTLS authentication.
-
-=cut
-
-has ssl_key_file => (is => 'ro');
-
-=attr ssl_key_file
-
-Optional. Path to client key file for mTLS authentication.
-
-=cut
-
-has ssl_ca_file => (is => 'ro');
-
-=attr ssl_ca_file
-
-Optional. Path to CA certificate file for verifying the server certificate.
-
-=cut
+has ssl_cert_pem  => (is => 'ro');
+has ssl_key_file  => (is => 'ro');
+has ssl_key_pem   => (is => 'ro');
+has ssl_ca_file   => (is => 'ro');
+has ssl_ca_pem    => (is => 'ro');
 
 has timeout => (is => 'ro', default => sub { 310 });
 
@@ -66,12 +49,28 @@ Timeout in seconds for HTTP requests. Defaults to 310 (slightly more than the Ku
 
 has ua => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
+    require IO::Socket::SSL::Utils;
 
     my %options;
     $options{ SSL_verify_mode } = SSL_VERIFY_PEER if ($self->ssl_verify_server);
-    $options{ SSL_cert_file } = $self->ssl_cert_file if (defined $self->ssl_cert_file);
-    $options{ SSL_key_file } = $self->ssl_key_file if (defined $self->ssl_key_file);
-    $options{ SSL_ca_file } = $self->ssl_ca_file if (defined $self->ssl_ca_file);
+
+    if (defined $self->ssl_cert_pem) {
+        $options{ SSL_cert } = [ IO::Socket::SSL::Utils::PEM_string2cert($self->ssl_cert_pem) ];
+    } elsif (defined $self->ssl_cert_file) {
+        $options{ SSL_cert_file } = $self->ssl_cert_file;
+    }
+
+    if (defined $self->ssl_key_pem) {
+        $options{ SSL_key } = IO::Socket::SSL::Utils::PEM_string2key($self->ssl_key_pem);
+    } elsif (defined $self->ssl_key_file) {
+        $options{ SSL_key_file } = $self->ssl_key_file;
+    }
+
+    if (defined $self->ssl_ca_pem) {
+        $options{ SSL_ca } = [ IO::Socket::SSL::Utils::PEM_string2cert($self->ssl_ca_pem) ];
+    } elsif (defined $self->ssl_ca_file) {
+        $options{ SSL_ca_file } = $self->ssl_ca_file;
+    }
 
     return HTTP::Tiny->new(
       agent => 'Kubernetes::REST Perl Client ' . ($Kubernetes::REST::VERSION // 'dev'),

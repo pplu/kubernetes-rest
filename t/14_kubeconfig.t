@@ -7,7 +7,7 @@ use FindBin;
 use lib "$FindBin::Bin/../lib";
 use File::Temp qw(tempfile tempdir);
 use YAML::XS ();
-use MIME::Base64 qw(encode_base64);
+use MIME::Base64 qw(encode_base64 decode_base64);
 
 use_ok('Kubernetes::REST::Kubeconfig');
 
@@ -222,9 +222,9 @@ subtest 'api - cert auth with cert file references' => sub {
     is $api->server->endpoint, 'https://dev.k8s.local:6443', 'dev server endpoint';
     is $api->server->ssl_cert_file, $cert_file, 'client cert file set';
     is $api->server->ssl_key_file, $key_file, 'client key file set';
-    # CA should be from base64 data, so it's a temp file
-    ok $api->server->ssl_ca_file, 'CA file set (from base64 data)';
-    ok -f $api->server->ssl_ca_file, 'CA temp file exists';
+    # CA from base64 data should be in-memory PEM, not a file
+    ok $api->server->ssl_ca_pem, 'CA PEM data set (from base64 data)';
+    ok !$api->server->ssl_ca_file, 'no CA file (in-memory instead)';
 };
 
 subtest 'api - insecure skip TLS verify' => sub {
@@ -260,18 +260,52 @@ subtest 'missing kubeconfig file' => sub {
         'throws for missing kubeconfig file';
 };
 
-subtest 'DEMOLISH cleans up temp files' => sub {
-    my @temp_files;
+subtest 'in-memory PEM survives kubeconfig destruction' => sub {
+    my $api;
     {
         my $kc = Kubernetes::REST::Kubeconfig->new(kubeconfig_path => $config_file);
-        # Creating API for dev cluster will create temp file from base64 CA data
-        my $api = $kc->api('development');
-        @temp_files = @{$kc->_temp_files};
-        ok scalar @temp_files > 0, 'temp files created for base64 data';
-        ok -f $temp_files[0], 'temp file exists before DEMOLISH';
+        $api = $kc->api('development');
     }
-    # After $kc goes out of scope, DEMOLISH should clean up
-    ok !-f $temp_files[0], 'temp file cleaned up after DEMOLISH';
+    # After $kc goes out of scope, PEM data lives in the API server object
+    ok $api->server->ssl_ca_pem, 'CA PEM still available after kubeconfig destroyed';
+    is $api->server->ssl_ca_pem, decode_base64($ca_data), 'PEM data matches original';
+};
+
+subtest 'inline cert-data uses PEM attributes, file refs use file attributes' => sub {
+    # Add a context that uses inline cert-data for user creds
+    my $inline_config = {
+        %$kubeconfig,
+        contexts => [
+            @{$kubeconfig->{contexts}},
+            {
+                name => 'inline-certs',
+                context => {
+                    cluster => 'dev-cluster',
+                    user => 'cert-data-user',
+                },
+            },
+        ],
+    };
+    my $inline_file = "$tmpdir/kubeconfig-inline";
+    YAML::XS::DumpFile($inline_file, $inline_config);
+
+    my $kc = Kubernetes::REST::Kubeconfig->new(kubeconfig_path => $inline_file);
+    my $api = $kc->api('inline-certs');
+
+    # User has inline cert-data → PEM attributes
+    ok $api->server->ssl_cert_pem, 'client cert is PEM (from inline data)';
+    ok $api->server->ssl_key_pem, 'client key is PEM (from inline data)';
+    ok !$api->server->ssl_cert_file, 'no cert file (in-memory)';
+    ok !$api->server->ssl_key_file, 'no key file (in-memory)';
+
+    # Cluster has inline CA data → PEM
+    ok $api->server->ssl_ca_pem, 'CA is PEM (from inline data)';
+    ok !$api->server->ssl_ca_file, 'no CA file (in-memory)';
+
+    # File-based context still uses file attributes
+    my $api2 = $kc->api('production');
+    is $api2->server->ssl_ca_file, $ca_file, 'file-based CA uses ssl_ca_file';
+    ok !$api2->server->ssl_ca_pem, 'no PEM for file-based CA';
 };
 
 done_testing;

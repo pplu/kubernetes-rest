@@ -63,7 +63,7 @@ my $rv = $api->watch('Pod',
 ```perl
 use Kubernetes::REST::Kubeconfig;
 
-# Use default ~/.kube/config and current context
+# Uses $KUBECONFIG env var, falls back to ~/.kube/config
 my $api = Kubernetes::REST::Kubeconfig->new->api;
 
 # Use a specific kubeconfig and context
@@ -73,7 +73,7 @@ my $api = Kubernetes::REST::Kubeconfig->new(
 )->api;
 ```
 
-Supports token auth, client certificates (file and inline base64), and exec credential plugins.
+Supports token auth, client certificates (file and inline base64), exec credential plugins, and in-memory PEM for inline certificate data.
 
 ## HTTP Debugging
 

@@ -6,7 +6,6 @@ use Carp qw(croak);
 use YAML::XS ();
 use Path::Tiny qw(path);
 use MIME::Base64 qw(decode_base64);
-use File::Temp qw(tempfile);
 use Kubernetes::REST;
 use Kubernetes::REST::Server;
 use Kubernetes::REST::AuthToken;
@@ -58,7 +57,7 @@ Supports:
 
 has kubeconfig_path => (
     is => 'ro',
-    default => sub { "$ENV{HOME}/.kube/config" },
+    default => sub { $ENV{KUBECONFIG} // "$ENV{HOME}/.kube/config" },
 );
 
 =attr kubeconfig_path
@@ -86,11 +85,6 @@ has _config => (
         croak "Kubeconfig not found: $path" unless -f $path;
         return YAML::XS::LoadFile($path);
     },
-);
-
-has _temp_files => (
-    is => 'ro',
-    default => sub { [] },
 );
 
 sub current_context_name {
@@ -150,26 +144,19 @@ sub user {
     return $user->{user};
 }
 
-sub _write_temp_file {
-    my ($self, $data) = @_;
-    my ($fh, $filename) = tempfile(UNLINK => 0);
-    print $fh $data;
-    close $fh;
-    push @{$self->_temp_files}, $filename;
-    return $filename;
-}
-
-sub _resolve_data_or_file {
+sub _resolve_cert {
     my ($self, $hash, $key) = @_;
 
-    # Try data first (base64 encoded)
     my $data_key = "${key}-data";
     if (my $data = $hash->{$data_key}) {
-        return $self->_write_temp_file(decode_base64($data));
+        return (pem => decode_base64($data));
     }
 
-    # Then try file path
-    return $hash->{$key};
+    if (my $file = $hash->{$key}) {
+        return (file => $file);
+    }
+
+    return ();
 }
 
 sub api {
@@ -208,8 +195,8 @@ Automatically resolves:
         endpoint => $cluster->{server},
     );
 
-    if (my $ca = $self->_resolve_data_or_file($cluster, 'certificate-authority')) {
-        $server{ssl_ca_file} = $ca;
+    if (my %ca = $self->_resolve_cert($cluster, 'certificate-authority')) {
+        $server{ $ca{pem} ? 'ssl_ca_pem' : 'ssl_ca_file' } = $ca{pem} // $ca{file};
     }
 
     if ($cluster->{'insecure-skip-tls-verify'}) {
@@ -218,12 +205,12 @@ Automatically resolves:
         $server{ssl_verify_server} = 1;
     }
 
-    if (my $cert = $self->_resolve_data_or_file($user, 'client-certificate')) {
-        $server{ssl_cert_file} = $cert;
+    if (my %cert = $self->_resolve_cert($user, 'client-certificate')) {
+        $server{ $cert{pem} ? 'ssl_cert_pem' : 'ssl_cert_file' } = $cert{pem} // $cert{file};
     }
 
-    if (my $key = $self->_resolve_data_or_file($user, 'client-key')) {
-        $server{ssl_key_file} = $key;
+    if (my %key = $self->_resolve_cert($user, 'client-key')) {
+        $server{ $key{pem} ? 'ssl_key_pem' : 'ssl_key_file' } = $key{pem} // $key{file};
     }
 
     # Build credentials
@@ -263,14 +250,6 @@ sub _exec_credential {
         or croak "exec credential did not return token";
 
     return Kubernetes::REST::AuthToken->new(token => $token);
-}
-
-sub DEMOLISH {
-    my $self = shift;
-    # Clean up temp files
-    for my $file (@{$self->_temp_files}) {
-        unlink $file if -f $file;
-    }
 }
 
 1;

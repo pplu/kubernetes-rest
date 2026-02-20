@@ -38,28 +38,11 @@ Boolean. Whether to verify the server's SSL certificate. Defaults to true.
 =cut
 
 has ssl_cert_file => (is => 'ro');
-
-=attr ssl_cert_file
-
-Optional. Path to client certificate file for mTLS authentication.
-
-=cut
-
-has ssl_key_file => (is => 'ro');
-
-=attr ssl_key_file
-
-Optional. Path to client key file for mTLS authentication.
-
-=cut
-
-has ssl_ca_file => (is => 'ro');
-
-=attr ssl_ca_file
-
-Optional. Path to CA certificate file for verifying the server certificate.
-
-=cut
+has ssl_cert_pem  => (is => 'ro');
+has ssl_key_file  => (is => 'ro');
+has ssl_key_pem   => (is => 'ro');
+has ssl_ca_file   => (is => 'ro');
+has ssl_ca_pem    => (is => 'ro');
 
 has timeout => (is => 'ro', default => sub { 310 });
 
@@ -71,13 +54,31 @@ Timeout in seconds for HTTP requests. Defaults to 310 (slightly more than the Ku
 
 has ua => (is => 'ro', lazy => 1, default => sub {
     my $self = shift;
+    require IO::Socket::SSL::Utils;
 
     my %ssl_opts;
     $ssl_opts{ verify_hostname } = $self->ssl_verify_server;
     $ssl_opts{ SSL_verify_mode } = $self->ssl_verify_server ? 1 : 0;
-    $ssl_opts{ SSL_cert_file } = $self->ssl_cert_file if defined $self->ssl_cert_file;
-    $ssl_opts{ SSL_key_file } = $self->ssl_key_file if defined $self->ssl_key_file;
-    $ssl_opts{ SSL_ca_file } = $self->ssl_ca_file if defined $self->ssl_ca_file;
+
+    # PEM data: convert to X509/EVP_PKEY objects via SSL_cert/SSL_key
+    # PEM file paths: use SSL_cert_file/SSL_key_file as normal
+    if (defined $self->ssl_cert_pem) {
+        $ssl_opts{ SSL_cert } = [ IO::Socket::SSL::Utils::PEM_string2cert($self->ssl_cert_pem) ];
+    } elsif (defined $self->ssl_cert_file) {
+        $ssl_opts{ SSL_cert_file } = $self->ssl_cert_file;
+    }
+
+    if (defined $self->ssl_key_pem) {
+        $ssl_opts{ SSL_key } = IO::Socket::SSL::Utils::PEM_string2key($self->ssl_key_pem);
+    } elsif (defined $self->ssl_key_file) {
+        $ssl_opts{ SSL_key_file } = $self->ssl_key_file;
+    }
+
+    if (defined $self->ssl_ca_pem) {
+        $ssl_opts{ SSL_ca } = [ IO::Socket::SSL::Utils::PEM_string2cert($self->ssl_ca_pem) ];
+    } elsif (defined $self->ssl_ca_file) {
+        $ssl_opts{ SSL_ca_file } = $self->ssl_ca_file;
+    }
 
     return LWP::UserAgent->new(
       agent => 'Kubernetes::REST Perl Client ' . ($Kubernetes::REST::VERSION // 'dev'),

@@ -46,6 +46,15 @@ Optional. Path to client certificate file for mTLS authentication.
 
 =cut
 
+has ssl_cert_pem => (is => 'ro');
+
+=attr ssl_cert_pem
+
+Optional. PEM string of client certificate for mTLS authentication.
+Takes precedence over C<ssl_cert_file>.
+
+=cut
+
 has ssl_key_file => (is => 'ro');
 
 =attr ssl_key_file
@@ -54,11 +63,29 @@ Optional. Path to client key file for mTLS authentication.
 
 =cut
 
+has ssl_key_pem => (is => 'ro');
+
+=attr ssl_key_pem
+
+Optional. PEM string of client key for mTLS authentication.
+Takes precedence over C<ssl_key_file>.
+
+=cut
+
 has ssl_ca_file => (is => 'ro');
 
 =attr ssl_ca_file
 
 Optional. Path to CA certificate file for verifying the server certificate.
+
+=cut
+
+has ssl_ca_pem => (is => 'ro');
+
+=attr ssl_ca_pem
+
+Optional. PEM string of CA certificate for server verification.
+Takes precedence over C<ssl_ca_file>.
 
 =cut
 

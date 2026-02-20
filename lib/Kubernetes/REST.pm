@@ -60,11 +60,15 @@ has io => (
     lazy => 1,
     default => sub {
         my $self = shift;
+        my $s = $self->server;
         Kubernetes::REST::LWPIO->new(
-            ssl_verify_server => $self->server->ssl_verify_server,
-            ssl_cert_file => $self->server->ssl_cert_file,
-            ssl_key_file => $self->server->ssl_key_file,
-            ssl_ca_file => $self->server->ssl_ca_file,
+            ssl_verify_server => $s->ssl_verify_server,
+            (defined $s->ssl_cert_pem  ? (ssl_cert_pem  => $s->ssl_cert_pem)  : ()),
+            (defined $s->ssl_cert_file ? (ssl_cert_file => $s->ssl_cert_file) : ()),
+            (defined $s->ssl_key_pem   ? (ssl_key_pem   => $s->ssl_key_pem)   : ()),
+            (defined $s->ssl_key_file  ? (ssl_key_file  => $s->ssl_key_file)  : ()),
+            (defined $s->ssl_ca_pem    ? (ssl_ca_pem    => $s->ssl_ca_pem)    : ()),
+            (defined $s->ssl_ca_file   ? (ssl_ca_file   => $s->ssl_ca_file)   : ()),
         );
     },
 );
@@ -523,16 +527,30 @@ sub list {
 =method list
 
     my $list = $api->list('Pod', namespace => 'default');
+    my $list = $api->list('Namespace', labelSelector => 'app=web');
 
 List resources. Returns an L<IO::K8s::List> object.
 
 Accepts short class names (C<Pod>) or full class paths. For namespaced resources, pass C<namespace> parameter. Omit C<namespace> to list cluster-scoped resources.
 
+Supports C<labelSelector> and C<fieldSelector> query parameters for server-side filtering.
+
 =cut
+
+    # Extract query parameters before building path
+    my $label_selector = delete $args{labelSelector};
+    my $field_selector = delete $args{fieldSelector};
 
     my $class = $self->expand_class($short_class);
     my $path = $self->_build_path($class, %args);
-    my $response = $self->_request('GET', $path);
+
+    my %params;
+    $params{labelSelector} = $label_selector if defined $label_selector;
+    $params{fieldSelector} = $field_selector if defined $field_selector;
+
+    my $response = %params
+        ? $self->_request('GET', $path, undef, parameters => \%params)
+        : $self->_request('GET', $path);
     $self->_check_response($response, "list $short_class");
 
     return $self->_inflate_list($class, $response);
