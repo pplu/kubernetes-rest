@@ -1,5 +1,5 @@
 package Kubernetes::REST::CLI::Role::Connection;
-our $VERSION = '1.002';
+our $VERSION = '1.003';
 # ABSTRACT: Shared kubeconfig/auth options for CLI tools
 use Moo::Role;
 use MooX::Options;

@@ -1,5 +1,5 @@
 package Kubernetes::REST::Call::GetAuthenticationAPIGroup;
-our $VERSION = '1.002';
+our $VERSION = '1.003';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;

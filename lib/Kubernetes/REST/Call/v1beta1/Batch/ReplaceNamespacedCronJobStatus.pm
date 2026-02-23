@@ -1,5 +1,5 @@
 package Kubernetes::REST::Call::v1beta1::Batch::ReplaceNamespacedCronJobStatus;
-our $VERSION = '1.002';
+our $VERSION = '1.003';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;

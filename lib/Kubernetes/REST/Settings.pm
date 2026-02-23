@@ -1,5 +1,5 @@
 package Kubernetes::REST::Settings;
-our $VERSION = '1.002';
+our $VERSION = '1.003';
 # ABSTRACT: DEPRECATED - v0 compatibility stub
 use strict;
 use warnings;

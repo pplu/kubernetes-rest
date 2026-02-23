@@ -1,5 +1,5 @@
 package Kubernetes::REST::Autoscaling;
-our $VERSION = '1.002';
+our $VERSION = '1.003';
 # ABSTRACT: DEPRECATED - v0 API group for Autoscaling resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';

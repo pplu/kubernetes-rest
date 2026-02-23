@@ -1,5 +1,5 @@
 package Kubernetes::REST::Role::IO;
-our $VERSION = '1.002';
+our $VERSION = '1.003';
 # ABSTRACT: Interface role for HTTP backends
 use Moo::Role;
 
