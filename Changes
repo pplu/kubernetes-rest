@@ -1,6 +1,8 @@
 Revision history for Kubernetes-REST
 
 {{$NEXT}}
+ - Fix client-certificate (mTLS) auth: skip empty Authorization header when
+   no bearer token is configured (was sending "Bearer " causing 401)
 
 1.001     2026-02-20 05:03:44Z
  - Fix inline kubeconfig certificates (use IO::Socket::SSL::Utils for in-memory PEM)
