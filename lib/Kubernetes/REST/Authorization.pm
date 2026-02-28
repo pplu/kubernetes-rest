@@ -1,5 +1,5 @@
 package Kubernetes::REST::Authorization;
-our $VERSION = '1.004';
+our $VERSION = '1.005';
 # ABSTRACT: DEPRECATED - v0 API group for Authorization resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';

@@ -1,5 +1,7 @@
 Revision history for Kubernetes-REST
 
+{{$NEXT}}
+
 1.004     2026-02-28 18:46:30Z
  - Fix resource name pluralization in _build_path: correctly handle words ending
    in ss/sh/ch/x/z (e.g. Ingress -> ingresses, NetworkPolicy -> networkpolicies),

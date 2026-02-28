@@ -1,5 +1,5 @@
 package Kubernetes::REST::Apiregistration;
-our $VERSION = '1.004';
+our $VERSION = '1.005';
 # ABSTRACT: DEPRECATED - v0 API group for API Registration resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';

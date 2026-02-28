@@ -1,5 +1,5 @@
 package Kubernetes::REST::Call::GetExtensionsAPIGroup;
-our $VERSION = '1.004';
+our $VERSION = '1.005';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;
