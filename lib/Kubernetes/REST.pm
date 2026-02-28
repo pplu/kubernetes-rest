@@ -367,10 +367,13 @@ sub _build_path {
         $resource = $class->resource_plural;
     } else {
         $resource = lc($kind);
-        $resource .= 's' unless $resource =~ /s$/;
-        # Handle special plurals
-        $resource =~ s/ys$/ies/;  # Policy -> policies
-        $resource =~ s/sss$/ses/; # Status -> statuses
+        if ($resource =~ /(?:ss|sh|ch|x|z)$/) {
+            $resource .= 'es';        # class -> classes, ingress -> ingresses
+        } elsif ($resource =~ /[^aeiou]y$/) {
+            $resource =~ s/y$/ies/;   # policy -> policies
+        } elsif ($resource !~ /s$/) {
+            $resource .= 's';         # pod -> pods
+        }
     }
 
     # Build path based on API group

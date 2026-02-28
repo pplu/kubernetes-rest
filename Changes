@@ -1,6 +1,10 @@
 Revision history for Kubernetes-REST
 
 {{$NEXT}}
+ - Fix resource name pluralization in _build_path: correctly handle words ending
+   in ss/sh/ch/x/z (e.g. Ingress -> ingresses, NetworkPolicy -> networkpolicies),
+   consonant+y (e.g. Policy -> policies), and avoid double-s for words already
+   ending in s.
 
 1.003     2026-02-28 01:05:55Z
  - Kubernetes::REST::Kubeconfig: add in-cluster service account auto-detection.
