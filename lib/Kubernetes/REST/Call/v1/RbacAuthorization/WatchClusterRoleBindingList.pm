@@ -1,5 +1,5 @@
 package Kubernetes::REST::Call::v1::RbacAuthorization::WatchClusterRoleBindingList;
-our $VERSION = '1.003';
+our $VERSION = '1.004';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;
