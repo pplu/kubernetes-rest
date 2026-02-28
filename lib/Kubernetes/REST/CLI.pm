@@ -190,7 +190,7 @@ Default execute method. Prints usage information.
 1;
 
 package Kubernetes::REST::CLI::Cmd::Get;
-our $VERSION = '1.001';
+our $VERSION = '1.003';
 use Moo;
 use MooX::Cmd;
 
@@ -219,7 +219,7 @@ sub execute {
 1;
 
 package Kubernetes::REST::CLI::Cmd::Create;
-our $VERSION = '1.001';
+our $VERSION = '1.003';
 use Moo;
 use MooX::Options;
 use MooX::Cmd;
@@ -256,7 +256,7 @@ sub execute {
 1;
 
 package Kubernetes::REST::CLI::Cmd::Delete;
-our $VERSION = '1.001';
+our $VERSION = '1.003';
 use Moo;
 use MooX::Cmd;
 
@@ -279,7 +279,7 @@ sub execute {
 1;
 
 package Kubernetes::REST::CLI::Cmd::Raw;
-our $VERSION = '1.001';
+our $VERSION = '1.003';
 use Moo;
 use MooX::Cmd;
 

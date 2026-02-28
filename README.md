@@ -73,7 +73,22 @@ my $api = Kubernetes::REST::Kubeconfig->new(
 )->api;
 ```
 
-Supports token auth, client certificates (file and inline base64), exec credential plugins, and in-memory PEM for inline certificate data.
+Supports token auth, client certificates (file and inline base64), exec credential plugins, in-memory PEM for inline certificate data, and in-cluster service account auto-detection.
+
+## In-Cluster (Inside Kubernetes Pods)
+
+When running inside a Kubernetes pod, no configuration is needed. `Kubernetes::REST::Kubeconfig` automatically detects the pod's mounted service account token:
+
+```perl
+use Kubernetes::REST::Kubeconfig;
+
+# Works inside a pod - no kubeconfig needed
+my $api = Kubernetes::REST::Kubeconfig->new->api;
+
+my $pods = $api->list('Pod', namespace => 'default');
+```
+
+If no kubeconfig file is found and the service account token is present at `/var/run/secrets/kubernetes.io/serviceaccount/token`, the client configures itself automatically using the token and the cluster CA certificate.
 
 ## HTTP Debugging
 
@@ -183,7 +198,7 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 ## Features
 
 - **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `delete()`, `watch()`
-- **Kubeconfig support**: Token auth, client certs, exec credential plugins
+- **Kubeconfig support**: Token auth, client certs, exec credential plugins, in-cluster service account auto-detection
 - **Pluggable HTTP backend**: LWP::UserAgent (default), HTTP::Tiny, or custom
 - **HTTP debugging**: LWP::ConsoleLogger support out of the box
 - **Patch support**: Strategic merge patch, JSON merge patch (RFC 7396), JSON patch (RFC 6902)

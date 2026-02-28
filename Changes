@@ -1,6 +1,11 @@
 Revision history for Kubernetes-REST
 
 {{$NEXT}}
+ - Kubernetes::REST::Kubeconfig: add in-cluster service account auto-detection.
+   When no kubeconfig file is found, automatically falls back to using the
+   mounted service account token at
+   /var/run/secrets/kubernetes.io/serviceaccount/token. This enables seamless
+   use inside Kubernetes pods without needing a kubeconfig file.
 
 1.002     2026-02-23 02:41:32Z
  - Fix client-certificate (mTLS) auth: skip empty Authorization header when

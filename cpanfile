@@ -12,6 +12,7 @@ requires 'YAML::XS';
 requires 'Path::Tiny';
 requires 'Module::Runtime';
 requires 'namespace::clean';
+requires 'Throwable';
 
 on test => sub {
   requires 'Test::More';
