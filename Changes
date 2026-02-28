@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.003     2026-02-28 01:05:55Z
  - Kubernetes::REST::Kubeconfig: add in-cluster service account auto-detection.
    When no kubeconfig file is found, automatically falls back to using the
    mounted service account token at
