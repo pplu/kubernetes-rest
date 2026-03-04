@@ -1,5 +1,5 @@
 package Kubernetes::REST::Apps;
-our $VERSION = '1.005';
+our $VERSION = '1.101';
 # ABSTRACT: DEPRECATED - v0 API group for Apps resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';

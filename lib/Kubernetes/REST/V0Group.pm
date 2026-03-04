@@ -1,5 +1,5 @@
 package Kubernetes::REST::V0Group;
-our $VERSION = '1.005';
+our $VERSION = '1.101';
 # ABSTRACT: Base class for backwards-compatible v0 API group wrappers
 use Moo;
 use Carp qw(croak carp);

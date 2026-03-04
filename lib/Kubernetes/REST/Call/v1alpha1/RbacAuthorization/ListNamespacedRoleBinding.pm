@@ -1,5 +1,5 @@
 package Kubernetes::REST::Call::v1alpha1::RbacAuthorization::ListNamespacedRoleBinding;
-our $VERSION = '1.005';
+our $VERSION = '1.101';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;
