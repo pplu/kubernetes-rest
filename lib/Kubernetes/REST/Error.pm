@@ -1,5 +1,5 @@
 package Kubernetes::REST::Error;
-our $VERSION = '1.101';
+our $VERSION = '1.102';
 # ABSTRACT: DEPRECATED - v0 error classes
   use Moo;
   use Types::Standard qw/Str/;

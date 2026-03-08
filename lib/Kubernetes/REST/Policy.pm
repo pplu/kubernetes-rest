@@ -1,5 +1,5 @@
 package Kubernetes::REST::Policy;
-our $VERSION = '1.101';
+our $VERSION = '1.102';
 # ABSTRACT: DEPRECATED - v0 API group for Policy resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';
