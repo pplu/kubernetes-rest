@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.101     2026-03-08 23:49:18Z
  - Raise minimum required IO::K8s version to 1.008.
    Needed for CRD YAML serialization correctness with JSON booleans in
    passthrough/hash fields (fix in IO::K8s 1.008).
