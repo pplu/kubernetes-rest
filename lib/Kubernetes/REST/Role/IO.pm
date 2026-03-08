@@ -21,6 +21,12 @@ use Moo::Role;
         ...
     }
 
+    # Optional: full-duplex transport (WebSocket/SPDY)
+    sub call_duplex {
+        my ($self, $req, %callbacks) = @_;
+        ...
+    }
+
 =head1 DESCRIPTION
 
 This role defines the interface that HTTP backends must implement. L<Kubernetes::REST> delegates all HTTP communication through this interface, making it possible to swap out the transport layer.
@@ -50,6 +56,24 @@ requires 'call_streaming';
 Required. Execute an HTTP request with streaming response. The C<$data_callback> is called with each chunk of data as it arrives: C<< $data_callback->($chunk) >>.
 
 Must return a L<Kubernetes::REST::HTTPResponse> when the stream ends.
+
+=cut
+
+sub supports_duplex {
+    my ($self) = @_;
+    return $self->can('call_duplex') ? 1 : 0;
+}
+
+=method supports_duplex
+
+    if ($io->supports_duplex) {
+        ...
+    }
+
+Optional capability probe for full-duplex protocols used by Kubernetes
+subresources such as pod port-forward and exec/attach streams.
+
+Returns true if the backend implements C<call_duplex>, false otherwise.
 
 =cut
 

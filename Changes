@@ -1,6 +1,13 @@
 Revision history for Kubernetes-REST
 
 {{$NEXT}}
+ - Pod Port-Forward API: new port_forward() method in active v1 API.
+   Builds /portforward requests, supports multiple ports, and passes duplex
+   callbacks (on_open/on_frame/on_close/on_error) to IO backends.
+ - _prepare_request now supports array query parameters (repeated key=value)
+   and explicit header overrides/additions.
+ - Kubernetes::REST::Role::IO adds supports_duplex() capability probe and
+   documents optional call_duplex() transport hook.
 
 1.100     2026-03-04 16:41:39Z
  - Pod Log API: new log() method for retrieving and streaming pod logs.
