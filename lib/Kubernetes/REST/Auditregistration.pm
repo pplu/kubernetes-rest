@@ -1,5 +1,5 @@
 package Kubernetes::REST::Auditregistration;
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 # ABSTRACT: DEPRECATED - v0 compatibility stub
 use strict;
 use warnings;

@@ -1,5 +1,5 @@
 package Kubernetes::REST::Call::v1beta1::Extensions::GetAPIResources;
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;

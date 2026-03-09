@@ -1,5 +1,5 @@
 package Kubernetes::REST::Scheduling;
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 # ABSTRACT: DEPRECATED - v0 API group for Scheduling resources
 use Moo;
 extends 'Kubernetes::REST::V0Group';
