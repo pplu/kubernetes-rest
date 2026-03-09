@@ -551,7 +551,7 @@ sub _process_log_chunk {
 # These methods expose the internal request/response pipeline as a stable API
 # for async wrappers (e.g. Net::Async::Kubernetes) that need to build requests,
 # process responses, and handle streaming without going through the sync
-# convenience methods (list, get, watch, log, port_forward, etc.).
+# convenience methods (list, get, watch, log, port_forward, exec, etc.).
 # ============================================================================
 
 sub build_path {
@@ -1176,6 +1176,100 @@ session/handle object managed by that backend).
     );
 }
 
+sub exec {
+    my ($self, $short_class, @rest) = @_;
+
+=method exec
+
+    my $session = $api->exec('Pod', 'my-pod',
+        namespace => 'default',
+        command   => ['sh', '-c', 'echo hello'],
+        stdin     => 0,
+        stdout    => 1,
+        stderr    => 1,
+        tty       => 0,
+        on_frame  => sub { my ($channel, $payload) = @_; ... },
+    );
+
+Start a full-duplex pod exec session via the C</exec> subresource.
+
+This method requires an IO backend that implements C<call_duplex>. The default
+L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> backends do not
+currently provide duplex transport.
+
+Returns whatever the IO backend returns for C<call_duplex> (typically a
+session/handle object managed by that backend).
+
+=cut
+
+    my %args;
+    if (@rest >= 1 && !ref($rest[0]) && $rest[0] !~ /^(name|namespace|command|container|stdin|stdout|stderr|tty|subprotocol|on_open|on_frame|on_close|on_error)$/) {
+        $args{name} = shift @rest;
+        %args = (%args, @rest);
+    } elsif (@rest % 2 == 0) {
+        %args = @rest;
+    } else {
+        croak "Invalid arguments to exec()";
+    }
+
+    croak "name required for exec" unless $args{name};
+
+    my $command = delete $args{command};
+    croak "command required for exec" unless defined $command;
+    $command = [$command] unless ref($command) eq 'ARRAY';
+    croak "command required for exec" unless @$command;
+    for my $part (@$command) {
+        croak "invalid command element for exec"
+            unless defined($part) && !ref($part) && length $part;
+    }
+
+    my $container = delete $args{container};
+    my $stdin  = delete($args{stdin})  ? 1 : 0;
+    my $stdout = exists($args{stdout}) ? (delete($args{stdout}) ? 1 : 0) : 1;
+    my $stderr = exists($args{stderr}) ? (delete($args{stderr}) ? 1 : 0) : 1;
+    my $tty    = delete($args{tty})    ? 1 : 0;
+
+    my $subprotocol = delete $args{subprotocol} // 'v4.channel.k8s.io';
+    my $on_open  = delete $args{on_open};
+    my $on_frame = delete $args{on_frame};
+    my $on_close = delete $args{on_close};
+    my $on_error = delete $args{on_error};
+
+    my $class = $self->expand_class($short_class);
+    my $path = $self->_build_path($class, %args) . '/exec';
+
+    my %params = (
+        command => $command,
+        stdin   => $stdin  ? 'true' : 'false',
+        stdout  => $stdout ? 'true' : 'false',
+        stderr  => $stderr ? 'true' : 'false',
+        tty     => $tty    ? 'true' : 'false',
+    );
+    $params{container} = $container if defined $container;
+
+    my $req = $self->_prepare_request('GET', $path,
+        parameters => \%params,
+        headers    => {
+            Accept                   => '*/*',
+            Connection               => 'Upgrade',
+            Upgrade                  => 'websocket',
+            'Sec-WebSocket-Protocol' => $subprotocol,
+        },
+    );
+
+    my $io = $self->io;
+    unless ($io->can('call_duplex')) {
+        croak "IO backend does not support exec(): missing call_duplex()";
+    }
+
+    return $io->call_duplex($req,
+        on_open  => $on_open,
+        on_frame => $on_frame,
+        on_close => $on_close,
+        on_error => $on_error,
+    );
+}
+
 1;
 
 __END__
@@ -1257,7 +1351,7 @@ This version has been completely rewritten. Key changes that may affect your cod
 
 The old method-per-operation API (e.g., C<< $api->Core->ListNamespacedPod(...) >>)
 has been replaced with a simple API: C<list>, C<get>, C<create>, C<update>,
-C<patch>, C<delete>, C<watch>, C<log>, C<port_forward>.
+C<patch>, C<delete>, C<watch>, C<log>, C<port_forward>, C<exec>.
 
 =item * B<Old API still works but deprecated>
 
@@ -1627,6 +1721,47 @@ B<Optional arguments:>
 =over 4
 
 =item namespace - Namespace (for namespaced resources)
+
+=item subprotocol - WebSocket subprotocol (default: C<v4.channel.k8s.io>)
+
+=item on_open, on_frame, on_close, on_error - Duplex transport callbacks passed to IO backend
+
+=back
+
+Requires an IO backend implementing C<call_duplex>. The default sync backends
+currently do not provide duplex transport.
+
+=head2 exec($class, $name, %args)
+
+Start a Kubernetes pod exec session via the C</exec> subresource.
+
+    my $session = $api->exec('Pod', 'my-pod',
+        namespace => 'default',
+        command   => ['sh', '-c', 'echo hello'],
+        on_frame  => sub { my ($channel, $payload) = @_; ... },
+        on_close  => sub { ... },
+        on_error  => sub { my ($err) = @_; ... },
+    );
+
+B<Required arguments:>
+
+=over 4
+
+=item name - Pod name
+
+=item command - Command as arrayref or scalar (e.g. C<['sh', '-c', 'id']>)
+
+=back
+
+B<Optional arguments:>
+
+=over 4
+
+=item namespace - Namespace (for namespaced resources)
+
+=item container - Container name (for multi-container pods)
+
+=item stdin, stdout, stderr, tty - Stream toggles (defaults: stdin=false, stdout=true, stderr=true, tty=false)
 
 =item subprotocol - WebSocket subprotocol (default: C<v4.channel.k8s.io>)
 

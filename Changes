@@ -1,6 +1,10 @@
 Revision history for Kubernetes-REST
 
 {{$NEXT}}
+ - Pod Exec API: new `exec()` method in active v1 API.
+   Builds `/exec` requests, supports repeated `command=` parameters and stream
+   toggles (stdin/stdout/stderr/tty), and passes duplex callbacks
+   (on_open/on_frame/on_close/on_error) to IO backends.
 
 1.101     2026-03-08 23:49:18Z
  - Raise minimum required IO::K8s version to 1.008.

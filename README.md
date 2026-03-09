@@ -82,6 +82,16 @@ my $session = $api->port_forward('Pod', 'my-pod',
         ...
     },
 );
+
+# Exec session (requires duplex-capable IO backend)
+my $exec = $api->exec('Pod', 'my-pod',
+    namespace => 'default',
+    command   => ['sh', '-c', 'id'],
+    on_frame  => sub {
+        my ($channel, $payload) = @_;
+        ...
+    },
+);
 ```
 
 ## Using kubeconfig
@@ -252,7 +262,7 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 
 ## Features
 
-- **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `delete()`, `watch()`, `log()`, `port_forward()`
+- **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `delete()`, `watch()`, `log()`, `port_forward()`, `exec()`
 - **Kubeconfig support**: Token auth, client certs, exec credential plugins, in-cluster service account auto-detection
 - **Pluggable HTTP backend**: LWP::UserAgent (default), HTTP::Tiny, or custom
 - **HTTP debugging**: LWP::ConsoleLogger support out of the box
@@ -260,6 +270,7 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 - **Watch API**: Stream resource changes with resumable watches via resourceVersion tracking
 - **Pod Log API**: Retrieve or stream pod logs with `log()`, supports follow, tailLines, container selection, and more
 - **Pod Port-Forward API**: `port_forward()` request/session API for duplex-capable backends
+- **Pod Exec API**: `exec()` request/session API for duplex-capable backends
 - **Automatic URL building**: Uses IO::K8s class metadata to construct proper API endpoints
 - **CRD support**: Use custom resource classes with the standard API
 - **Short class names**: Use `'Pod'` instead of `'IO::K8s::Api::Core::V1::Pod'`
