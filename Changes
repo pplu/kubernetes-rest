@@ -1,6 +1,9 @@
 Revision history for Kubernetes-REST
 
 {{$NEXT}}
+ - Add Claude Code skills (.claude/skills/) for kubernetes-rest API reference,
+   @Author::GETTY bundle, and dist.ini analysis
+ - Add .gitignore rules for .claude/ directory (track skills, ignore session data)
 
 1.102     2026-03-09 08:36:25Z
  - Pod Exec API: new `exec()` method in active v1 API.
