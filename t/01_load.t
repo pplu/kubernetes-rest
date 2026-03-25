@@ -18,6 +18,10 @@ use_ok('Kubernetes::REST::HTTPRequest');
 use_ok('Kubernetes::REST::Role::IO');
 use_ok('Kubernetes::REST::WatchEvent');
 use_ok('Kubernetes::REST::LogEvent');
-use_ok('Kubernetes::REST::CLI::Watch');
+SKIP: {
+    skip 'MooX::Options not available', 1
+        unless eval { require MooX::Options; 1 };
+    use_ok('Kubernetes::REST::CLI::Watch');
+}
 
 done_testing;
