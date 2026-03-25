@@ -1379,7 +1379,7 @@ Kubernetes::REST - A Perl REST Client for the Kubernetes API
 
     # List all namespaces
     my $namespaces = $api->list('Namespace');
-    for my $ns ($namespaces->items->@*) {
+    for my $ns (@{ $namespaces->items }) {
         say $ns->metadata->name;
     }
 
