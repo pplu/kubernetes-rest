@@ -1,5 +1,5 @@
 package Kubernetes::REST::Version;
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 # ABSTRACT: DEPRECATED - v0 compatibility stub
 use strict;
 use warnings;

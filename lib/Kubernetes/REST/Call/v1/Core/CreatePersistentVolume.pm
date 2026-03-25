@@ -1,5 +1,5 @@
 package Kubernetes::REST::Call::v1::Core::CreatePersistentVolume;
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 # ABSTRACT: Deprecated - use the new Kubernetes::REST API instead
 use strict;
 use warnings;
