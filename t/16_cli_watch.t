@@ -6,11 +6,6 @@ use Test::Exception;
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/lib";
 
-BEGIN {
-    eval { require MooX::Options; 1 }
-        or plan skip_all => 'MooX::Options not available';
-}
-
 use Kubernetes::REST::CLI::Watch;
 use Kubernetes::REST::WatchEvent;
 

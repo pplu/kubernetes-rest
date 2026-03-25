@@ -6,8 +6,6 @@ Revision history for Kubernetes-REST
  - Add .gitignore rules for .claude/ directory (track skills, ignore session data)
  - Fix CPAN testers: replace ->@* postfix dereference with @{ } in t/08_crd.t
    and t/09_crd_autogen.t for Perl < 5.24 compatibility
- - Fix CPAN testers: skip CLI::Watch tests gracefully when MooX::Options
-   dependency chain is broken (e.g. Unicode::LineBreak on FreeBSD)
 
 1.102     2026-03-09 08:36:25Z
  - Pod Exec API: new `exec()` method in active v1 API.
