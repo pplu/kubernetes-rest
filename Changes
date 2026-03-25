@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.103     2026-03-25 20:09:12Z
  - Add Claude Code skills (.claude/skills/) for kubernetes-rest API reference,
    @Author::GETTY bundle, and dist.ini analysis
  - Add .gitignore rules for .claude/ directory (track skills, ignore session data)
