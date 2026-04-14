@@ -1,5 +1,5 @@
 ---
-name: kubernetes-rest
+name: perl-kubernetes-rest
 description: "Kubernetes::REST — How to talk to the Kubernetes API from Perl"
 user-invocable: false
 allowed-tools: Read, Grep, Glob
