@@ -1,5 +1,7 @@
 Revision history for Kubernetes-REST
 
+{{$NEXT}}
+
 1.104     2026-04-14 16:41:31Z
  - Add ensure(), ensure_all(), ensure_only() for idempotent create-or-update.
    Handles 404/409 race conditions and server-side immutability for
