@@ -48,6 +48,26 @@ my $patched = $api->patch('Pod', 'my-pod',
 # Delete a pod
 $api->delete($pod);
 
+# Idempotent create-or-update (works on a typed object or a manifest hashref)
+$api->ensure($pod);
+$api->ensure({
+    apiVersion => 'v1',
+    kind       => 'Secret',
+    metadata   => { name => 'my-secret', namespace => 'default' },
+    stringData => { password => 'hunter2' },
+});
+
+# Batch apply
+$api->ensure_all(@objects);
+
+# Apply a labeled set and prune anything with that label not in the set
+$api->ensure_only(
+    label      => 'app.kubernetes.io/component=queen',
+    objects    => \@rbac_objects,
+    kinds      => [qw(Role RoleBinding ClusterRoleBinding)],
+    namespaces => ['default', undef],
+);
+
 # Watch for changes
 my $rv = $api->watch('Pod',
     namespace => 'default',
@@ -276,7 +296,8 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 
 ## Features
 
-- **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `delete()`, `watch()`, `log()`, `port_forward()`, `exec()`, `attach()`
+- **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `delete()`, `ensure()`, `ensure_all()`, `ensure_only()`, `watch()`, `log()`, `port_forward()`, `exec()`, `attach()`
+- **Idempotent apply**: `ensure()` / `ensure_all()` / `ensure_only()` for declarative create-or-update with 404/409 race-condition handling; accepts typed objects or manifest hashrefs
 - **Kubeconfig support**: Token auth, client certs, exec credential plugins, in-cluster service account auto-detection
 - **Pluggable HTTP backend**: LWP::UserAgent (default), HTTP::Tiny, or custom
 - **HTTP debugging**: LWP::ConsoleLogger support out of the box
