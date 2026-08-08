@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.106     2026-08-08 19:03:58Z
 
  - Fix "HTTP::Message content must be bytes" on any request body containing
    a non-ASCII character. The internal JSON encoder now uses utf8 => 1 (plus
