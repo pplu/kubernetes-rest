@@ -1,5 +1,7 @@
 Revision history for Kubernetes-REST
 
+{{$NEXT}}
+
 1.105     2026-08-08 02:34:04Z
 
  - Remove the old v0 API's per-endpoint Call::* classes (1002) and 10
