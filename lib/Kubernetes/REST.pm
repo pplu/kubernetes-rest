@@ -1,5 +1,5 @@
 package Kubernetes::REST;
-our $VERSION = '1.106';
+our $VERSION = '1.107';
 # ABSTRACT: A Perl REST Client for the Kubernetes API
 use Moo;
 use Carp qw(croak carp);
@@ -333,30 +333,38 @@ sub _load_resource_map_from_cluster {
 }
 
 # V0 API compatibility - returns group wrapper objects
+#
+# Called as a plain function, not a method: each accessor below shares its name
+# with the group module it wraps, so once this package is loaded Perl resolves
+# a bareword like Kubernetes::REST::Core->new(...) against the sub instead of
+# the class and calls it as Kubernetes::REST::Core()->new(...) - with no
+# invocant. Returning the class name in that case puts the ->new(...) back on
+# the class the caller was aiming at.
 sub _v0_group {
-    my ($self, $group) = @_;
+    my ($group, $self) = @_;
     my $class = "Kubernetes::REST::$group";
     require_module($class);
+    return $class unless defined $self;
     return $class->new(api => $self);
 }
 
-sub Core { shift->_v0_group('Core') }
-sub Apps { shift->_v0_group('Apps') }
-sub Batch { shift->_v0_group('Batch') }
-sub Networking { shift->_v0_group('Networking') }
-sub Storage { shift->_v0_group('Storage') }
-sub Policy { shift->_v0_group('Policy') }
-sub Autoscaling { shift->_v0_group('Autoscaling') }
-sub RbacAuthorization { shift->_v0_group('RbacAuthorization') }
-sub Certificates { shift->_v0_group('Certificates') }
-sub Coordination { shift->_v0_group('Coordination') }
-sub Events { shift->_v0_group('Events') }
-sub Scheduling { shift->_v0_group('Scheduling') }
-sub Authentication { shift->_v0_group('Authentication') }
-sub Authorization { shift->_v0_group('Authorization') }
-sub Admissionregistration { shift->_v0_group('Admissionregistration') }
-sub Apiextensions { shift->_v0_group('Apiextensions') }
-sub Apiregistration { shift->_v0_group('Apiregistration') }
+sub Core { _v0_group('Core', @_) }
+sub Apps { _v0_group('Apps', @_) }
+sub Batch { _v0_group('Batch', @_) }
+sub Networking { _v0_group('Networking', @_) }
+sub Storage { _v0_group('Storage', @_) }
+sub Policy { _v0_group('Policy', @_) }
+sub Autoscaling { _v0_group('Autoscaling', @_) }
+sub RbacAuthorization { _v0_group('RbacAuthorization', @_) }
+sub Certificates { _v0_group('Certificates', @_) }
+sub Coordination { _v0_group('Coordination', @_) }
+sub Events { _v0_group('Events', @_) }
+sub Scheduling { _v0_group('Scheduling', @_) }
+sub Authentication { _v0_group('Authentication', @_) }
+sub Authorization { _v0_group('Authorization', @_) }
+sub Admissionregistration { _v0_group('Admissionregistration', @_) }
+sub Apiextensions { _v0_group('Apiextensions', @_) }
+sub Apiregistration { _v0_group('Apiregistration', @_) }
 
 # Build URL path from class metadata
 sub _build_path {

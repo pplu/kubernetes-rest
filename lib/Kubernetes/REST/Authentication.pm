@@ -1,13 +1,11 @@
 package Kubernetes::REST::Authentication;
-our $VERSION = '1.106';
-# ABSTRACT: DEPRECATED - v0 API group for Authentication resources
+our $VERSION = '1.107';
+# ABSTRACT: Compatibility helper for deprecated v0 Authentication calls
 use Moo;
 extends 'Kubernetes::REST::V0Group';
 has '+group' => (default => sub { 'Authentication' });
 
 =head1 SYNOPSIS
-
-    # DEPRECATED API - use the new v1 API instead
 
     # Old way (deprecated):
     my $result = $api->Authentication->CreateTokenReview(body => $tokenreview);
@@ -17,7 +15,7 @@ has '+group' => (default => sub { 'Authentication' });
 
 =head1 DESCRIPTION
 
-B<This module is DEPRECATED>. It provides backwards compatibility for the v0 API (Kubernetes::REST 0.01/0.02 by JLMARTIN) which used method names like C<< $api->Authentication->CreateTokenReview(...) >>.
+This module keeps the deprecated v0 API usable. Kubernetes::REST 0.01/0.02 (by JLMARTIN) used method names like C<< $api->Authentication->CreateTokenReview(...) >>; calls like that still reach the cluster from here, translated onto the v1 API.
 
 The new v1 API uses simple methods directly on the main L<Kubernetes::REST> object:
 

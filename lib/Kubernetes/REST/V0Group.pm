@@ -1,5 +1,5 @@
 package Kubernetes::REST::V0Group;
-our $VERSION = '1.106';
+our $VERSION = '1.107';
 # ABSTRACT: Base class for backwards-compatible v0 API group wrappers
 use Moo;
 use Carp qw(croak carp);
@@ -28,8 +28,9 @@ has version => (is => 'ro', default => sub { 'v1' });
 #   Actions: List, Read, Create, Replace, Patch, Delete, Watch
 #   Example: ListNamespacedPod → list('IO::K8s::Api::Core::V1::Pod', ...)
 #
-# The old Call classes are now deprecation stubs (warn + return 1).
-# This entire layer can be removed once no downstream code uses the old API.
+# The old Call classes no longer ship here at all - their names are tombstoned
+# in Kubernetes-REST-Deprecated. This layer is the only thing left keeping the
+# v0 method names alive, and can go once no downstream code uses them.
 # ============================================================================
 
 our $AUTOLOAD;

@@ -1,5 +1,24 @@
 Revision history for Kubernetes-REST
 
+{{$NEXT}}
+
+ - Fix Kubernetes::REST::Core->new(...) -- and its 16 sibling v0 group
+   classes -- dying with 'Can't call method "_v0_group" on an undefined
+   value'. Each v0 group accessor in Kubernetes::REST shares its name with
+   the class it wraps, so once Kubernetes::REST is loaded Perl resolves the
+   bareword against the sub and calls it as Kubernetes::REST::Core()->new(),
+   without an invocant. The accessors now hand back the class name in that
+   case, putting the ->new(...) back on the class the caller was aiming at.
+   Reaching a group through $api->Core is unaffected and behaves as before.
+ - Reword the v0 compatibility modules so their ABSTRACT says what they do
+   instead of shouting their status. Kubernetes::REST::Core and its 16
+   siblings now read "Compatibility helper for deprecated v0 Core calls"
+   rather than "DEPRECATED - v0 API group for Core resources", and the same
+   goes for Kubernetes::REST::Error and ::RemoteError. These modules are
+   working translation layers onto the v1 API, not dead weight -- the ones
+   that really were dead left in 1.105. Behaviour is unchanged: every v0
+   call still warns unless HIDE_KUBERNETES_REST_V0_API_WARNING is set.
+
 1.106     2026-08-08 19:03:58Z
 
  - Fix "HTTP::Message content must be bytes" on any request body containing

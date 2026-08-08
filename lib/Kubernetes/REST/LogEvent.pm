@@ -1,5 +1,5 @@
 package Kubernetes::REST::LogEvent;
-our $VERSION = '1.106';
+our $VERSION = '1.107';
 # ABSTRACT: A single log line from the Kubernetes Pod Log API
 use Moo;
 use Types::Standard qw(Str);

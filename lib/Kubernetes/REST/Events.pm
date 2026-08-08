@@ -1,13 +1,11 @@
 package Kubernetes::REST::Events;
-our $VERSION = '1.106';
-# ABSTRACT: DEPRECATED - v0 API group for Events resources
+our $VERSION = '1.107';
+# ABSTRACT: Compatibility helper for deprecated v0 Events calls
 use Moo;
 extends 'Kubernetes::REST::V0Group';
 has '+group' => (default => sub { 'Events' });
 
 =head1 SYNOPSIS
-
-    # DEPRECATED API - use the new v1 API instead
 
     # Old way (deprecated):
     my $events = $api->Events->ListNamespacedEvent(namespace => 'default');
@@ -17,7 +15,7 @@ has '+group' => (default => sub { 'Events' });
 
 =head1 DESCRIPTION
 
-B<This module is DEPRECATED>. It provides backwards compatibility for the v0 API (Kubernetes::REST 0.01/0.02 by JLMARTIN) which used method names like C<< $api->Events->ListNamespacedEvent(...) >>.
+This module keeps the deprecated v0 API usable. Kubernetes::REST 0.01/0.02 (by JLMARTIN) used method names like C<< $api->Events->ListNamespacedEvent(...) >>; calls like that still reach the cluster from here, translated onto the v1 API.
 
 The new v1 API uses simple methods directly on the main L<Kubernetes::REST> object:
 

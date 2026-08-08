@@ -7,7 +7,7 @@ use warnings;
 
 use Kubernetes::REST::CLI;
 
-our $VERSION = '1.106';
+our $VERSION = '1.107';
 
 Kubernetes::REST::CLI->new_with_cmd;
 

@@ -1,6 +1,6 @@
 package Kubernetes::REST::Error;
-our $VERSION = '1.106';
-# ABSTRACT: DEPRECATED - v0 error classes
+our $VERSION = '1.107';
+# ABSTRACT: Compatibility helper for deprecated v0 error handling
   use Moo;
   use Types::Standard qw/Str/;
   extends 'Throwable::Error';
@@ -49,7 +49,7 @@ Returns the full error message as a string, including detail if available.
 
 =head1 DESCRIPTION
 
-B<These error classes are DEPRECATED>. The new v1 API uses C<croak> for errors instead of throwing structured exceptions.
+These error classes belong to the deprecated v0 API - the v1 API croaks instead of throwing structured exceptions. They stay around so code that still catches them keeps working.
 
 See L<Kubernetes::REST/"UPGRADING FROM 0.02"> for migration guide.
 
