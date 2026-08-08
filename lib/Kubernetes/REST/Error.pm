@@ -47,34 +47,28 @@ Returns the full error message as a string, including detail if available.
 
 =cut
 
-package Kubernetes::REST::RemoteError;
-our $VERSION = '1.003';
-# ABSTRACT: DEPRECATED - v0 remote error class
-  use Moo;
-  use Types::Standard qw/Int/;
-  extends 'Kubernetes::REST::Error';
-
-  has '+type' => (default => sub { 'Remote' });
-  has status => (is => 'ro', isa => Int, required => 1);
-
-=attr status
-
-HTTP status code.
-
-=cut
-
-  around header => sub {
-    my ($orig, $self) = @_;
-    my $orig_message = $self->$orig;
-    sprintf "%s with HTTP status %d", $orig_message, $self->status;
-  };
-
 =head1 DESCRIPTION
 
 B<These error classes are DEPRECATED>. The new v1 API uses C<croak> for errors instead of throwing structured exceptions.
 
 See L<Kubernetes::REST/"UPGRADING FROM 0.02"> for migration guide.
 
+L<Kubernetes::REST::RemoteError> used to live in this file and now has one of
+its own. Loading it from here is not possible - it inherits from this class, so
+this file has to finish first - which means code that throws a C<RemoteError>
+has to C<use Kubernetes::REST::RemoteError> itself. Code that only catches one
+is unaffected.
+
 =cut
 
 1;
+
+=seealso
+
+=over
+
+=item * L<Kubernetes::REST::RemoteError> - Subclass carrying the HTTP status
+
+=back
+
+=cut

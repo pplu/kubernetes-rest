@@ -27,6 +27,8 @@ HTTP client implementation using L<LWP::UserAgent> for making Kubernetes API req
 
 The C<ua> attribute is exposed so that debugging tools like L<LWP::ConsoleLogger> can be attached to inspect HTTP traffic.
 
+Response bodies are returned as bytes, via C<< decoded_content(charset => 'none') >>: C<Content-Encoding> is undone, the charset is left to L<Kubernetes::REST>. See L<Kubernetes::REST::Role::IO/Encoding contract>.
+
 =cut
 
 has ssl_verify_server => (is => 'ro', isa => Bool, default => 1);
@@ -113,10 +115,7 @@ Execute an HTTP request. Receives a fully prepared L<Kubernetes::REST::HTTPReque
 
     my $res = $self->ua->request($http_req);
 
-    return Kubernetes::REST::HTTPResponse->new(
-       status => $res->code,
-       (length $res->decoded_content) ? ( content => $res->decoded_content ) : (),
-    );
+    return $self->_response($res);
   }
 
 sub call_streaming {
@@ -143,11 +142,23 @@ Used internally by L<Kubernetes::REST/watch> for the Watch API.
       $data_callback->($chunk);
     });
 
+    return $self->_response($res);
+  }
+
+# charset => 'none' undoes Content-Encoding (gzip et al) but leaves the charset
+# alone, so the body stays bytes - which is what Kubernetes::REST and IO::K8s
+# expect, and what HTTPTinyIO hands back. Plain decoded_content() would decode
+# UTF-8 here and IO::K8s would then decode the characters a second time.
+sub _response {
+    my ($self, $res) = @_;
+
+    my $content = $res->decoded_content(charset => 'none');
+
     return Kubernetes::REST::HTTPResponse->new(
        status => $res->code,
-       (length $res->decoded_content) ? ( content => $res->decoded_content ) : (),
+       (defined $content && length $content) ? ( content => $content ) : (),
     );
-  }
+}
 
 1;
 

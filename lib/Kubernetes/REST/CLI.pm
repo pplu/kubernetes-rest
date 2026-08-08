@@ -106,12 +106,14 @@ option output => (
 
 has json => (
     is => 'ro',
-    default => sub { JSON::MaybeXS->new->pretty->canonical },
+    default => sub { JSON::MaybeXS->new->pretty->canonical->utf8 },
 );
 
 =attr json
 
-L<JSON::MaybeXS> encoder instance for JSON output.
+L<JSON::MaybeXS> encoder instance for JSON output. Encodes with C<utf8>, so
+C<format_output> prints UTF-8 bytes and non-ASCII values survive the way to
+the terminal.
 
 =cut
 
@@ -179,6 +181,14 @@ Default execute method. Prints usage information.
 
 =item * L<Kubernetes::REST> - Main API module
 
+=item * L<Kubernetes::REST::CLI::Cmd::Get> - The get command
+
+=item * L<Kubernetes::REST::CLI::Cmd::Create> - The create command
+
+=item * L<Kubernetes::REST::CLI::Cmd::Delete> - The delete command
+
+=item * L<Kubernetes::REST::CLI::Cmd::Raw> - The raw command
+
 =item * L<Kubernetes::REST::CLI::Watch> - Watch command implementation
 
 =item * L<Kubernetes::REST::CLI::Role::Connection> - Connection options
@@ -186,128 +196,5 @@ Default execute method. Prints usage information.
 =back
 
 =cut
-
-1;
-
-package Kubernetes::REST::CLI::Cmd::Get;
-our $VERSION = '1.003';
-use Moo;
-use MooX::Cmd;
-
-sub execute {
-    my ($self, $args, $chain) = @_;
-    my $root = $chain->[0];
-
-    my ($kind, $name) = @$args;
-
-    unless ($kind) {
-        print STDERR "Usage: kube_client get <Kind> [name]\n";
-        return 1;
-    }
-
-    my $result;
-    if ($name) {
-        $result = $root->api->get($kind, $name, namespace => $root->namespace);
-    } else {
-        $result = $root->api->list($kind, namespace => $root->namespace);
-    }
-
-    $root->format_output($result);
-    return 0;
-}
-
-1;
-
-package Kubernetes::REST::CLI::Cmd::Create;
-our $VERSION = '1.003';
-use Moo;
-use MooX::Options;
-use MooX::Cmd;
-
-option file => (
-    is => 'ro',
-    format => 's',
-    short => 'f',
-    doc => 'File to read (- for stdin)',
-    default => sub { '-' },
-);
-
-sub execute {
-    my ($self, $args, $chain) = @_;
-    my $root = $chain->[0];
-
-    my $input;
-    if ($self->file eq '-') {
-        local $/;
-        $input = <STDIN>;
-    } else {
-        open my $fh, '<', $self->file or die "Cannot open " . $self->file . ": $!";
-        local $/;
-        $input = <$fh>;
-        close $fh;
-    }
-
-    my $obj = $root->api->inflate($input);
-    my $result = $root->api->create($obj);
-    $root->format_output($result);
-    return 0;
-}
-
-1;
-
-package Kubernetes::REST::CLI::Cmd::Delete;
-our $VERSION = '1.003';
-use Moo;
-use MooX::Cmd;
-
-sub execute {
-    my ($self, $args, $chain) = @_;
-    my $root = $chain->[0];
-
-    my ($kind, $name) = @$args;
-
-    unless ($kind && $name) {
-        print STDERR "Usage: kube_client delete <Kind> <name>\n";
-        return 1;
-    }
-
-    my $result = $root->api->delete($kind, $name, namespace => $root->namespace);
-    $root->format_output($result);
-    return 0;
-}
-
-1;
-
-package Kubernetes::REST::CLI::Cmd::Raw;
-our $VERSION = '1.003';
-use Moo;
-use MooX::Cmd;
-
-sub execute {
-    my ($self, $args, $chain) = @_;
-    my $root = $chain->[0];
-
-    my ($group, $method, @rest) = @$args;
-
-    unless ($group && $method) {
-        print STDERR "Usage: kube_client raw <Group> <Method> [key=value ...]\n";
-        print STDERR "Example: kube_client raw CoreV1 ListNamespace\n";
-        return 1;
-    }
-
-    my %params;
-    for my $arg (@rest) {
-        if ($arg =~ /^([^=]+)=(.*)$/) {
-            $params{$1} = $2;
-        } else {
-            print STDERR "Invalid argument: $arg (expected key=value)\n";
-            return 1;
-        }
-    }
-
-    my $result = $root->api->$group->$method(%params);
-    $root->format_output($result);
-    return 0;
-}
 
 1;

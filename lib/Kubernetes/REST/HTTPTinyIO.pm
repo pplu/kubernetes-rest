@@ -22,6 +22,8 @@ with 'Kubernetes::REST::Role::IO';
 
 HTTP client implementation using L<HTTP::Tiny> for making Kubernetes API requests. Lighter alternative to L<Kubernetes::REST::LWPIO>.
 
+Response bodies are returned as bytes - L<HTTP::Tiny> hands back the body unmodified and never decodes a charset. See L<Kubernetes::REST::Role::IO/Encoding contract>.
+
 =cut
 
 has ssl_verify_server => (is => 'ro', isa => Bool, default => 1);

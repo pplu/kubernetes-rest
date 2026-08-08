@@ -1,0 +1,44 @@
+package Kubernetes::REST::RemoteError;
+our $VERSION = '1.106';
+# ABSTRACT: DEPRECATED - v0 remote error class
+  use Moo;
+  use Types::Standard qw/Int/;
+  use Kubernetes::REST::Error;
+  extends 'Kubernetes::REST::Error';
+
+  has '+type' => (default => sub { 'Remote' });
+  has status => (is => 'ro', isa => Int, required => 1);
+
+=attr status
+
+HTTP status code.
+
+=cut
+
+  around header => sub {
+    my ($orig, $self) = @_;
+    my $orig_message = $self->$orig;
+    sprintf "%s with HTTP status %d", $orig_message, $self->status;
+  };
+
+=head1 DESCRIPTION
+
+B<This error class is DEPRECATED>. The new v1 API uses C<croak> for errors instead of throwing structured exceptions.
+
+Thrown for errors reported by the cluster itself, carrying the HTTP status alongside the message of L<Kubernetes::REST::Error>.
+
+See L<Kubernetes::REST/"UPGRADING FROM 0.02"> for migration guide.
+
+=cut
+
+1;
+
+=seealso
+
+=over
+
+=item * L<Kubernetes::REST::Error> - The base error class
+
+=back
+
+=cut
