@@ -184,6 +184,45 @@ The C<+> prefix tells L<IO::K8s> that this is a custom class (not in the IO::K8s
 
 =cut
 
+# Kubernetes groups whose IO::K8s classes do NOT live under IO::K8s::Api::.
+# Their namespace follows the upstream Go staging repository the types are
+# generated from (apiextensions-apiserver, kube-aggregator), not the API group
+# name, so it cannot be derived - it has to be listed here.
+#
+# Keyed on the full group name, because that is the only globally unique
+# identifier: a cluster is free to serve a CRD group called
+# apiextensions.example.com, and that group is an ordinary one.
+my %NON_API_NAMESPACE = (
+    'apiextensions.k8s.io'   => 'ApiextensionsApiserver::Pkg::Apis::Apiextensions',
+    'apiregistration.k8s.io' => 'KubeAggregator::Pkg::Apis::Apiregistration',
+);
+
+# The same table, indexed by the IO::K8s group directory instead - the trailing
+# segment of each namespace above is exactly that directory name. Derived, so
+# there is still only one place to add a group.
+my %NON_API_NAMESPACE_BY_GROUP_PATH =
+    map { ((split /::/)[-1] => $_) } values %NON_API_NAMESPACE;
+
+# Namespace below IO::K8s:: for a Kubernetes API group name as the cluster's
+# OpenAPI spec reports it: '' for core, 'apps', 'apiextensions.k8s.io',
+# 'cert-manager.io', ... The exception table is matched exactly on the full
+# name - a CRD group that merely starts with 'apiextensions' is an ordinary
+# group and must keep landing under Api::.
+sub _io_k8s_namespace_for_group {
+    my ($self, $group) = @_;
+    return $NON_API_NAMESPACE{$group} if exists $NON_API_NAMESPACE{$group};
+    return 'Api::' . ($group eq '' ? 'Core' : ucfirst(lc((split /\./, $group)[0])));
+}
+
+# Namespace below IO::K8s:: for an IO::K8s group directory name - 'Core',
+# 'Apps', 'Apiextensions'. That is the form the v0 compatibility layer carries,
+# and it is a closed set of names this distribution ships, so unlike a group
+# name off the wire it needs no exact-match guard.
+sub _io_k8s_namespace_for_group_path {
+    my ($self, $group_path) = @_;
+    return $NON_API_NAMESPACE_BY_GROUP_PATH{$group_path} // "Api::${group_path}";
+}
+
 # Public method to fetch resource map from cluster's OpenAPI spec
 sub fetch_resource_map {
     my ($self) = @_;
@@ -223,20 +262,8 @@ Called automatically if C<resource_map_from_cluster> is enabled.
             next unless $kind && $version;
 
             my $version_path = ucfirst($version);
-            my $new_path;
-
-            # Extension APIs have different base paths in IO::K8s
-            if ($group eq 'apiextensions.k8s.io') {
-                my $group_path = 'Apiextensions';
-                $new_path = "ApiextensionsApiserver::Pkg::Apis::${group_path}::${version_path}::${kind}";
-            } elsif ($group eq 'apiregistration.k8s.io') {
-                my $group_path = 'Apiregistration';
-                $new_path = "KubeAggregator::Pkg::Apis::${group_path}::${version_path}::${kind}";
-            } else {
-                # Standard API resources use Api:: prefix
-                my $group_path = $group eq '' ? 'Core' : ucfirst(lc((split /\./, $group)[0]));
-                $new_path = "Api::${group_path}::${version_path}::${kind}";
-            }
+            my $new_path = $self->_io_k8s_namespace_for_group($group)
+                . "::${version_path}::${kind}";
 
             # Prefer stable versions
             if (!$map{$kind} || $version !~ /alpha|beta/) {

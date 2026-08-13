@@ -38,6 +38,20 @@ Revision history for Kubernetes-REST
    working translation layers onto the v1 API, not dead weight -- the ones
    that really were dead left in 1.105. Behaviour is unchanged: every v0
    call still warns unless HIDE_KUBERNETES_REST_V0_API_WARNING is set.
+ - Fix the v0 groups Apiextensions and Apiregistration dying with "Can't
+   locate IO/K8s/Api/Apiextensions/V1/CustomResourceDefinition.pm in @INC"
+   instead of reaching the cluster. V0Group named every class
+   IO::K8s::Api::<Group>::<Version>::<Kind>, but those two groups keep their
+   IO::K8s classes in the upstream staging namespaces they are generated
+   from -- ApiextensionsApiserver::Pkg::Apis::Apiextensions:: and
+   KubeAggregator::Pkg::Apis::Apiregistration::. fetch_resource_map already
+   special-cased both; that knowledge is now one table shared by the two
+   callers rather than a copy in each, so they cannot drift apart again.
+   The other 15 v0 groups resolve to exactly the class names they did
+   before, and fetch_resource_map returns exactly the map it did before:
+   the exception is still matched on the full group name, so a custom
+   resource served under a group like apiextensions.example.com keeps
+   mapping to Api::Apiextensions:: the way any other group does.
 
 1.106     2026-08-08 19:03:58Z
 
