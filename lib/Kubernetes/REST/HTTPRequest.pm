@@ -32,7 +32,9 @@ has credentials => (is => 'ro');
 
 =attr credentials
 
-Optional. L<Kubernetes::REST::AuthToken> instance for authentication.
+Optional. Credentials for authentication: a L<Kubernetes::REST::AuthToken>, a
+L<Kubernetes::REST::AuthTokenFile>, or any other object with a C<token()>
+method.
 
 =cut
 

@@ -10,6 +10,7 @@ use MIME::Base64 qw(decode_base64);
 use Kubernetes::REST;
 use Kubernetes::REST::Server;
 use Kubernetes::REST::AuthToken;
+use Kubernetes::REST::AuthTokenFile;
 use namespace::clean;
 
 =head1 SYNOPSIS
@@ -141,6 +142,28 @@ has context_name => (
 =attr context_name
 
 Optional. The context name to use. If not specified, uses the current-context from the kubeconfig.
+
+=cut
+
+has refresh_token_files => (
+    is => 'ro',
+    default => sub { 1 },
+);
+
+=attr refresh_token_files
+
+Whether a token that comes from a file - a user's C<tokenFile>, or the service
+account token of the in-cluster fallback - is re-read when the file changes.
+True by default; see L</TOKEN FILES AND ROTATION>.
+
+Set it to false and such a token is read once, when L</api> builds the client,
+and never again, which is what this module did before it could refresh.
+
+    my $kc = Kubernetes::REST::Kubeconfig->new(refresh_token_files => 0);
+
+It reaches every client this object builds. A caller who wants it per client
+can build a second C<Kubernetes::REST::Kubeconfig> - they are cheap, and the
+kubeconfig is only read when a client is actually built.
 
 =cut
 
@@ -364,7 +387,9 @@ User authentication is resolved in this order: a plain C<token> field; a C<token
 
 That order is C<kubectl>'s. An inline C<token> wins over a C<tokenFile> - client-go's C<getUserIdentificationPartialConfig> reads the file only when there is no inline token - and either of them wins over an C<exec> block, which C<kubectl> skips whenever a request already carries an C<Authorization> header. An C<exec> plugin is therefore not run at all when the user also has a token or a token file.
 
-A C<tokenFile> that cannot be read, or that holds nothing but whitespace, is a fatal error naming the user and the file. It is deliberately not a fall-through to the next mechanism: a kubeconfig saying where its token lives is a statement about how this user authenticates, and quietly carrying on would produce a 401 from the cluster with nothing pointing at the file. Leading and trailing whitespace is stripped - such files almost always end in a newline, and a newline in an C<Authorization> header does not reach the server as intended. The token is read once, when C<api()> builds the client; see L</TOKEN FILES AND ROTATION>.
+A C<tokenFile> that cannot be read, or that holds nothing but whitespace, is a fatal error naming the user and the file. It is deliberately not a fall-through to the next mechanism: a kubeconfig saying where its token lives is a statement about how this user authenticates, and quietly carrying on would produce a 401 from the cluster with nothing pointing at the file. Leading and trailing whitespace is stripped - such files almost always end in a newline, and a newline in an C<Authorization> header does not reach the server as intended.
+
+A C<tokenFile> is handed to L<Kubernetes::REST> as a L<Kubernetes::REST::AuthTokenFile>, which reads the file again when it changes, so a rotated token is picked up without rebuilding the client. The in-cluster service account token works the same way. See L</TOKEN FILES AND ROTATION>, and L</refresh_token_files> to turn it off.
 
 Falls back to in-cluster service account authentication when no kubeconfig
 file is found - none of the merged paths exists, or there is no path at all
@@ -416,10 +441,8 @@ cluster CA is read from C</var/run/secrets/kubernetes.io/serviceaccount/ca.crt>.
     if (my $token = $user->{token}) {
         $credentials = Kubernetes::REST::AuthToken->new(token => $token);
     } elsif (my $token_file = $user->{tokenFile}) {
-        $credentials = Kubernetes::REST::AuthToken->new(
-            token => $self->_read_token_file(
-                $token_file, "tokenFile of user '$ctx->{user}'"
-            ),
+        $credentials = $self->_token_file_credential(
+            $token_file, "tokenFile of user '$ctx->{user}'"
         );
     } elsif (my $exec = $user->{exec}) {
         $credentials = $self->_exec_credential($exec);
@@ -434,22 +457,18 @@ cluster CA is read from C</var/run/secrets/kubernetes.io/serviceaccount/ca.crt>.
     );
 }
 
-# Reads a file holding a bearer token: a user's tokenFile, or the service
-# account token mounted into a pod. Both are written by something else - the
-# kubelet, a login helper - and both are read the same way.
-sub _read_token_file {
+# Credentials for a file holding a bearer token: a user's tokenFile, or the
+# service account token mounted into a pod. Both are written by something else
+# - the kubelet, a login helper - and both are rotated under a running process,
+# so both get credentials that notice.
+sub _token_file_credential {
     my ($self, $file, $what) = @_;
 
-    my $token = eval { path($file)->slurp_raw };
-    croak "Cannot read the $what ($file): $@" unless defined $token;
-
-    # Such a file ends with a newline more often than not, and a newline inside
-    # an Authorization header is not something a server ever sees as intended.
-    $token =~ s/\A\s+//;
-    $token =~ s/\s+\z//;
-    croak "The $what ($file) holds no token" unless length $token;
-
-    return $token;
+    return Kubernetes::REST::AuthTokenFile->new(
+        file => $file,
+        description => $what,
+        refresh => $self->refresh_token_files ? 1 : 0,
+    );
 }
 
 sub _exec_credential {
@@ -483,7 +502,6 @@ sub _in_cluster_api {
 
     my $host = $ENV{KUBERNETES_SERVICE_HOST} // 'kubernetes.default.svc';
     my $port = $ENV{KUBERNETES_SERVICE_PORT} // '443';
-    my $token = $self->_read_token_file($SA_TOKEN, 'service account token');
 
     return Kubernetes::REST->new(
         server => Kubernetes::REST::Server->new(
@@ -491,7 +509,9 @@ sub _in_cluster_api {
             ssl_ca_file       => $SA_CA,
             ssl_verify_server => 1,
         ),
-        credentials => Kubernetes::REST::AuthToken->new(token => $token),
+        credentials => $self->_token_file_credential(
+            $SA_TOKEN, 'service account token'
+        ),
     );
 }
 
@@ -548,24 +568,33 @@ reference in this sense either: it is looked up in C<PATH> and is left alone.
 
 =head1 TOKEN FILES AND ROTATION
 
+Kubernetes rotates the files a token can come from. The kubelet replaces a
+projected service account token well before it expires, and a client that read
+the file once at startup would go on sending a token that has stopped being
+valid while a good one sits in the file next to it.
+
 A token that comes from a file - a user's C<tokenFile>, or the service account
-token of the in-cluster fallback - is read once, while L</api> builds the
-client, and the resulting L<Kubernetes::REST> instance carries that one string
-for as long as it lives.
+token of the in-cluster fallback - is therefore not handed over as a fixed
+string. L</api> builds a L<Kubernetes::REST::AuthTokenFile>, which reads the
+file again whenever it has changed. There is no timer and no interval to
+configure: the trigger is the file itself, and a client picks up a new token on
+the first request after the rotation.
 
-Kubernetes rotates those files. The kubelet rewrites a projected service
-account token well before it expires, and C<kubectl> copes by re-reading the
-file (client-go caches it for a minute at a time, deliberately matched to that
-rotation). A process that builds one client and keeps it for hours does not
-cope: it goes on sending the token it read at startup and starts collecting
-401s once that token expires, while the file next to it holds a valid one.
+What "changed" means, and what it costs, is
+L<Kubernetes::REST::AuthTokenFile/token>: one C<stat> per request, comparing
+inode, size and modification time, so the C<..data> symlink swap the kubelet
+performs is seen as the different file it is. A read that fails after a
+successful one - the file gone for a moment mid-rotation - keeps the last good
+token rather than breaking the client. Only the first read, when the client is
+built, is fatal.
 
-Until this module refreshes on its own, a long-running process has two ways
-out: build a new client from the kubeconfig now and then - C<api()> re-reads
-everything - or hand L<Kubernetes::REST> its own C<credentials> object whose
-C<token()> method reads the file when it is called. C<credentials> accepts any
-object with a C<token()> method, so that is a few lines and needs nothing from
-this class.
+Set L</refresh_token_files> to false to switch this off. The token is then read
+exactly once, when C<api()> builds the client, and never again: no C<stat> per
+request, and the client stops working when that token expires, until something
+builds it anew.
+
+An inline C<token> in the kubeconfig is unaffected either way - there is no
+file to watch, and it is used exactly as it is written.
 
 =seealso
 

@@ -169,10 +169,37 @@ Revision history for Kubernetes-REST
    next mechanism -- that would trade a clear error for a 401 with nothing
    pointing at the file. The in-cluster service account token is read through
    the same code now, so it gets the same treatment instead of losing exactly
-   one trailing newline. Both are read once, when api() builds the client:
-   the new TOKEN FILES AND ROTATION section in Kubernetes::REST::Kubeconfig
-   says what that means for a process that outlives a token rotation, and how
-   to work around it.
+   one trailing newline.
+ - New Kubernetes::REST::AuthTokenFile: credentials whose bearer token lives
+   in a file and are re-read when that file changes. Kubernetes rotates those
+   files -- the kubelet replaces a projected service account token well
+   before it expires -- so a client that read the token once at startup went
+   on sending it and started collecting 401s an hour in, with a valid token
+   sitting in the file next to it. A user's tokenFile and the in-cluster
+   service account token are now handed to Kubernetes::REST as one of these,
+   so a rotated token is picked up on the first request after the rotation
+   without rebuilding anything.
+   The trigger is the file, not a timer: every token() call stats the file
+   and re-reads when device, inode, size or modification time differ from the
+   last read. Inode is what carries it, because the kubelet does not
+   overwrite the token -- it writes a new timestamped directory and renames a
+   new "..data" symlink over the old one, so the path resolves to a different
+   file while the old inode is never touched. That costs one stat per
+   request, which is deliberate and documented. What it cannot see is an
+   in-place rewrite that keeps the inode, the exact size and the
+   modification time; nothing short of reading the file every time would, and
+   nothing Kubernetes does looks like that.
+   A read that fails after a successful one -- the file gone for a moment
+   mid-rotation, or momentarily empty -- keeps the last good token instead of
+   dying, the way client-go does; only the first read, when the client is
+   built, is fatal, exactly as before. Set refresh_token_files => 0 on
+   Kubernetes::REST::Kubeconfig to switch the whole thing off and get one
+   read at build time and no stat per request.
+   Note that $api->credentials is therefore no longer always a
+   Kubernetes::REST::AuthToken for a kubeconfig with a tokenFile or an
+   in-cluster client. It still answers token(), which is all the credentials
+   attribute has ever required of it and all this distribution calls; code
+   testing the class rather than the method is the only thing that notices.
 
 1.106     2026-08-08 19:03:58Z
 
