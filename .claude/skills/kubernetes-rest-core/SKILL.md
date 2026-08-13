@@ -145,6 +145,14 @@ reported the release version. `t/25_one_package_per_file.t` pins both properties
 
 Every `.pm` also needs a `# ABSTRACT:` line; PodWeaver builds NAME from it.
 
+## A new file has to be `git add`ed to exist
+
+`[@Author::GETTY]` gathers through `Git::GatherDir`, and its `include_untracked` defaults
+to false. An untracked file is therefore absent from `dzil build`, from the release test
+gate and from the CPAN tarball — while `prove -lr t/` runs it and passes. Nothing warns:
+the release simply never saw the test. `git add` a new test or module the moment you
+create it.
+
 ## The test harness
 
 `t/lib/Test/Kubernetes/Mock.pm` exports `mock_api`, `live_api`, `is_live`. `mock_api`
@@ -167,9 +175,15 @@ replaced.
 
 ## Kubeconfig and CLI
 
-`Kubernetes::REST::Kubeconfig` parses the YAML, resolves cert data (inline base64 or file
-path) and builds the `api`. Inline certs are written to **temp files whose lifetime is tied
-to the Kubeconfig object** — drop the object and the files vanish under the running client.
+`Kubernetes::REST::Kubeconfig` parses the YAML and resolves cert data (inline base64 or a
+file path) for the CA, client cert and client key independently. Inline base64 data is
+decoded and passed to `Server` as an in-memory PEM string (`ssl_ca_pem`/`ssl_cert_pem`/
+`ssl_key_pem`); a plain path is passed through as-is (`ssl_ca_file`/`ssl_cert_file`/
+`ssl_key_file`). No temp file is written for inline data — the built `api` stays usable
+after the `Kubeconfig` object is dropped. (Earlier versions wrote inline certs to temp
+files tied to the `Kubeconfig` object's lifetime; that was removed because
+`IO::Socket::SSL` doesn't accept scalar-ref cert files, and `t/14_kubeconfig.t` pins the
+in-memory-PEM behavior surviving kubeconfig destruction — don't reintroduce temp files.)
 It also handles `exec` credential plugins and in-cluster service-account config.
 
 The CLI layer is `MooX::Cmd` + `MooX::Options`: `Kubernetes::REST::CLI` with

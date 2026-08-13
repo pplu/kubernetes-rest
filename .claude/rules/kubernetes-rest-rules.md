@@ -85,6 +85,12 @@ specific item. Every write publishes under the maintainer's account.
 
 - **`prove -l t/` is not recursive** and silently skips subdirectory tests, exiting 0. Use
   `dzil test` or `prove -lr t/`. Reserve non-`-r` for a single named file.
+- **An untracked file does not exist as far as dzil is concerned.** `[@Author::GETTY]`
+  gathers through `Git::GatherDir`, whose `include_untracked` defaults to false and is not
+  overridden here. A new test file that was never `git add`ed is silently absent from
+  `dzil build`, from the release test gate and from the CPAN tarball — `prove -lr t/` runs
+  it and passes, so nothing anywhere says the release never saw it. `git add` a new file
+  as soon as it exists, and make `git status` the last check before any release.
 - **Bytes on the wire, characters in objects.** The internal JSON encoder uses `utf8 => 1`
   and IO backends must return undecoded bodies (`decoded_content(charset => 'none')` under
   LWP). Decoding in a backend causes silent mojibake, not an error; dropping `utf8 => 1`
