@@ -72,12 +72,6 @@ Make a raw call through the deprecated v0 API.
 
 =head1 GLOBAL OPTIONS
 
-=opt --namespace
-
-Namespace for namespaced resources. Defaults to C<default>.
-
-Short form: C<-n>
-
 =cut
 
 option namespace => (
@@ -88,13 +82,11 @@ option namespace => (
     doc => 'Namespace for namespaced resources',
 );
 
-=opt --output
+=opt namespace
 
-Output format. One of: C<json>, C<yaml>, C<name>.
+Namespace for namespaced resources. Defaults to C<default>.
 
-Defaults to C<json>.
-
-Short form: C<-o>
+Short form: C<-n>
 
 =cut
 
@@ -106,16 +98,30 @@ option output => (
     doc => 'Output format: json, yaml, name',
 );
 
+=opt output
+
+Output format. One of: C<json>, C<yaml>, C<name>.
+
+Defaults to C<json>.
+
+Short form: C<-o>
+
+=cut
+
 has json => (
     is => 'ro',
     default => sub { JSON::MaybeXS->new->pretty->canonical->utf8 },
 );
 
+=head1 ATTRIBUTES
+
 =attr json
 
-L<JSON::MaybeXS> encoder instance for JSON output. Encodes with C<utf8>, so
-C<format_output> prints UTF-8 bytes and non-ASCII values survive the way to
-the terminal.
+L<JSON::MaybeXS> encoder instance used for C<--output json>. Configured
+C<pretty>, C<canonical> (stable key ordering) and C<utf8> - the C<utf8> flag
+is what makes C<format_output> print UTF-8 bytes instead of characters, so
+non-ASCII values survive the way to the terminal instead of triggering "Wide
+character in print".
 
 =cut
 
@@ -150,11 +156,15 @@ sub format_output {
     }
 }
 
+=head1 METHODS
+
 =method format_output
 
     $cli->format_output($result);
 
-Format and print the result according to the C<--output> option.
+Format and print the result according to the C<--output> option
+(C<json>, C<yaml>, or C<name>). Any other value falls back to a raw dump via
+L<Data::Dumper>, mainly useful for debugging.
 
 =cut
 
@@ -173,7 +183,8 @@ sub execute {
 
 =method execute
 
-Default execute method. Prints usage information.
+Default C<execute> method, invoked by L<MooX::Cmd> when C<kube_client> is run
+without a recognized subcommand. Prints usage information to STDOUT.
 
 =cut
 

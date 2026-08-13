@@ -98,7 +98,9 @@ has content => (is => 'rw', isa => Str);
 
 =attr content
 
-The request body content (typically JSON).
+The request body content (typically JSON). L<Kubernetes::REST> sets this as
+already UTF-8-encoded bytes; treat it as opaque and send it on the wire
+unchanged. See L<Kubernetes::REST::Role::IO/Encoding contract>.
 
 =cut
 
@@ -107,6 +109,8 @@ The request body content (typically JSON).
 =seealso
 
 =over
+
+=item * L<Kubernetes::REST> - Main API client
 
 =item * L<Kubernetes::REST::HTTPResponse> - Response object
 

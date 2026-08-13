@@ -2215,6 +2215,79 @@ Delete a resource.
     $api->delete($pod);
     $api->delete('Pod', name => 'my-pod', namespace => 'default');
 
+=head2 ensure($object)
+
+    my $obj = $api->ensure($pod);
+    # or from a plain hashref (treated as a Kubernetes manifest):
+    my $secret = $api->ensure({
+        apiVersion => 'v1',
+        kind       => 'Secret',
+        metadata   => { name => 'foo', namespace => 'default' },
+        stringData => { password => 'hunter2' },
+    });
+
+Idempotent create-or-update. Fetches the resource by kind/name/namespace; if
+it exists, updates it (preserving C<resourceVersion>), otherwise creates it.
+Returns the resulting IO::K8s object.
+
+Accepts either a typed IO::K8s object or a plain hashref. A hashref must carry
+a C<kind> field and is inflated to a typed object via L<IO::K8s/struct_to_object>.
+Hashref keys follow the Kubernetes API convention (camelCase, e.g.
+C<stringData>, not C<string_data>).
+
+B<Handles common race conditions:>
+
+=over 4
+
+=item * 404 on the initial get is treated as "does not exist" and falls
+through to create.
+
+=item * 409 AlreadyExists on create (resource appeared between get and
+create) is retried as an update.
+
+=item * 409 Conflict on update (C<resourceVersion> changed server-side, e.g.
+a controller wrote status) is retried by re-fetching and re-applying.
+
+=back
+
+B<Special-cases two kinds where the server rejects a plain update:>
+
+=over 4
+
+=item * C<PersistentVolumeClaim> - spec is immutable after creation, so an
+existing PVC is returned unchanged.
+
+=item * C<Job> - spec is immutable; an existing Job that is active or has
+succeeded is returned unchanged. A failed Job is deleted and recreated.
+
+=back
+
+=head2 ensure_all(@objects)
+
+    my @results = $api->ensure_all(@objects);
+
+Batch version of L</ensure>. Applies create-or-update to each object in order
+and returns the list of resulting objects.
+
+=head2 ensure_only(%args)
+
+    $api->ensure_only(
+        label      => 'app.kubernetes.io/component=queen',
+        objects    => \@objects,
+        kinds      => [qw(Role RoleBinding ClusterRoleBinding)],
+        namespaces => ['default', 'kube-system', undef],
+    );
+
+Like L</ensure_all>, but also B<deletes> any resources matching the label
+selector in the given kinds and namespaces that are not present in
+C<objects>. Use this for resources where stale objects must not survive
+(e.g. RBAC).
+
+Pass C<undef> inside C<namespaces> to scan cluster-scoped resources. If
+C<namespaces> is omitted, only cluster-scoped resources are scanned.
+
+Returns the list of applied objects (from L</ensure_all>).
+
 =head2 watch($class, %args)
 
 Watch for changes to resources. Uses the Kubernetes Watch API with chunked
@@ -2469,6 +2542,27 @@ Fetch the resource map from the cluster's OpenAPI spec (/openapi/v2 endpoint).
 Returns a hashref mapping short resource names (e.g., "Pod") to full IO::K8s
 class paths. This method is called automatically if C<resource_map_from_cluster>
 is enabled.
+
+=head2 schema_for($kind)
+
+    my $schema = $api->schema_for('Pod');
+
+Get the OpenAPI schema definition for a resource type from the cluster.
+Accepts short names (C<Pod>), full class names
+(C<IO::K8s::Api::Core::V1::Pod>), or OpenAPI definition names
+(C<io.k8s.api.core.v1.Pod>).
+
+Returns a hashref with the OpenAPI v2 schema definition.
+
+=head2 compare_schema($kind)
+
+    my $result = $api->compare_schema('Pod');
+
+Compare the local IO::K8s class definition against the cluster's OpenAPI
+schema. Useful for detecting version skew between your IO::K8s installation
+and the cluster's Kubernetes version.
+
+Returns the comparison result from C<< IO::K8s::Resource->compare_to_schema >>.
 
 =head1 BUILDING BLOCKS FOR ASYNC WRAPPERS
 

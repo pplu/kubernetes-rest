@@ -23,7 +23,9 @@ has content => (is => 'ro', isa => Str);
 
 =attr content
 
-The response body content.
+The response body content, as bytes: an IO backend must undo
+C<Content-Encoding> (e.g. gzip) but leave the charset alone, and never decode
+it itself. See L<Kubernetes::REST::Role::IO/Encoding contract>.
 
 =cut
 
@@ -40,6 +42,8 @@ The HTTP status code (e.g., 200, 404, 500).
 =seealso
 
 =over
+
+=item * L<Kubernetes::REST> - Main API client
 
 =item * L<Kubernetes::REST::HTTPRequest> - Request object
 

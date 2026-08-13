@@ -25,7 +25,7 @@ has line => (is => 'ro', isa => Str, required => 1);
 
 =attr line
 
-The log line text. Does not include the trailing newline.
+Required. The log line text. Does not include the trailing newline.
 
 =cut
 
@@ -35,7 +35,11 @@ The log line text. Does not include the trailing newline.
 
 =over
 
+=item * L<Kubernetes::REST> - Main API client
+
 =item * L<Kubernetes::REST/log> - Pod Log API documentation
+
+=item * L<Kubernetes::REST::WatchEvent> - Analogous event object for the Watch API
 
 =item * L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#read-log-pod-v1-core> - Kubernetes Pod log API reference
 

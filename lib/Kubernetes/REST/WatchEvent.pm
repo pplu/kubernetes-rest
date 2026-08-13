@@ -26,7 +26,7 @@ has type => (is => 'ro', isa => Str, required => 1);
 
 =attr type
 
-The event type string. One of: C<ADDED>, C<MODIFIED>, C<DELETED>, C<ERROR>, or C<BOOKMARK>.
+Required. The event type string. One of: C<ADDED>, C<MODIFIED>, C<DELETED>, C<ERROR>, or C<BOOKMARK>.
 
 =cut
 
@@ -34,7 +34,7 @@ has object => (is => 'ro', required => 1);
 
 =attr object
 
-The inflated L<IO::K8s> object for the resource. For C<ERROR> events this is a hashref (the Kubernetes Status object).
+Required. The inflated L<IO::K8s> object for the resource. For C<ERROR> events this is a hashref (the Kubernetes Status object) instead.
 
 =cut
 
@@ -42,7 +42,7 @@ has raw => (is => 'ro', required => 1);
 
 =attr raw
 
-The original hashref from the JSON before inflation. Useful for accessing fields that may not be mapped to the L<IO::K8s> class.
+Required. The original C<object> hashref from the watch event's JSON, before inflation. Useful for accessing fields that may not be mapped to the L<IO::K8s> class.
 
 =cut
 
@@ -52,7 +52,11 @@ The original hashref from the JSON before inflation. Useful for accessing fields
 
 =over
 
+=item * L<Kubernetes::REST> - Main API client
+
 =item * L<Kubernetes::REST/watch> - Watch API documentation
+
+=item * L<Kubernetes::REST::LogEvent> - Analogous event object for the Pod Log API
 
 =item * L<https://kubernetes.io/docs/reference/using-api/api-concepts/#efficient-detection-of-changes> - Kubernetes watch documentation
 

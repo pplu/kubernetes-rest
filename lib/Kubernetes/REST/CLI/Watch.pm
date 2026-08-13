@@ -75,12 +75,32 @@ option event_type => (
     doc => 'Only show these event types (comma-separated)',
 );
 
+=opt event_type
+
+Comma-separated list of watch event types to show, e.g. C<ADDED,DELETED>.
+Matched case-insensitively (values are uppercased before comparing) against
+C<ADDED>, C<MODIFIED>, C<DELETED>, C<ERROR>, and C<BOOKMARK>. Omit to show all
+event types.
+
+Short option: C<-T>
+
+=cut
+
 option label => (
     is => 'ro',
     format => 's',
     short => 'l',
     doc => 'Label selector',
 );
+
+=opt label
+
+Kubernetes label selector passed through as C<labelSelector>, e.g.
+C<app=web,env=prod>.
+
+Short option: C<-l>
+
+=cut
 
 option field => (
     is => 'ro',
@@ -89,12 +109,31 @@ option field => (
     doc => 'Field selector',
 );
 
+=opt field
+
+Kubernetes field selector passed through as C<fieldSelector>, e.g.
+C<status.phase=Running>.
+
+Short option: C<-f>
+
+=cut
+
 option names => (
     is => 'ro',
     format => 's',
     short => 'N',
     doc => 'Filter by resource name (Perl regex)',
 );
+
+=opt names
+
+Perl regular expression. Only events for resources whose C<metadata.name>
+matches are printed; all others are silently skipped. Applied client-side,
+after the event has already been received from the server.
+
+Short option: C<-N>
+
+=cut
 
 option timestamp_format => (
     is => 'ro',
@@ -103,6 +142,16 @@ option timestamp_format => (
     default => sub { 'datetime' },
     doc => 'Timestamp format: datetime, date, time, epoch, iso',
 );
+
+=opt timestamp_format
+
+Timestamp format used in C<text> output. One of C<datetime> (C<%Y-%m-%d
+%H:%M:%S>, the default), C<date>, C<time>, C<epoch> (seconds since the Unix
+epoch), or C<iso>. Ignored for C<json>/C<yaml> output.
+
+Short option: C<-F>
+
+=cut
 
 has _json => (
     is => 'ro',
@@ -176,6 +225,20 @@ sub run {
         # Normal timeout, restart watch
     }
 }
+
+=method run
+
+    $watcher->run($kind);
+
+Watches resources of C<$kind>, printing each event as it arrives (formatted
+per C<--output>). Calls L<Kubernetes::REST/watch> in an infinite loop: a
+normal server-side timeout restarts the watch from the last seen
+C<resourceVersion>, and a C<410 Gone> (the C<resourceVersion> has expired)
+warns and restarts a fresh watch from scratch. Any other error is rethrown.
+Dies with a usage message if C<$kind> is missing. This method never returns
+under normal operation - it is the entry point called by C<bin/kube_watch>.
+
+=cut
 
 sub _handle_event {
     my ($self, $event) = @_;

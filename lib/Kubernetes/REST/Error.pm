@@ -67,6 +67,8 @@ is unaffected.
 
 =over
 
+=item * L<Kubernetes::REST> - Main API client
+
 =item * L<Kubernetes::REST::RemoteError> - Subclass carrying the HTTP status
 
 =back

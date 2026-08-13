@@ -37,6 +37,8 @@ See L<Kubernetes::REST/"UPGRADING FROM 0.02"> for migration guide.
 
 =over
 
+=item * L<Kubernetes::REST> - Main API client
+
 =item * L<Kubernetes::REST::Error> - The base error class
 
 =back

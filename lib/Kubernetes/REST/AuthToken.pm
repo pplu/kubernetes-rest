@@ -16,6 +16,8 @@ use Types::Standard qw/Str/;
 
 Authentication credentials for Kubernetes API requests using bearer token authentication.
 
+L<Kubernetes::REST>'s C<credentials> attribute accepts an instance of this class, a plain hashref (coerced into one automatically), or any other object that implements a C<token()> method.
+
 =cut
 
 has token => (is => 'ro', isa => Str, required => 1);

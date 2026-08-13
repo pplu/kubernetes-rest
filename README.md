@@ -45,6 +45,15 @@ my $patched = $api->patch('Pod', 'my-pod',
     patch     => { metadata => { labels => { env => 'staging' } } },
 );
 
+# Patch/replace a resource's status through the /status subresource --
+# needed for any kind with a status subresource (built-in or CRD): create(),
+# update() and patch() all silently drop the status stanza on those.
+my $patched_status = $api->patch_status('Pod', 'my-pod',
+    namespace => 'default',
+    patch     => { status => { message => 'draining' } },
+);
+my $put_status = $api->update_status($pod);
+
 # Delete a pod
 $api->delete($pod);
 
@@ -208,7 +217,7 @@ sub call_streaming { ... }
 Async wrappers like [Net::Async::Kubernetes](https://metacpan.org/pod/Net::Async::Kubernetes) need access to the request/response pipeline without going through the synchronous convenience methods. The following public methods provide a stable API for this:
 
 - `expand_class($short)` - Resolve short name (e.g., `'Pod'`) to full IO::K8s class
-- `build_path($class, %args)` - Build REST API URL path from class metadata
+- `build_path($class, %args)` - Build REST API URL path from class metadata; an optional `subresource => 'status'|'log'|'exec'|'attach'|'portforward'` argument appends the subresource segment
 - `prepare_request($method, $path, %opts)` - Build HTTP request with auth headers
 - `check_response($response, $context)` - Validate HTTP status (croaks on error)
 - `inflate_object($class, $response)` - Decode JSON response to typed object
@@ -219,7 +228,11 @@ Async wrappers like [Net::Async::Kubernetes](https://metacpan.org/pod/Net::Async
 ```perl
 # Example: async log streaming
 my $class = $rest->expand_class('Pod');
-my $path = $rest->build_path($class, name => $name, namespace => $ns) . '/log';
+my $path = $rest->build_path($class,
+    name        => $name,
+    namespace   => $ns,
+    subresource => 'log',
+);
 my $req = $rest->prepare_request('GET', $path, parameters => { follow => 'true' });
 
 # Execute through your own event loop
@@ -296,12 +309,13 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 
 ## Features
 
-- **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `delete()`, `ensure()`, `ensure_all()`, `ensure_only()`, `watch()`, `log()`, `port_forward()`, `exec()`, `attach()`
+- **Simple API**: `list()`, `get()`, `create()`, `update()`, `patch()`, `patch_status()`, `update_status()`, `delete()`, `ensure()`, `ensure_all()`, `ensure_only()`, `watch()`, `log()`, `port_forward()`, `exec()`, `attach()`
 - **Idempotent apply**: `ensure()` / `ensure_all()` / `ensure_only()` for declarative create-or-update with 404/409 race-condition handling; accepts typed objects or manifest hashrefs
 - **Kubeconfig support**: Token auth, client certs, exec credential plugins, in-cluster service account auto-detection
 - **Pluggable HTTP backend**: LWP::UserAgent (default), HTTP::Tiny, or custom
 - **HTTP debugging**: LWP::ConsoleLogger support out of the box
 - **Patch support**: Strategic merge patch, JSON merge patch (RFC 7396), JSON patch (RFC 6902)
+- **Status subresource**: `patch_status()` / `update_status()` write through `/status` -- required for any built-in kind or CRD with a status subresource, since `create()`/`update()`/`patch()` silently drop the status stanza on those
 - **Watch API**: Stream resource changes with resumable watches via resourceVersion tracking
 - **Pod Log API**: Retrieve or stream pod logs with `log()`, supports follow, tailLines, container selection, and more
 - **Pod Port-Forward API**: `port_forward()` request/session API for duplex-capable backends

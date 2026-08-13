@@ -24,6 +24,10 @@ HTTP client implementation using L<HTTP::Tiny> for making Kubernetes API request
 
 Response bodies are returned as bytes - L<HTTP::Tiny> hands back the body unmodified and never decodes a charset. See L<Kubernetes::REST::Role::IO/Encoding contract>.
 
+This backend does not implement C<call_duplex>: L<Kubernetes::REST> methods that
+need full-duplex transport (C<port_forward>, C<exec>, C<attach>) croak against
+it by design. Use L<Net::Async::Kubernetes> for those.
+
 =cut
 
 has ssl_verify_server => (is => 'ro', isa => Bool, default => 1);
@@ -35,11 +39,52 @@ Boolean. Whether to verify the server's SSL certificate. Defaults to true.
 =cut
 
 has ssl_cert_file => (is => 'ro');
+
+=attr ssl_cert_file
+
+Path to a client certificate file (PEM) for TLS client-certificate authentication. Ignored when C<ssl_cert_pem> is set.
+
+=cut
+
 has ssl_cert_pem  => (is => 'ro');
+
+=attr ssl_cert_pem
+
+Client certificate as a PEM string, for TLS client-certificate authentication. Takes precedence over C<ssl_cert_file>.
+
+=cut
+
 has ssl_key_file  => (is => 'ro');
+
+=attr ssl_key_file
+
+Path to the private key file (PEM) matching C<ssl_cert_file> or C<ssl_cert_pem>. Ignored when C<ssl_key_pem> is set.
+
+=cut
+
 has ssl_key_pem   => (is => 'ro');
+
+=attr ssl_key_pem
+
+Private key as a PEM string, matching C<ssl_cert_file> or C<ssl_cert_pem>. Takes precedence over C<ssl_key_file>.
+
+=cut
+
 has ssl_ca_file   => (is => 'ro');
+
+=attr ssl_ca_file
+
+Path to a CA certificate file (PEM) used to verify the server's certificate. Ignored when C<ssl_ca_pem> is set.
+
+=cut
+
 has ssl_ca_pem    => (is => 'ro');
+
+=attr ssl_ca_pem
+
+CA certificate as a PEM string, used to verify the server's certificate. Takes precedence over C<ssl_ca_file>.
+
+=cut
 
 has timeout => (is => 'ro', default => sub { 310 });
 
