@@ -52,6 +52,28 @@ Revision history for Kubernetes-REST
    the exception is still matched on the full group name, so a custom
    resource served under a group like apiextensions.example.com keeps
    mapping to Api::Apiextensions:: the way any other group does.
+ - kube_client create reads YAML manifests, not only JSON. YAML is the usual
+   format for Kubernetes manifests and the documentation claimed support for
+   it, but the file went straight into inflate(), which is a JSON decode --
+   so every "kube_client create -f deployment.yaml" died on the first line of
+   the file. Manifests are parsed by IO::K8s load_yaml() now. The format is
+   detected from the content rather than the file name, so "-f -" behaves
+   exactly like a named file: a manifest starting with "{" after optional
+   whitespace still takes the JSON path it always took, everything else is
+   read as YAML.
+ - kube_client create accepts multi-document YAML, the common shape of a
+   Kubernetes manifest. Every "---"-separated document is created in the
+   order it appears in the file -- so a manifest listing a Namespace before
+   the objects inside it works -- and each created object is printed in the
+   --output format. If one document fails, the error names which one; the
+   documents before it have already been created. A manifest with no
+   documents at all, or an empty file, is now an error naming the source
+   instead of an obscure decode failure.
+ - Fix the usage line of "kube_client raw" and five examples in
+   kube_client's own documentation naming the v0 groups with a version
+   suffix, "kube_client raw CoreV1 ListNamespace". The groups are called
+   Core, Apps, Batch and so on, without a version, so anyone following the
+   example got an error.
 
 1.106     2026-08-08 19:03:58Z
 

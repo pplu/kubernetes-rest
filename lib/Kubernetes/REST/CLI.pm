@@ -54,7 +54,9 @@ Get a resource or list resources.
 
     kube_client create -f <file>
 
-Create a resource from a YAML or JSON file. Use C<-f -> to read from stdin.
+Create resources from a YAML or JSON manifest. Use C<-f -> to read from stdin.
+The format is detected from the content, and multi-document YAML creates every
+C<--->-separated document in order.
 
 =head2 delete
 

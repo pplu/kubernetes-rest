@@ -34,8 +34,11 @@ kube_client - Kubernetes CLI client using Kubernetes::REST
     # Output only names
     kube_client get Pod -o name
 
-    # Create resource from file
+    # Create resources from a YAML or JSON manifest
     kube_client create -f pod.yaml
+
+    # Multi-document YAML creates every document in order
+    kube_client create -f manifests/all.yaml
 
     # Create resource from stdin
     cat pod.json | kube_client create
@@ -50,8 +53,8 @@ kube_client - Kubernetes CLI client using Kubernetes::REST
     kube_client --kubeconfig /path/to/config get Pod
 
     # Raw API call
-    kube_client raw CoreV1 ListNamespace
-    kube_client raw CoreV1 ReadNamespacedPod namespace=default name=nginx
+    kube_client raw Core ListNamespace
+    kube_client raw Core ReadNamespacedPod namespace=default name=nginx
 
 =head1 DESCRIPTION
 
@@ -99,9 +102,16 @@ resource. Otherwise lists all resources of that kind.
 
     kube_client create -f <file>
 
-Create a resource from a JSON or YAML file. Use C<-f -> to read from stdin.
+Create resources from a YAML or JSON manifest. Use C<-f -> to read from stdin,
+which is also the default. The format is detected from the content, so stdin
+works exactly like a named file.
+
+Multi-document YAML is supported: every C<--->-separated document is created in
+the order it appears, and each created object is printed in the C<--output>
+format.
 
     kube_client create -f deployment.yaml
+    kube_client create -f manifests/all.yaml
     cat pod.json | kube_client create
 
 =head2 delete
@@ -117,19 +127,31 @@ Delete a resource by kind and name.
 
     kube_client raw <Group> <Method> [key=value ...]
 
-Make a raw API call using Kubernetes::REST method groups.
+Make a raw API call through the deprecated v0 API groups. C<Group> is a
+L<Kubernetes::REST::V0Group> subclass name without a version suffix - C<Core>,
+C<Apps>, C<Batch> and so on, not C<CoreV1> or C<AppsV1>.
 
-    kube_client raw CoreV1 ListNamespace
-    kube_client raw CoreV1 ReadNamespacedPod namespace=default name=nginx
-    kube_client raw AppsV1 ListNamespacedDeployment namespace=default
+    kube_client raw Core ListNamespace
+    kube_client raw Core ReadNamespacedPod namespace=default name=nginx
+    kube_client raw Apps ListNamespacedDeployment namespace=default
 
 =head1 ENVIRONMENT
 
 =over 4
 
+=item C<KUBECONFIG>
+
+Path to the kubeconfig file to use when C<--kubeconfig> is not given. Unlike
+C<kubectl> this is a single path, not a C<:>-separated list of files to merge.
+
 =item C<HOME>
 
-Used to locate the default kubeconfig at F<~/.kube/config>.
+Used to locate the default kubeconfig at F<~/.kube/config> when neither
+C<--kubeconfig> nor C<KUBECONFIG> is set.
+
+=item C<HIDE_KUBERNETES_REST_V0_API_WARNING>
+
+Silences the deprecation warning C<raw> prints on every call.
 
 =back
 
