@@ -1,0 +1,24 @@
+---
+class: standard
+completed: 2026-08-13T17:34:56Z
+created: 2026-08-13T04:51:23Z
+id: 7
+priority: low
+started: 2026-08-13T05:08:38Z
+status: archived
+tags:
+- test
+- doku
+title: Veraltete temp-cert-Kommentare in t/lib/Test/Kubernetes/Mock.pm
+updated: 2026-08-13T17:34:56Z
+---
+
+Zwei Kommentare behaupten, Kubeconfig schreibe Inline-Zertifikate in temp files, die beim Wegfallen des Objekts geloescht werden:
+
+  Zeile 19: # Keep kubeconfig object alive so temp cert files aren\t deleted
+  Zeile 49: # Keep kubeconfig alive so temp cert files aren\t deleted
+
+Das stimmt nicht mehr. _resolve_cert gibt Inline-Daten als PEM-String zurueck (ssl_ca_pem/ssl_cert_pem/ssl_key_pem), es gibt kein File::Temp im ganzen lib/. t/14_kubeconfig.t pinnt sogar, dass die api nach Zerstoerung des Kubeconfig-Objekts weiterlebt.
+
+Die Kommentare haben real in die Irre gefuehrt: die Behauptung ist von dort in eine Skill-Datei gewandert. Entweder streichen oder auf den echten Grund umschreiben, falls die Variable aus einem anderen Grund gehalten wird.
+2026-08-13 05:08 Beide Kommentare entfernt, nicht umformuliert: die File-Scope-Variable $_kubeconfig, die sie rechtfertigten, war nachweislich tot. Kubeconfig::api() baut ein eigenstaendiges Kubernetes::REST-Objekt (Cert-Material als PEM-String oder Pfad in den Server kopiert, keine Closure auf das Kubeconfig-Objekt), und t/14_kubeconfig.t pinnt genau das im Subtest "in-memory PEM survives kubeconfig destruction". live_api() baut das Objekt jetzt inline. Suite gruen: 452 Tests, 26 Dateien, nur das vorbestehende t/08_crd.t rot. Kein Changes-Bullet, Test-Infrastruktur ist nicht benutzersichtbar.
