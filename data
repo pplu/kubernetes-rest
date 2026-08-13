@@ -1,0 +1,46 @@
+---
+class: standard
+completed: 2026-08-13T17:34:34Z
+created: 2026-08-12T14:43:27Z
+id: 3
+priority: medium
+started: 2026-08-13T04:01:39Z
+status: archived
+tags:
+- api
+- crd
+title: Kein Writer fuer die /status-Subresource (patch_status/update_status)
+updated: 2026-08-13T17:34:34Z
+---
+
+Kubernetes::REST kann Status nicht schreiben, wenn eine CRD `subresources: {status: {}}` deklariert.
+
+Sobald das der Fall ist, verwirft der API-Server die status-Stanza JEDES Writes
+auf den Haupt-Endpoint — create, update, merge-patch und server-side apply
+gleichermassen — und antwortet trotzdem 2xx. Der Aufrufer sieht also Erfolg,
+gespeichert wird nichts.
+
+Verifiziert per server-side dry-run gegen einen echten Cluster (k3s v1.36.3):
+
+  kubectl apply -f node.yaml --dry-run=server   -> Antwort hat GAR KEIN status
+  kubectl patch ... --subresource=status ...    -> alle vier Felder gespeichert
+
+ensure(), update() und patch() gehen alle ueber _build_path(), das keine
+Subresource adressieren kann; es gibt keinen oeffentlichen Weg an /status.
+
+Das hat in OCP real Schaden gemacht: OCPNode-CRs wurden ohne jeden Status
+gespeichert, `ocp node ls` zeigte einen Ready control-plane als Pending ohne IP,
+und jede Worker-Phase ueberlebte den Prozess nicht, der sie gesetzt hat.
+
+Workaround dort ist OCP::K8s::patch_status — der rohe _request-Escape:
+
+    my $path = $api->_build_path($class, name => $n, namespace => $ns);
+    $api->_request(PATCH, "$path/status", { status => $status },
+                   content_type => q{application/merge-patch+json});
+
+Gewuenscht: patch_status()/update_status() (oder ein subresource => q{status}
+Argument an patch/update). OCP ruft bereits $api->can(q{patch_status}) ab und
+benutzt eine native Methode bevorzugt, der Escape entfaellt dort also
+automatisch, sobald es sie gibt.
+Praezisierung: in OCP betrifft es die OCPNode-CRD (ocpnodeprovider hat keine status-Subresource). Am Kern des Requests aendert das nichts.
+2026-08-13 04:51 Implementiert: patch_status()/update_status(), _build_path/build_path nehmen ein optionales subresource-Argument, log/exec/attach/port_forward auf denselben Mechanismus umgestellt statt String-Konkatenation. Neue Testdatei t/26_status_subresource.t (19 Subtests) pinnt Methode, URL, Content-Type und Body der tatsaechlich rausgehenden Requests. POD inline + __END__, Changes-Bullets inkl. der build_path-Seam-Erweiterung. patch_status defaultet auf merge statt strategic, weil Custom Resources auf strategic merge patch mit 415 antworten. Suite gruen (424 Tests) ausser dem vorbestehenden t/08_crd.t, dessen Ursache in IO::K8s::inflate liegt -- io-k8s-p5 #31. Noch nicht committet.
