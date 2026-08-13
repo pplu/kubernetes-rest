@@ -1,0 +1,128 @@
+---
+class: standard
+completed: 2026-08-13T04:01:28Z
+created: 2026-08-08T17:35:21Z
+id: 1
+priority: high
+started: 2026-08-08
+status: archived
+tags:
+- bug
+- encoding
+- json
+- io-backend
+title: 'JSON encoder lacks utf8 => 1: non-ASCII request bodies die in HTTP::Message'
+updated: 2026-08-13T04:01:28Z
+---
+
+## Symptom
+
+Any request whose body contains a non-ASCII character dies before it reaches the
+cluster, with an error that names neither this distribution nor the offending
+data:
+
+```
+HTTP::Message content must be bytes at Kubernetes/REST/LWPIO.pm line 68
+```
+
+Hit in the wild by OCP applying the upstream cert-manager manifest
+(`v1.21.1`, 17 non-ASCII bytes in the CRD descriptions — `§`, `–`).
+
+## Cause
+
+`Kubernetes/REST.pm:93`
+
+```perl
+has _json => (is => 'ro', default => sub { JSON::MaybeXS->new });
+```
+
+No `utf8 => 1`, so `->encode` returns a character string. `_build_request`
+(`REST.pm:461`) hands that straight to `HTTPRequest->content`, and
+`HTTP::Request` refuses anything with a character above U+00FF.
+
+The chain, each step verified:
+
+| Step | Result |
+|---|---|
+| `HTTP::Tiny` fetches cert-manager.yaml | bytes (`application/octet-stream`, no decode) |
+| `YAML::XS::Load` | **character** strings — YAML::XS decodes UTF-8 by design |
+| `$self->_json->encode($body)` | character string ← the defect |
+| `HTTP::Request->content` | dies |
+
+`JSON::MaybeXS->new(utf8 => 1)->encode` on the same structure returns bytes and
+is accepted.
+
+## Second defect in the same area
+
+The two IO backends disagree about what `HTTPResponse->content` holds, and one
+of them contradicts IO::K8s:
+
+- `LWPIO.pm:118,148` — `$res->decoded_content` → **characters**
+- `HTTPTinyIO.pm:110,138` — `$res->{content}` → **bytes** (HTTP::Tiny only
+  decodes `text/*`, and the API answers `application/json`)
+
+`_inflate_object` passes that content to `IO::K8s::json_to_object`, and IO::K8s
+decodes with `JSON::MaybeXS->new(utf8 => 1, ...)` (`IO/K8s.pm:111`) — it expects
+bytes. So under the LWP backend, a response containing non-ASCII gets its
+already-decoded characters decoded a second time: mojibake, silently, no error.
+Under the HTTP::Tiny backend the same call is correct. `_inflate_list`
+(`REST.pm:481`) decodes via `_json` and inherits the same split.
+
+Worth confirming with a test that runs the same non-ASCII payload through both
+backends and asserts identical objects — nothing currently pins that.
+
+## Suggested direction
+
+Standardise on bytes end to end, which is what IO::K8s already assumes:
+
+1. `_json` → `JSON::MaybeXS->new(utf8 => 1)` — fixes encode and lines decode up
+   with IO::K8s.
+2. `LWPIO` → `$res->content` instead of `$res->decoded_content`, so both
+   backends hand back the same thing.
+
+Check while doing it: `_check_response` (`REST.pm:469`) interpolates
+`$response->content` into a `croak` message, so an error body with non-ASCII
+becomes a "Wide character"-free but mis-rendered string — decide whether that
+one wants an explicit decode for human output.
+
+## Reproduce
+
+```perl
+use Kubernetes::REST;
+# any object with a non-ASCII value, e.g.
+my $cm = { apiVersion => 'v1', kind => 'ConfigMap',
+           metadata => { name => 'utf8-probe', namespace => 'default' },
+           data => { note => "caf\x{e9} \x{a7}" } };
+# -> HTTP::Message content must be bytes
+```
+
+Found while debugging `ocp apply` against a live RKE2 cluster; OCP has no
+workaround, cert-manager setup simply fails there.
+Fixed in the working tree (uncommitted).
+
+- REST.pm: _json is now JSON::MaybeXS->new(utf8 => 1, canonical => 1, convert_blessed => 1) -- encode() emits bytes, decode() lines up with IO::K8s.
+- LWPIO: both call() and call_streaming() go through a shared _response(), using decoded_content(charset => 'none'). Content-Encoding is undone, the charset is not. Matches HTTPTinyIO.
+- _check_response: error body is UTF-8 decoded (FB_DEFAULT) before croak, so a non-ASCII API error is readable and a malformed body cannot turn an API error into an encoding death.
+- CLI.pm: output encoder gained ->utf8, otherwise the now correctly-decoded objects would hit print as wide characters. CLI/Watch.pm already had it.
+- t/lib/Test/Kubernetes/Mock.pm: the mock IO backend now returns bytes like the real ones do.
+- log() deliberately stays bytes -- container output is not guaranteed to be text, let alone UTF-8. Documented, with the decode one-liner.
+
+Docs: encoding contract in Role::IO (custom backends must not decode), new ENCODING section in Kubernetes::REST, note in each backend, Changes entry.
+
+Test: t/24_encoding.t -- 9 subtests covering encode, both backends in isolation, both backends inflating identical objects, decoded error message, undecodable error body, watch, log. Verified it fails against the unfixed lib (dies in IO::K8s with 'Wide character in subroutine entry'). Full suite green: dzil test, 313 tests.
+
+Left alone: IO::K8s's own POD (IO/K8s.pm around line 814) still shows JSON::MaybeXS->new->decode($resp->content) as the way to fetch the OpenAPI spec -- that example now under-decodes. Belongs in the io-k8s-p5 repo, not here.
+Committed as c2d9be2 on master. The handoff note above said 'uncommitted' -- it is not anymore. Also in that commit: cpanfile declares Encode and pins IO::K8s to 1.100 (was 1.008; utf8 decoding has been in IO::K8s since 1.000, so the fix does not depend on the bump). dzil test green, 322 tests.
+Follow-up: Encode removed from the cpanfile again (core, and the cpanfile lists no core modules -- Carp and Scalar::Util are used the same way and are absent too). IO::K8s stays at 1.100: that is what is on CPAN (MetaCPAN, 2026-03-25). The 1.105 in the io-k8s-p5 checkout is the unreleased next version, {{$NEXT}} still open in its Changes -- pinning it would break installs.
+
+Separate find while checking versions: five packages reported $VERSION 1.003 -- Kubernetes::REST::RemoteError and the four Kubernetes::REST::CLI::Cmd::* classes. They are the only ones sharing a file with another package, and RewriteVersion/BumpVersionAfterRelease run with global = 0, so only the first package per file gets rewritten. Shipped stale in every release since 1.003, 1.105 included. Set to 1.106 in b1051c0; the mechanism is unfixed and will drift again at 1.107 unless the bundle passes global = 1.
+
+Commits: c2d9be2 (encoding), 3061a04 (Encode prereq), b1051c0 (versions).
+Version sweep completed package by package, not just file by file: lib/ holds 39 packages across 34 files and all of them read 1.106 (the five stale ones were the only misses). bin/kube_client and bin/kube_watch had no $VERSION at all -- added in be5cd2f, matching the Getty convention for exec scripts, and both plugins already list :ExecFiles among their finders so the line is maintained from here on. Verified against a real build: Kubernetes-REST-1.106 ships 41 $VERSION declarations, every one of them 1.106.
+Root cause removed rather than worked around (f476621): the five packages that shared a file now have files of their own -- RemoteError out of Error.pm, the four CLI::Cmd::* out of CLI.pm. With one package per file, 'first $VERSION' and 'only $VERSION' are the same line and no global => 1 is needed anywhere; the dist.ini could not have set it anyway (verified by building with the option in place: META still said global: 0, because Author::GETTY consumes only PluginBundle::Easy and forwards a fixed key list to \@Git::VersionManager).
+
+Worth knowing: 1.105 shipped CLI::Cmd::Get with 1.003 in the code and 1.105 in META -- MetaProvides::Update corrected the metadata while the source stayed stale, so ->VERSION and the PAUSE index disagreed.
+
+Note for callers: Kubernetes::REST::Error no longer drags RemoteError in. A circular use cannot work when the child inherits from the parent -- use runs at compile time, Moo builds attributes at runtime, so the parent is still empty. Catching is unaffected, throwing needs an explicit use.
+
+t/25_one_package_per_file.t now asserts one package and one $VERSION per file across lib/, all matching the main module. dzil test green, 446 tests.
