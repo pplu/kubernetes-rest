@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-08-13T05:14:37Z
+created: 2026-08-13T05:04:14Z
+id: 8
+priority: medium
+started: 2026-08-13T05:14:37Z
+status: done
+tags:
+- cli
+- bug
+title: CLI ignores $ENV{KUBECONFIG}
+updated: 2026-08-13T05:14:37Z
+---
+
+Kubernetes::REST::Kubeconfig defaults its kubeconfig_path to $ENV{KUBECONFIG} // "$ENV{HOME}/.kube/config" (Kubeconfig.pm:68), but CLI::Role::Connection declares its own --kubeconfig option with default => sub { "$ENV{HOME}/.kube/config" } and always passes that value on. The option is therefore never undef, Kubeconfig never reaches its own default, and $ENV{KUBECONFIG} is ignored by both kube_client and kube_watch -- while every other tool in the ecosystem honours it.
+
+Fix is to let the option default to undef and only pass kubeconfig_path when it is set, so Kubeconfig applies its own precedence. bin/kube_client POD ENVIRONMENT should then list KUBECONFIG.
+
+Side effect of the same line: with HOME unset the default interpolates an undef and warns.
+
+Found while doing #5/#6; Role/Connection.pm was outside that ticket scope.
