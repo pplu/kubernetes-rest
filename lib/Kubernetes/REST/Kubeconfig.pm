@@ -62,7 +62,7 @@ Supports:
 
 =item * Merging several kubeconfig files, C<kubectl>-style
 
-=item * Token authentication
+=item * Token authentication, inline or from a C<tokenFile>
 
 =item * Client certificate authentication
 
@@ -172,7 +172,7 @@ has _config => (
 # neither is an exec plugin's command, which is looked up in PATH.
 my %FILE_REFERENCES = (
     clusters => { body => 'cluster', fields => ['certificate-authority'] },
-    users    => { body => 'user',    fields => [qw(client-certificate client-key)] },
+    users    => { body => 'user',    fields => [qw(client-certificate client-key tokenFile)] },
 );
 
 sub _resolve_file_references {
@@ -360,7 +360,11 @@ Create a L<Kubernetes::REST> instance (with a L<Kubernetes::REST::Server> built 
 
 Certificate and key material can come from either an inline base64 C<*-data> field or a plain file-path field in the kubeconfig. Inline data is decoded and passed to L<Kubernetes::REST::Server> as an in-memory PEM string (C<ssl_ca_pem>/C<ssl_cert_pem>/C<ssl_key_pem>) rather than written to a temporary file, so the returned L<Kubernetes::REST> instance keeps working after this C<Kubernetes::REST::Kubeconfig> object is garbage-collected. A file path is passed on as C<ssl_ca_file>/C<ssl_cert_file>/C<ssl_key_file>, absolute: a relative one is resolved against the directory of the kubeconfig that defined the entry, see L</MERGING>.
 
-User authentication is resolved in this order: a plain C<token> field; an C<exec> block (kubectl's exec-credential-plugin mechanism, used for e.g. cloud IAM auth), which runs the configured C<command> (with C<args> and any C<env> entries applied to the child process) and reads C<status.token> from its output (parsed as YAML, which also accepts the JSON that real exec plugins emit); otherwise an empty token, for setups that authenticate via client certificate alone.
+User authentication is resolved in this order: a plain C<token> field; a C<tokenFile>, whose content is the bearer token; an C<exec> block (kubectl's exec-credential-plugin mechanism, used for e.g. cloud IAM auth), which runs the configured C<command> (with C<args> and any C<env> entries applied to the child process) and reads C<status.token> from its output (parsed as YAML, which also accepts the JSON that real exec plugins emit); otherwise an empty token, for setups that authenticate via client certificate alone.
+
+That order is C<kubectl>'s. An inline C<token> wins over a C<tokenFile> - client-go's C<getUserIdentificationPartialConfig> reads the file only when there is no inline token - and either of them wins over an C<exec> block, which C<kubectl> skips whenever a request already carries an C<Authorization> header. An C<exec> plugin is therefore not run at all when the user also has a token or a token file.
+
+A C<tokenFile> that cannot be read, or that holds nothing but whitespace, is a fatal error naming the user and the file. It is deliberately not a fall-through to the next mechanism: a kubeconfig saying where its token lives is a statement about how this user authenticates, and quietly carrying on would produce a 401 from the cluster with nothing pointing at the file. Leading and trailing whitespace is stripped - such files almost always end in a newline, and a newline in an C<Authorization> header does not reach the server as intended. The token is read once, when C<api()> builds the client; see L</TOKEN FILES AND ROTATION>.
 
 Falls back to in-cluster service account authentication when no kubeconfig
 file is found - none of the merged paths exists, or there is no path at all
@@ -411,6 +415,12 @@ cluster CA is read from C</var/run/secrets/kubernetes.io/serviceaccount/ca.crt>.
     my $credentials;
     if (my $token = $user->{token}) {
         $credentials = Kubernetes::REST::AuthToken->new(token => $token);
+    } elsif (my $token_file = $user->{tokenFile}) {
+        $credentials = Kubernetes::REST::AuthToken->new(
+            token => $self->_read_token_file(
+                $token_file, "tokenFile of user '$ctx->{user}'"
+            ),
+        );
     } elsif (my $exec = $user->{exec}) {
         $credentials = $self->_exec_credential($exec);
     } else {
@@ -422,6 +432,24 @@ cluster CA is read from C</var/run/secrets/kubernetes.io/serviceaccount/ca.crt>.
         server => Kubernetes::REST::Server->new(%server),
         credentials => $credentials,
     );
+}
+
+# Reads a file holding a bearer token: a user's tokenFile, or the service
+# account token mounted into a pod. Both are written by something else - the
+# kubelet, a login helper - and both are read the same way.
+sub _read_token_file {
+    my ($self, $file, $what) = @_;
+
+    my $token = eval { path($file)->slurp_raw };
+    croak "Cannot read the $what ($file): $@" unless defined $token;
+
+    # Such a file ends with a newline more often than not, and a newline inside
+    # an Authorization header is not something a server ever sees as intended.
+    $token =~ s/\A\s+//;
+    $token =~ s/\s+\z//;
+    croak "The $what ($file) holds no token" unless length $token;
+
+    return $token;
 }
 
 sub _exec_credential {
@@ -455,9 +483,7 @@ sub _in_cluster_api {
 
     my $host = $ENV{KUBERNETES_SERVICE_HOST} // 'kubernetes.default.svc';
     my $port = $ENV{KUBERNETES_SERVICE_PORT} // '443';
-    open my $fh, '<', $SA_TOKEN or croak "Cannot read $SA_TOKEN: $!";
-    my $token = do { local $/; <$fh> };
-    chomp $token;
+    my $token = $self->_read_token_file($SA_TOKEN, 'service account token');
 
     return Kubernetes::REST->new(
         server => Kubernetes::REST::Server->new(
@@ -503,9 +529,9 @@ back to in-cluster authentication exactly as it does for a single missing file.
 =head2 Relative paths inside a kubeconfig
 
 The file references an entry holds - C<certificate-authority> on a cluster,
-C<client-certificate> and C<client-key> on a user - are resolved against the
-directory of the kubeconfig file that defines that entry, the way C<kubectl>
-resolves them, and not against the current working directory.
+C<client-certificate>, C<client-key> and C<tokenFile> on a user - are resolved
+against the directory of the kubeconfig file that defines that entry, the way
+C<kubectl> resolves them, and not against the current working directory.
 
 With several files merged that directory is a property of the entry, not of the
 configuration: a cluster that won from F</a/config> resolves its CA against
@@ -519,6 +545,27 @@ of the C<*-data> fields, which names no file. A leading C<~> is not expanded -
 it is an ordinary directory name, exactly as it is for C<kubectl>, and resolves
 like any other relative path. An C<exec> plugin's C<command> is not a file
 reference in this sense either: it is looked up in C<PATH> and is left alone.
+
+=head1 TOKEN FILES AND ROTATION
+
+A token that comes from a file - a user's C<tokenFile>, or the service account
+token of the in-cluster fallback - is read once, while L</api> builds the
+client, and the resulting L<Kubernetes::REST> instance carries that one string
+for as long as it lives.
+
+Kubernetes rotates those files. The kubelet rewrites a projected service
+account token well before it expires, and C<kubectl> copes by re-reading the
+file (client-go caches it for a minute at a time, deliberately matched to that
+rotation). A process that builds one client and keeps it for hours does not
+cope: it goes on sending the token it read at startup and starts collecting
+401s once that token expires, while the file next to it holds a valid one.
+
+Until this module refreshes on its own, a long-running process has two ways
+out: build a new client from the kubeconfig now and then - C<api()> re-reads
+everything - or hand L<Kubernetes::REST> its own C<credentials> object whose
+C<token()> method reads the file when it is called. C<credentials> accepts any
+object with a C<token()> method, so that is a few lines and needs nothing from
+this class.
 
 =seealso
 

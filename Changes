@@ -151,6 +151,28 @@ Revision history for Kubernetes-REST
    the *-data fields, and an exec plugin's command -- a PATH lookup, not a
    file reference -- are untouched, and a leading "~" is not expanded, no
    more than kubectl expands it.
+ - A kubeconfig user's tokenFile is read and used as the bearer token. The
+   field was ignored: such a user matched neither "token" nor "exec", fell
+   into the client-certificate branch and was given an empty bearer token, so
+   a kubeconfig pointing at a projected service account token or at a file
+   some login helper refreshes authenticated as nobody and collected 401s,
+   next to a kubectl working from the very same file. The order is kubectl's,
+   read off client-go: an inline "token" wins over a "tokenFile", and either
+   wins over an "exec" block, which is then not run at all -- so no
+   kubeconfig that works today changes meaning. A relative tokenFile resolves
+   against the directory of the kubeconfig that defines the user, like the
+   certificate fields. Leading and trailing whitespace is stripped, since
+   such a file ends in a newline more often than not and a newline inside an
+   Authorization header does not reach the server as intended. A tokenFile
+   that cannot be read, or that holds nothing but whitespace, is fatal and
+   names the user and the resolved path, rather than falling through to the
+   next mechanism -- that would trade a clear error for a 401 with nothing
+   pointing at the file. The in-cluster service account token is read through
+   the same code now, so it gets the same treatment instead of losing exactly
+   one trailing newline. Both are read once, when api() builds the client:
+   the new TOKEN FILES AND ROTATION section in Kubernetes::REST::Kubeconfig
+   says what that means for a process that outlives a token rotation, and how
+   to work around it.
 
 1.106     2026-08-08 19:03:58Z
 
