@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-08-13T17:35:18Z
+created: 2026-08-13T05:14:04Z
+id: 11
+priority: low
+started: 2026-08-13T16:12:59Z
+status: archived
+tags:
+- kubeconfig
+title: Kubeconfig default warns and builds "/.kube/config" when HOME is unset
+updated: 2026-08-13T17:35:18Z
+---
+
+Kubeconfig.pm:68 reads
+
+    default => sub { $ENV{KUBECONFIG} // "$ENV{HOME}/.kube/config" },
+
+With HOME unset and KUBECONFIG unset the interpolation of undef warns ("Use of uninitialized value $ENV{\"HOME\"} in concatenation") and then produces the path "/.kube/config", so the eventual error is "Cannot open /.kube/config: No such file or directory" rather than anything naming the real problem. HOME is genuinely unset in cron jobs, some systemd units and minimal containers -- exactly where a missing kubeconfig is hardest to read off a stack trace.
+
+The same expression used to sit in CLI::Role::Connection as the option default too; #8 removed that copy, so this is now the only one left, but it is a pre-existing line that #8 did not touch.
+
+Fix is to croak with something like "Cannot determine kubeconfig path: neither KUBECONFIG nor HOME is set" instead of interpolating undef. That changes the failure mode of a currently-warning path, so it wants a Changes bullet, and t/14_kubeconfig.t should pin it with a local delete of both variables.
