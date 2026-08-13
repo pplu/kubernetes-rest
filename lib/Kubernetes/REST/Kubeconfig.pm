@@ -154,12 +154,51 @@ has _config => (
             # same way it is not one for kubectl.
             next unless -f $path;
             my $config = YAML::XS::LoadFile($path);
-            push @configs, $config if ref $config eq 'HASH';
+            next unless ref $config eq 'HASH';
+            # While the file is being read is the only place where its own
+            # directory is still known: the merge below keeps whole entries but
+            # not where they came from, and with several files merged that
+            # directory differs per entry.
+            push @configs, $self->_resolve_file_references($config, $path);
         }
         return undef unless @configs;
         return $self->_merge_configs(@configs);
     },
 );
+
+# The file references a kubeconfig entry can hold, per section: the key of the
+# entry body, and the fields in it that name a file. The *-data twins hold
+# base64 content rather than a path and are none of this code's business, and
+# neither is an exec plugin's command, which is looked up in PATH.
+my %FILE_REFERENCES = (
+    clusters => { body => 'cluster', fields => ['certificate-authority'] },
+    users    => { body => 'user',    fields => [qw(client-certificate client-key)] },
+);
+
+sub _resolve_file_references {
+    my ($self, $config, $file) = @_;
+
+    # Absolute, so the result survives a later chdir - the file itself may well
+    # have been named relatively.
+    my $dir = path($file)->absolute->parent;
+
+    for my $section (sort keys %FILE_REFERENCES) {
+        my $spec = $FILE_REFERENCES{$section};
+        for my $entry (@{ $config->{$section} // [] }) {
+            next unless ref $entry eq 'HASH';
+            my $body = $entry->{ $spec->{body} };
+            next unless ref $body eq 'HASH';
+            for my $field (@{ $spec->{fields} }) {
+                my $value = $body->{$field};
+                next unless defined $value and !ref $value and length $value;
+                next if path($value)->is_absolute;
+                $body->{$field} = $dir->child($value)->stringify;
+            }
+        }
+    }
+
+    return $config;
+}
 
 # The sections keyed by name, which are unioned; everything else is a plain
 # top-level key taken from the first file that has it.
@@ -319,7 +358,7 @@ sub api {
 
 Create a L<Kubernetes::REST> instance (with a L<Kubernetes::REST::Server> built from the cluster entry and credentials built from the user entry) configured from the kubeconfig. If C<$context_name> is provided, uses that context; otherwise uses the current context.
 
-Certificate and key material can come from either an inline base64 C<*-data> field or a plain file-path field in the kubeconfig. Inline data is decoded and passed to L<Kubernetes::REST::Server> as an in-memory PEM string (C<ssl_ca_pem>/C<ssl_cert_pem>/C<ssl_key_pem>) rather than written to a temporary file, so the returned L<Kubernetes::REST> instance keeps working after this C<Kubernetes::REST::Kubeconfig> object is garbage-collected.
+Certificate and key material can come from either an inline base64 C<*-data> field or a plain file-path field in the kubeconfig. Inline data is decoded and passed to L<Kubernetes::REST::Server> as an in-memory PEM string (C<ssl_ca_pem>/C<ssl_cert_pem>/C<ssl_key_pem>) rather than written to a temporary file, so the returned L<Kubernetes::REST> instance keeps working after this C<Kubernetes::REST::Kubeconfig> object is garbage-collected. A file path is passed on as C<ssl_ca_file>/C<ssl_cert_file>/C<ssl_key_file>, absolute: a relative one is resolved against the directory of the kubeconfig that defined the entry, see L</MERGING>.
 
 User authentication is resolved in this order: a plain C<token> field; an C<exec> block (kubectl's exec-credential-plugin mechanism, used for e.g. cloud IAM auth), which runs the configured C<command> (with C<args> and any C<env> entries applied to the child process) and reads C<status.token> from its output (parsed as YAML, which also accepts the JSON that real exec plugins emit); otherwise an empty token, for setups that authenticate via client certificate alone.
 
@@ -453,15 +492,33 @@ which is what C<kubectl> does - a list assembled by a shell profile or by
 C<direnv> routinely mentions files that are not there. So are empty entries, so
 C</a::/b> and a trailing C<:> are harmless.
 
-=item * Relative entries are resolved against the current working directory.
-Relative file references I<inside> a kubeconfig - C<certificate-authority>,
-C<client-certificate>, C<client-key> - are resolved the same way, against the
-working directory rather than against the directory of the file naming them.
+=item * Relative entries in the list itself are resolved against the current
+working directory.
 
 =back
 
 If no file in the list exists, the configuration is empty and L</api> falls
 back to in-cluster authentication exactly as it does for a single missing file.
+
+=head2 Relative paths inside a kubeconfig
+
+The file references an entry holds - C<certificate-authority> on a cluster,
+C<client-certificate> and C<client-key> on a user - are resolved against the
+directory of the kubeconfig file that defines that entry, the way C<kubectl>
+resolves them, and not against the current working directory.
+
+With several files merged that directory is a property of the entry, not of the
+configuration: a cluster that won from F</a/config> resolves its CA against
+F</a> even when the current context came from F</b/config>. Resolution
+therefore happens as each file is read, before anything is merged, so what
+L</cluster>, L</user> and L</api> hand back are absolute paths that keep
+pointing at the same file after a C<chdir>.
+
+An absolute reference is passed through untouched, and so is the inline base64
+of the C<*-data> fields, which names no file. A leading C<~> is not expanded -
+it is an ordinary directory name, exactly as it is for C<kubectl>, and resolves
+like any other relative path. An C<exec> plugin's C<command> is not a file
+reference in this sense either: it is looked up in C<PATH> and is left alone.
 
 =seealso
 

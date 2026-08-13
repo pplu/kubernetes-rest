@@ -130,6 +130,27 @@ Revision history for Kubernetes-REST
    contexts(), current_context_name(), context(), cluster() and user() croak
    with that message instead of dying on an undefined hashref whenever no
    kubeconfig could be read.
+ - Relative file references inside a kubeconfig -- certificate-authority on a
+   cluster, client-certificate and client-key on a user -- are resolved
+   against the directory of the kubeconfig file that defines the entry, the
+   way kubectl resolves them, instead of against the process working
+   directory. This changes what an existing kubeconfig means, not just when
+   it works: a kubeconfig saying "certificate-authority: ca.crt" used to find
+   the file only when the program was started from the directory holding it,
+   and now always finds the one sitting next to the kubeconfig. A setup that
+   relies on the old reading -- a cert deliberately placed in the working
+   directory rather than beside the config -- stops finding it, and fails
+   with a TLS error naming the CA file it now looks for; a kubeconfig checked
+   in next to its certs starts working from any directory instead of exactly
+   one. It matters most for a merged KUBECONFIG list, where the directory
+   belongs to the entry rather than to the configuration: a cluster that won
+   from /a/config resolves its CA against /a even when the current context
+   came from /b/config. Resolution happens as each file is read, before the
+   merge, so cluster(), user() and api() hand back absolute paths that a
+   later chdir cannot invalidate. Absolute references, the inline base64 of
+   the *-data fields, and an exec plugin's command -- a PATH lookup, not a
+   file reference -- are untouched, and a leading "~" is not expanded, no
+   more than kubectl expands it.
 
 1.106     2026-08-08 19:03:58Z
 
