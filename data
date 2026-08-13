@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-08-13T17:35:41Z
+created: 2026-08-13T16:35:35Z
+id: 13
+priority: low
+started: 2026-08-13T17:17:22Z
+status: archived
+tags:
+- kubeconfig
+- compat
+title: 'Kubeconfig ignores user.tokenFile: a kubeconfig authenticating from a token
+  file sends an empty token'
+updated: 2026-08-13T17:35:41Z
+---
+
+Kubernetes::REST::Kubeconfig->api resolves user credentials in the order token, exec, empty (Kubeconfig.pm). kubectl knows a third field: user.tokenFile, a path to a file whose content is the bearer token. It is what a kubeconfig points at when the token is rotated by something else -- a projected service account token, a sidecar refreshing it, the kubelet-managed file in an in-cluster style config written by hand.
+
+We do not read it. Such a user matches neither token nor exec, falls into the "no token auth, might be using client certs only" branch and gets AuthToken->new(token => q{}), so every request goes out with an empty bearer token and the cluster answers 401. Nothing in the error names tokenFile, and the kubeconfig works with kubectl right next to it.
+
+Two pieces: read the file into the token in api(), and add tokenFile to the %FILE_REFERENCES table in _resolve_file_references (#12), because kubectl relativizes it against the kubeconfig directory exactly like certificate-authority, client-certificate and client-key -- GetAuthInfoFileReferences in client-go lists all four. The table is already there and takes one more field name.
+
+Open question for whoever picks this up: whether the file is read once at api() time or on every request. kubectl re-reads it, because the point of the field is that the content changes; Kubernetes::REST::AuthToken holds a fixed string, so reading once is the small fix and a refreshing credentials object is the honest one. Reading once already turns a guaranteed 401 into a working client until the token rotates.
