@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-08-13T05:14:43Z
+created: 2026-08-13T05:04:28Z
+id: 9
+priority: low
+started: 2026-08-13T05:14:43Z
+status: done
+tags:
+- api
+title: Kubernetes::REST does not delegate load_yaml to its k8s attribute
+updated: 2026-08-13T05:14:43Z
+---
+
+The k8s attribute in Kubernetes::REST delegates new_object, inflate, json_to_object, struct_to_object and expand_class, but not load_yaml -- so CLI::Cmd::Create has to reach through $api->k8s->load_yaml(...) to parse a YAML manifest, while the JSON sibling is just $api->inflate(...).
+
+Adding load_yaml to that handles list is additive and would make the pair symmetric. REST.pm was outside the scope of #5 (another agent was working in it), hence this ticket rather than the change.
+
+Note the argument contract if this is done: load_yaml parses characters, not bytes, unlike inflate whose decoder is utf8 => 1. A delegated load_yaml inherits that asymmetry, so it wants a line in the POD saying so.
