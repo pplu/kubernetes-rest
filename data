@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-08-13T04:02:48Z
+created: 2026-08-12T04:28:44Z
+id: 2
+priority: low
+started: 2026-08-13T03:49:15Z
+status: archived
+tags:
+- gitignore
+- cleanup
+title: '.gitignore: !.claude/settings.local.json entfernen, rules/-Ausnahme ergänzen
+  (Haus-Muster)'
+updated: 2026-08-13T04:02:48Z
+---
+
+Auf den Stand von io-k8s-p5/p5-app-karr/kubernetes-ocp bringen: settings.local.json ist Maschinen-Noise (nie committen; Ausnahme-Zeile raus), !.claude/rules/ + !.claude/rules/** ergänzen. Nichts ist dort aktuell getrackt, rein präventiv.
