@@ -414,6 +414,15 @@ sub _build_path {
         $path .= "/$args{name}";
     }
 
+    # Subresource suffix: /status, /log, /exec, /attach, /portforward.
+    # Every subresource addresses one named resource - without a name the
+    # suffix would silently land on the collection endpoint instead.
+    if (defined $args{subresource} && length $args{subresource}) {
+        croak "subresource '$args{subresource}' requires a name for $class"
+            unless $args{name};
+        $path .= "/$args{subresource}";
+    }
+
     return $path;
 }
 
@@ -584,7 +593,16 @@ sub build_path {
     my $path = $api->build_path($class, name => 'my-pod', namespace => 'default');
     # => /api/v1/namespaces/default/pods/my-pod
 
-Build the REST API URL path for a resource class. Takes a fully-qualified class name (from L</expand_class>) and optional C<name>/C<namespace> arguments.
+    my $status = $api->build_path($class,
+        name        => 'my-pod',
+        namespace   => 'default',
+        subresource => 'status',
+    );
+    # => /api/v1/namespaces/default/pods/my-pod/status
+
+Build the REST API URL path for a resource class. Takes a fully-qualified class name (from C<expand_class>) and optional C<name>/C<namespace> arguments.
+
+The optional C<subresource> argument appends a subresource segment (C<status>, C<log>, C<exec>, C<attach>, C<portforward>) to the resource path. A subresource always addresses one named resource, so C<subresource> without C<name> croaks rather than returning a path pointing at the collection endpoint.
 
 This is a public API for async wrappers like L<Net::Async::Kubernetes> that need to construct request paths independently.
 
@@ -828,6 +846,51 @@ my %PATCH_TYPES = (
     json      => 'application/json-patch+json',
 );
 
+# Shared argument unpacking for patch() and patch_status(): accepts either a
+# blessed object or a class plus name, in both the shorthand
+# (patch('Pod', 'name', ...)) and the fully keyed (patch('Pod', name => ...))
+# call form. $label only appears in croak messages, $default_type is the patch
+# strategy used when the caller does not pass one.
+sub _unpack_patch_args {
+    my ($self, $label, $default_type, $class_or_object, @rest) = @_;
+
+    my ($class, $name, $namespace, $patch, $patch_type);
+
+    if (ref($class_or_object) && blessed($class_or_object)) {
+        # Object passed: patch($object, patch => {...})
+        my $object = $class_or_object;
+        $class = ref($object);
+        my $metadata = $object->metadata or croak "object must have metadata";
+        $name = $metadata->name or croak "object must have metadata.name";
+        $namespace = $metadata->namespace;
+        my %args = @rest;
+        $patch = $args{patch} // croak "$label requires 'patch' parameter";
+        $patch_type = $args{type} // $default_type;
+    } else {
+        # Class + name: patch('Pod', 'name', namespace => 'ns', patch => {...})
+        my %args;
+        if (@rest >= 1 && !ref($rest[0]) && $rest[0] !~ /^(name|namespace|patch|type)$/) {
+            $args{name} = shift @rest;
+            %args = (%args, @rest);
+        } elsif (@rest % 2 == 0) {
+            %args = @rest;
+        } else {
+            croak "Invalid arguments to $label()";
+        }
+
+        $class = $self->expand_class($class_or_object);
+        $name = $args{name} or croak "name required for $label";
+        $namespace = $args{namespace};
+        $patch = $args{patch} // croak "$label requires 'patch' parameter";
+        $patch_type = $args{type} // $default_type;
+    }
+
+    my $content_type = $PATCH_TYPES{$patch_type}
+        // croak "Unknown patch type '$patch_type' (use: strategic, merge, json)";
+
+    return ($class, $name, $namespace, $patch, $content_type);
+}
+
 sub patch {
     my ($self, $class_or_object, @rest) = @_;
 
@@ -861,44 +924,98 @@ See L<Kubernetes::REST/patch> for detailed examples.
 
 =cut
 
-    my ($class, $name, $namespace, $patch, $patch_type);
-
-    if (ref($class_or_object) && blessed($class_or_object)) {
-        # Object passed: patch($object, patch => {...})
-        my $object = $class_or_object;
-        $class = ref($object);
-        my $metadata = $object->metadata or croak "object must have metadata";
-        $name = $metadata->name or croak "object must have metadata.name";
-        $namespace = $metadata->namespace;
-        my %args = @rest;
-        $patch = $args{patch} // croak "patch requires 'patch' parameter";
-        $patch_type = $args{type} // 'strategic';
-    } else {
-        # Class + name: patch('Pod', 'name', namespace => 'ns', patch => {...})
-        my %args;
-        if (@rest >= 1 && !ref($rest[0]) && $rest[0] !~ /^(name|namespace|patch|type)$/) {
-            $args{name} = shift @rest;
-            %args = (%args, @rest);
-        } elsif (@rest % 2 == 0) {
-            %args = @rest;
-        } else {
-            croak "Invalid arguments to patch()";
-        }
-
-        $class = $self->expand_class($class_or_object);
-        $name = $args{name} or croak "name required for patch";
-        $namespace = $args{namespace};
-        $patch = $args{patch} // croak "patch requires 'patch' parameter";
-        $patch_type = $args{type} // 'strategic';
-    }
-
-    my $content_type = $PATCH_TYPES{$patch_type}
-        // croak "Unknown patch type '$patch_type' (use: strategic, merge, json)";
+    my ($class, $name, $namespace, $patch, $content_type)
+        = $self->_unpack_patch_args('patch', 'strategic', $class_or_object, @rest);
 
     my $path = $self->_build_path($class, name => $name, namespace => $namespace);
     my $response = $self->_request('PATCH', $path, $patch,
         content_type => $content_type);
     $self->_check_response($response, "patch $class");
+
+    return $self->_inflate_object($class, $response);
+}
+
+sub patch_status {
+    my ($self, $class_or_object, @rest) = @_;
+
+=method patch_status
+
+    my $node = $api->patch_status('OCPNode', 'cp-1',
+        namespace => 'ocp',
+        patch     => { status => { phase => 'Ready', ip => '10.0.0.7' } },
+    );
+
+    # Or with an object:
+    my $node = $api->patch_status($node,
+        patch => { status => { phase => 'Ready' } },
+    );
+
+Partially update a resource's B<status> through the C</status> subresource.
+
+Once a CustomResourceDefinition declares C<subresources: {status: {}}>, the API
+server strips the C<status> stanza from every write to the main endpoint -
+C<create>, C<update>, C<patch> and server-side apply alike - and still answers
+2xx. The write appears to succeed and nothing is stored. Status has to go to
+C</status>, which is what this method addresses.
+
+Takes the same arguments as L</patch> (object or class plus name, both call
+forms, the same C<type> values) and returns the full object from the server.
+The patch document is passed through unchanged, so it carries its own
+C<status> key.
+
+The default patch type is C<merge>, not C<strategic> as in L</patch>: custom
+resources do not support strategic merge patch and the API server rejects it
+with 415, and C<merge> works for built-in kinds as well. Pass
+C<type =E<gt> 'strategic'> explicitly when patching the status of a built-in
+resource and you need array merge semantics.
+
+=cut
+
+    my ($class, $name, $namespace, $patch, $content_type)
+        = $self->_unpack_patch_args('patch_status', 'merge', $class_or_object, @rest);
+
+    my $path = $self->_build_path($class,
+        name        => $name,
+        namespace   => $namespace,
+        subresource => 'status',
+    );
+    my $response = $self->_request('PATCH', $path, $patch,
+        content_type => $content_type);
+    $self->_check_response($response, "patch_status $class");
+
+    return $self->_inflate_object($class, $response);
+}
+
+sub update_status {
+    my ($self, $object) = @_;
+
+=method update_status
+
+    my $node = $api->update_status($node);
+
+Replace a resource's B<status> through the C</status> subresource. The whole
+object is sent, as with L</update>, but the server only takes its C<status>
+and leaves C<spec> and C<metadata> untouched. Returns the updated object.
+
+This is the read-modify-write counterpart to L</patch_status>: it needs a
+current C<resourceVersion> and fails with a 409 conflict when the object
+changed in the meantime. Prefer L</patch_status> when you are setting
+individual status fields.
+
+=cut
+
+    my $class = ref($object);
+    my $metadata = $object->metadata or croak "object must have metadata";
+    my $name = $metadata->name or croak "object must have metadata.name";
+    my $namespace = $metadata->namespace;
+
+    my $path = $self->_build_path($class,
+        name        => $name,
+        namespace   => $namespace,
+        subresource => 'status',
+    );
+    my $response = $self->_request('PUT', $path, $object->TO_JSON);
+    $self->_check_response($response, "update_status " . ref($object));
 
     return $self->_inflate_object($class, $response);
 }
@@ -1271,7 +1388,7 @@ The streaming mode is designed for event-based systems like L<IO::Async> — see
     my $limit_bytes  = delete $args{limitBytes};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args) . '/log';
+    my $path = $self->_build_path($class, %args, subresource => 'log');
 
     my %params;
     $params{container}    = $container     if defined $container;
@@ -1365,7 +1482,7 @@ session/handle object managed by that backend).
     my $on_error = delete $args{on_error};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args) . '/portforward';
+    my $path = $self->_build_path($class, %args, subresource => 'portforward');
 
     my $req = $self->_prepare_request('GET', $path,
         parameters => { ports => $ports },
@@ -1450,7 +1567,7 @@ session/handle object managed by that backend).
     my $on_error = delete $args{on_error};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args) . '/exec';
+    my $path = $self->_build_path($class, %args, subresource => 'exec');
 
     my %params = (
         command => $command,
@@ -1535,7 +1652,7 @@ session/handle object managed by that backend).
     my $on_error = delete $args{on_error};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args) . '/attach';
+    my $path = $self->_build_path($class, %args, subresource => 'attach');
 
     my %params = (
         stdin   => $stdin  ? 'true' : 'false',
@@ -1669,8 +1786,9 @@ This version has been completely rewritten. Key changes that may affect your cod
 
 The old method-per-operation API (e.g., C<< $api->Core->ListNamespacedPod(...) >>)
 has been replaced with a simple API: C<list>, C<get>, C<create>, C<update>,
-C<patch>, C<delete>, C<ensure>, C<ensure_all>, C<ensure_only>, C<watch>,
-C<log>, C<port_forward>, C<exec>, C<attach>.
+C<patch>, C<patch_status>, C<update_status>, C<delete>, C<ensure>,
+C<ensure_all>, C<ensure_only>, C<watch>, C<log>, C<port_forward>, C<exec>,
+C<attach>.
 
 =item * B<Old API still works but deprecated>
 
@@ -1878,6 +1996,60 @@ For namespaced resources, the namespace.
 =back
 
 Returns the full updated object from the server.
+
+=head2 patch_status($class_or_object, %args)
+
+Partially update a resource's status through the C</status> subresource.
+
+    my $node = $api->patch_status('OCPNode', 'cp-1',
+        namespace => 'ocp',
+        patch     => { status => { phase => 'Ready', ip => '10.0.0.7' } },
+    );
+
+    # Same thing with an object reference
+    my $node = $api->patch_status($node,
+        patch => { status => { phase => 'Ready' } },
+    );
+
+B<You need this whenever the resource has a status subresource.> A
+CustomResourceDefinition that declares
+
+    subresources:
+      status: {}
+
+makes the API server strip the C<status> stanza from every write to the main
+endpoint. C<create()>, C<update()>, C<patch()> and server-side apply are all
+affected, and all of them still answer 2xx - the call looks like it worked and
+nothing was stored. The same is true for the built-in kinds that have always
+had a status subresource (Pod, Node, Deployment, PersistentVolumeClaim, ...).
+
+Arguments are the same as L</patch>: an object or a class plus C<name>, both
+call forms, and the same C<type> values. The patch document is sent unchanged,
+so it carries its own C<status> key.
+
+The one difference is the default patch type, which is C<merge> rather than
+C<strategic>. Custom resources do not support strategic merge patch - the API
+server answers 415 Unsupported Media Type - while JSON Merge Patch works for
+custom and built-in kinds alike. Pass C<type =E<gt> 'strategic'> explicitly if
+you are patching a built-in resource's status and need array merge semantics.
+
+Returns the full updated object from the server.
+
+=head2 update_status($object)
+
+Replace a resource's status through the C</status> subresource.
+
+    my $node = $api->get('Node', 'cp-1');
+    $node->status->phase('Ready');
+    my $updated = $api->update_status($node);
+
+Sends the whole object like L</update> does, but the server takes only its
+C<status> and leaves C<spec> and C<metadata> alone. Being a full replace, it
+needs a current C<resourceVersion> and answers 409 when the object changed in
+the meantime; L</patch_status> is the better tool for setting individual
+fields.
+
+Returns the updated object from the server.
 
 =head2 delete($class_or_object, %args)
 
@@ -2171,7 +2343,11 @@ Example async integration:
 
     # Build request using Kubernetes::REST
     my $class = $rest->expand_class('Pod');
-    my $path = $rest->build_path($class, name => $name, namespace => $ns) . '/log';
+    my $path = $rest->build_path($class,
+        name        => $name,
+        namespace   => $ns,
+        subresource => 'log',
+    );
     my $req = $rest->prepare_request('GET', $path, parameters => { follow => 'true' });
 
     # Execute through your own event loop
