@@ -3,6 +3,7 @@ package Kubernetes::REST::Kubeconfig;
 our $VERSION = '1.107';
 use Moo;
 use Carp qw(croak);
+use Config ();
 use YAML::XS ();
 use Path::Tiny qw(path);
 use MIME::Base64 qw(decode_base64);
@@ -25,6 +26,14 @@ use namespace::clean;
         context_name => 'my-cluster',
     );
 
+    # Several kubeconfigs, merged the way kubectl merges $KUBECONFIG
+    my $kc = Kubernetes::REST::Kubeconfig->new(
+        kubeconfig_path => '/etc/kube/base:/home/me/.kube/extra',
+    );
+    my $kc = Kubernetes::REST::Kubeconfig->new(
+        kubeconfig_path => [ '/etc/kube/base', '/home/me/.kube/extra' ],
+    );
+
     # List available contexts
     my $contexts = $kc->contexts;
 
@@ -38,6 +47,10 @@ use namespace::clean;
 
 Parses Kubernetes kubeconfig files (typically C<~/.kube/config>) and creates configured L<Kubernetes::REST> instances.
 
+Several kubeconfig files can be given at once - as the C<:>-separated list
+C<kubectl> expects in C<KUBECONFIG>, or as an arrayref - and are merged into
+one configuration the way C<kubectl> merges them. See L</MERGING>.
+
 When no kubeconfig file is found, automatically falls back to in-cluster
 authentication using the pod's service account token.
 
@@ -46,6 +59,8 @@ Supports:
 =over 4
 
 =item * Multiple clusters and contexts
+
+=item * Merging several kubeconfig files, C<kubectl>-style
 
 =item * Token authentication
 
@@ -65,12 +80,56 @@ Supports:
 
 has kubeconfig_path => (
     is => 'ro',
-    default => sub { $ENV{KUBECONFIG} // "$ENV{HOME}/.kube/config" },
+    default => sub { $_[0]->_default_kubeconfig_path },
 );
 
 =attr kubeconfig_path
 
-Path to the kubeconfig file. Defaults to the C<KUBECONFIG> environment variable if set, otherwise C<~/.kube/config>.
+Path to the kubeconfig file: a single path, a C<$Config{path_sep}>-separated
+list of paths (C<:> on Unix, C<;> on Win32), or an arrayref of paths. A list is
+merged as described in L</MERGING>; a single path behaves exactly as it always
+has.
+
+Defaults to the C<KUBECONFIG> environment variable if it is set and not empty,
+otherwise to C<~/.kube/config>. With neither C<KUBECONFIG> nor C<HOME> set
+there is no path to guess, and the default is C<undef>: L</api> then goes
+straight to in-cluster authentication, and every method that needs a file
+croaks naming the two missing variables instead of reaching for C</.kube/config>.
+
+The split list, without empty entries, is L</kubeconfig_paths>.
+
+=cut
+
+sub _default_kubeconfig_path {
+    my $self = shift;
+    return $ENV{KUBECONFIG} if defined $ENV{KUBECONFIG} and length $ENV{KUBECONFIG};
+    return undef unless defined $ENV{HOME} and length $ENV{HOME};
+    return "$ENV{HOME}/.kube/config";
+}
+
+my $PATH_SEP = $Config::Config{path_sep} || ':';
+
+has kubeconfig_paths => (
+    is => 'lazy',
+    init_arg => undef,
+    builder => sub {
+        my $self = shift;
+        my $path = $self->kubeconfig_path;
+        return [] unless defined $path;
+        my @entries = ref $path eq 'ARRAY' ? @$path : split /\Q$PATH_SEP\E/, $path, -1;
+        return [ grep { defined and length } @entries ];
+    },
+);
+
+=attr kubeconfig_paths
+
+Arrayref of the individual kubeconfig paths L</kubeconfig_path> names, in the
+order they are merged, with empty entries removed. Derived from
+C<kubeconfig_path> and not settable on its own. Empty when neither
+C<KUBECONFIG> nor C<HOME> is set.
+
+The paths are not checked for existence here - see L</MERGING> for what happens
+to entries that are not there.
 
 =cut
 
@@ -89,11 +148,54 @@ has _config => (
     is => 'lazy',
     builder => sub {
         my $self = shift;
-        my $path = $self->kubeconfig_path;
-        return undef unless -f $path;
-        return YAML::XS::LoadFile($path);
+        my @configs;
+        for my $path (@{ $self->kubeconfig_paths }) {
+            # A file the list names but that is not there is not an error, the
+            # same way it is not one for kubectl.
+            next unless -f $path;
+            my $config = YAML::XS::LoadFile($path);
+            push @configs, $config if ref $config eq 'HASH';
+        }
+        return undef unless @configs;
+        return $self->_merge_configs(@configs);
     },
 );
+
+# The sections keyed by name, which are unioned; everything else is a plain
+# top-level key taken from the first file that has it.
+my @NAMED_SECTIONS = qw(clusters contexts users);
+my %IS_NAMED_SECTION = map { $_ => 1 } @NAMED_SECTIONS;
+
+sub _merge_configs {
+    my ($self, @configs) = @_;
+
+    my (%merged, %seen);
+    for my $config (@configs) {
+        for my $section (@NAMED_SECTIONS) {
+            for my $entry (@{ $config->{$section} // [] }) {
+                next unless ref $entry eq 'HASH' and defined $entry->{name};
+                next if $seen{$section}{ $entry->{name} }++;
+                push @{ $merged{$section} }, $entry;
+            }
+        }
+        for my $key (grep { !$IS_NAMED_SECTION{$_} } keys %$config) {
+            next if exists $merged{$key};
+            my $value = $config->{$key};
+            next unless defined $value;
+            next if !ref $value and !length $value;
+            $merged{$key} = $value;
+        }
+    }
+
+    return \%merged;
+}
+
+sub _not_found_error {
+    my $self = shift;
+    my $paths = $self->kubeconfig_paths;
+    return 'Kubeconfig not found: ' . join($PATH_SEP, @$paths) if @$paths;
+    return 'Kubeconfig not found: neither KUBECONFIG nor HOME is set';
+}
 
 sub current_context_name {
     my $self = shift;
@@ -102,12 +204,14 @@ sub current_context_name {
 
     my $name = $kc->current_context_name;
 
-Returns the current context name (either from C<context_name> attribute or from the kubeconfig's C<current-context>).
+Returns the current context name (either from C<context_name> attribute or from the kubeconfig's C<current-context>). With several kubeconfig files merged, C<current-context> is the one from the first file that sets it.
 
 =cut
 
     return $self->context_name if $self->has_context_name;
-    return $self->_config->{'current-context'};
+    my $config = $self->_config
+        or croak $self->_not_found_error;
+    return $config->{'current-context'};
 }
 
 sub contexts {
@@ -117,12 +221,12 @@ sub contexts {
 
     my $contexts = $kc->contexts;
 
-Returns an arrayref of all available context names from the kubeconfig.
+Returns an arrayref of all available context names from the kubeconfig, or from every merged kubeconfig.
 
 =cut
 
     my $config = $self->_config
-        or croak "Kubeconfig not found: " . $self->kubeconfig_path;
+        or croak $self->_not_found_error;
     return [ map { $_->{name} } @{$config->{contexts} // []} ];
 }
 
@@ -146,8 +250,10 @@ Look up a context entry by name and return its C<context> hashref (with C<cluste
 
 =cut
 
+    my $config = $self->_config
+        or croak $self->_not_found_error;
     $name //= $self->current_context_name;
-    my $ctx = $self->_find_by_name($self->_config->{contexts}, $name)
+    my $ctx = $self->_find_by_name($config->{contexts}, $name)
         or croak "Context not found: $name";
     return $ctx->{context};
 }
@@ -163,7 +269,9 @@ Look up a cluster entry by name and return its C<cluster> hashref (with keys suc
 
 =cut
 
-    my $cluster = $self->_find_by_name($self->_config->{clusters}, $name)
+    my $config = $self->_config
+        or croak $self->_not_found_error;
+    my $cluster = $self->_find_by_name($config->{clusters}, $name)
         or croak "Cluster not found: $name";
     return $cluster->{cluster};
 }
@@ -179,7 +287,9 @@ Look up a user entry by name and return its C<user> hashref (with keys such as C
 
 =cut
 
-    my $user = $self->_find_by_name($self->_config->{users}, $name)
+    my $config = $self->_config
+        or croak $self->_not_found_error;
+    my $user = $self->_find_by_name($config->{users}, $name)
         or croak "User not found: $name";
     return $user->{user};
 }
@@ -214,7 +324,9 @@ Certificate and key material can come from either an inline base64 C<*-data> fie
 User authentication is resolved in this order: a plain C<token> field; an C<exec> block (kubectl's exec-credential-plugin mechanism, used for e.g. cloud IAM auth), which runs the configured C<command> (with C<args> and any C<env> entries applied to the child process) and reads C<status.token> from its output (parsed as YAML, which also accepts the JSON that real exec plugins emit); otherwise an empty token, for setups that authenticate via client certificate alone.
 
 Falls back to in-cluster service account authentication when no kubeconfig
-file is found and the pod has a mounted token at
+file is found - none of the merged paths exists, or there is no path at all
+because neither C<KUBECONFIG> nor C<HOME> is set - and the pod has a mounted
+token at
 C</var/run/secrets/kubernetes.io/serviceaccount/token>. In that case the API
 server address comes from the C<KUBERNETES_SERVICE_HOST>/C<KUBERNETES_SERVICE_PORT>
 environment variables (defaulting to C<kubernetes.default.svc:443>), and the
@@ -225,8 +337,7 @@ cluster CA is read from C</var/run/secrets/kubernetes.io/serviceaccount/ca.crt>.
     # If no kubeconfig, try in-cluster
     unless ($self->_config) {
         return $self->_in_cluster_api
-            // croak "Kubeconfig not found: " . $self->kubeconfig_path
-                   . " and not running in-cluster";
+            // croak $self->_not_found_error . " and not running in-cluster";
     }
 
     $context_name //= $self->current_context_name;
@@ -320,6 +431,37 @@ sub _in_cluster_api {
 }
 
 1;
+
+=head1 MERGING
+
+C<KUBECONFIG> is a C<PATH>-style list of kubeconfig files, not a single path -
+C<:>-separated everywhere except on Win32, where it is C<;>-separated, the same
+separator Perl reports in C<$Config{path_sep}>. C<kubectl> merges every file in
+that list into one configuration, and so does this module:
+
+=over 4
+
+=item * Clusters, contexts and users are unioned by name. The B<first> file
+that defines a given name wins; later definitions of that same name are
+discarded, they do not overwrite fields.
+
+=item * C<current-context> comes from the first file in the list that sets one,
+as does every other top-level key (C<apiVersion>, C<kind>, C<preferences>).
+
+=item * Entries that name a file that does not exist are skipped silently,
+which is what C<kubectl> does - a list assembled by a shell profile or by
+C<direnv> routinely mentions files that are not there. So are empty entries, so
+C</a::/b> and a trailing C<:> are harmless.
+
+=item * Relative entries are resolved against the current working directory.
+Relative file references I<inside> a kubeconfig - C<certificate-authority>,
+C<client-certificate>, C<client-key> - are resolved the same way, against the
+working directory rather than against the directory of the file naming them.
+
+=back
+
+If no file in the list exists, the configuration is empty and L</api> falls
+back to in-cluster authentication exactly as it does for a single missing file.
 
 =seealso
 

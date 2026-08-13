@@ -98,6 +98,38 @@ Revision history for Kubernetes-REST
    that gets evaluated in-process. IO::K8s' add() is deliberately not
    delegated, because it mutates a resource map this client mirrors in its
    own resource_map attribute.
+ - KUBECONFIG is read as the list of files kubectl merges, not as a single
+   path. "KUBECONFIG=/a/config:/b/config" went into one open() and died with
+   "Cannot open /a/config:/b/config: No such file or directory" -- a hard
+   failure on a setting that works everywhere else in the ecosystem, and the
+   normal shape of the variable for anyone layering a per-project kubeconfig
+   over a base one with direnv. Kubernetes::REST::Kubeconfig now splits
+   kubeconfig_path on the platform path separator (":" everywhere but Win32,
+   where it is ";") and merges the files the way kubectl does: clusters,
+   contexts and users are unioned by name and the first file defining a name
+   wins, whole entry at a time rather than field by field, and
+   current-context comes from the first file that sets one. Entries naming a
+   file that is not there are skipped silently, as are empty entries, so
+   "/a::/b" and a trailing ":" are harmless; relative entries resolve against
+   the working directory. kubeconfig_path keeps its shape -- a single path
+   behaves exactly as it did, is still returned unsplit, and now also accepts
+   an arrayref of paths -- and the new read-only kubeconfig_paths attribute
+   is the split list. --kubeconfig on kube_client and kube_watch takes a list
+   too, since it is passed straight through.
+ - Fix Kubernetes::REST::Kubeconfig warning "Use of uninitialized value
+   $ENV{HOME} in concatenation" and then looking for "/.kube/config" when
+   HOME is unset -- the case in cron jobs, some systemd units and minimal
+   containers, where the resulting "Cannot open /.kube/config" named
+   everything except the real problem. With neither KUBECONFIG nor HOME set
+   there is nothing to guess, so kubeconfig_path defaults to undef and
+   kubeconfig_paths is empty. api() then goes straight to the in-cluster
+   service account, which makes a pod without HOME but with a mounted token
+   work rather than fail; when there is no token either, and for the other
+   methods, the error is "Kubeconfig not found: neither KUBECONFIG nor HOME
+   is set". An empty KUBECONFIG counts as unset, as it does for kubectl.
+   contexts(), current_context_name(), context(), cluster() and user() croak
+   with that message instead of dying on an undefined hashref whenever no
+   kubeconfig could be read.
 
 1.106     2026-08-08 19:03:58Z
 

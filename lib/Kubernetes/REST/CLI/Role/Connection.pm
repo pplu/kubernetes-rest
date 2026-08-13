@@ -30,8 +30,10 @@ used, and without that C<~/.kube/config> - the same precedence C<kubectl> and
 L<Kubernetes::REST::Kubeconfig> apply. An explicitly given C<--kubeconfig> wins
 over C<KUBECONFIG>.
 
-Note that C<KUBECONFIG> is honoured as a single path here, not as the
-C<:>-separated list of files C<kubectl> merges.
+C<KUBECONFIG> may name several files as the C<:>-separated list C<kubectl>
+merges, in which case they are merged the same way - see
+L<Kubernetes::REST::Kubeconfig/MERGING>. C<--kubeconfig> takes such a list too,
+since it is passed straight through.
 
 =cut
 
@@ -70,7 +72,8 @@ has api => (
 Lazy L<Kubernetes::REST> instance built from the kubeconfig.
 
 The kubeconfig it is built from is C<--kubeconfig> if given, otherwise
-C<$ENV{KUBECONFIG}>, otherwise C<~/.kube/config>.
+C<$ENV{KUBECONFIG}>, otherwise C<~/.kube/config>. Either of the first two may
+be a C<:>-separated list of files, which is merged as C<kubectl> merges it.
 
 =cut
 
