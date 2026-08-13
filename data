@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-08-13T17:35:07Z
+created: 2026-08-13T05:13:50Z
+id: 10
+priority: low
+started: 2026-08-13T16:12:59Z
+status: archived
+tags:
+- kubeconfig
+- compat
+title: KUBECONFIG is read as a single path, not as the :-separated list kubectl merges
+updated: 2026-08-13T17:35:07Z
+---
+
+Kubernetes::REST::Kubeconfig->kubeconfig_path defaults to $ENV{KUBECONFIG} // "$ENV{HOME}/.kube/config" (Kubeconfig.pm:68) and hands the result straight to a single open(). kubectl treats KUBECONFIG as a PATH-style, ":"-separated list of kubeconfig files and merges them: clusters, contexts and users are unioned, the first file to define a given name wins, and current-context comes from the first file that sets one.
+
+With KUBECONFIG="/a/config:/b/config" we therefore try to open the literal string "/a/config:/b/config" and die with "Cannot open ...: No such file or directory" -- not a wrong cluster, but a hard failure on a setting that is valid everywhere else in the ecosystem, and a common one for anyone using direnv or a per-project kubeconfig layered on a base one.
+
+Deliberately out of scope of #8, which was only about the CLI overriding the variable entirely; #8 documents the single-path behaviour in bin/kube_client, bin/kube_watch and CLI::Role::Connection so it is at least not a surprise.
+
+Doing this means: split kubeconfig_path on ":" (and ";" on Win32, cf. File::Spec->path), parse each file, then merge with first-wins semantics per named entry, plus current-context from the first file that has one. Worth deciding whether kubeconfig_path stays a single scalar with the list handled internally or grows a list form; the attribute is public API and t/14_kubeconfig.t pins its current shape.
