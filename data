@@ -1,0 +1,28 @@
+---
+class: standard
+completed: 2026-08-13T17:34:45Z
+created: 2026-08-13T04:51:06Z
+id: 4
+priority: medium
+started: 2026-08-13T05:01:14Z
+status: archived
+tags:
+- v0
+- bug
+title: V0Group::_build_class baut falsche Klassennamen fuer Apiextensions und Apiregistration
+updated: 2026-08-13T17:34:45Z
+---
+
+Die v0-Kompatibilitaetsschicht mappt Gruppennamen auf IO::K8s-Pfade ueber %group_map in V0Group::_build_class, und das Ergebnis ist immer IO::K8s::Api::<Gruppe>::<Version>::<Kind>. Fuer zwei Gruppen stimmt dieses Schema nicht:
+
+  gebaut:  IO::K8s::Api::Apiextensions::V1::CustomResourceDefinition
+  echt:    IO::K8s::ApiextensionsApiserver::Pkg::Apis::Apiextensions::V1::CustomResourceDefinition
+
+  gebaut:  IO::K8s::Api::Apiregistration::V1::APIService
+  echt:    IO::K8s::KubeAggregator::Pkg::Apis::Apiregistration::V1::APIService
+
+Damit sterben $api->Apiextensions->...(...) und $api->Apiregistration->...(...) mit "Cannot locate module", waehrend die POD sagt, dass diese Aufrufe uebersetzt werden und den Cluster erreichen.
+
+Kubernetes::REST::fetch_resource_map behandelt exakt dieselben zwei Sonderfaelle bereits korrekt -- die Logik existiert also schon im Repo, nur nicht in V0Group.
+
+Gefunden beim Doku-Durchgang 2026-08-13. Betrifft nur die deprecated v0-Schicht; entweder fixen oder die POD ehrlich machen.
