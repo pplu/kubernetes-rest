@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-08-13T05:04:43Z
+created: 2026-08-13T04:51:17Z
+id: 6
+priority: low
+started: 2026-08-13T05:04:43Z
+status: done
+tags:
+- cli
+- doku
+title: Raw-Kommando nennt Gruppen CoreV1/AppsV1 -- die heissen Core/Apps
+updated: 2026-08-13T05:04:43Z
+---
+
+Der Nutzungshinweis in CLI::Cmd::Raw (print STDERR "Example: kube_client raw CoreV1 ListNamespace") und fuenf Stellen in bin/kube_clients POD nennen die v0-Gruppen mit Versions-Suffix. Die V0Group-Subklassen heissen ohne: Core, Apps, Batch, ... Wer dem Beispiel folgt, bekommt einen Fehler.
+
+Die POD in lib/ wurde beim Doku-Durchgang 2026-08-13 korrigiert; die print-Zeile in Raw.pm und bin/kube_client sind noch offen.
