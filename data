@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-08-13T17:35:30Z
+created: 2026-08-13T16:12:50Z
+id: 12
+priority: low
+started: 2026-08-13T16:35:40Z
+status: archived
+tags:
+- kubeconfig
+- compat
+title: Relative file references inside a kubeconfig resolve against the cwd, not against
+  the file
+updated: 2026-08-13T17:35:30Z
+---
+
+kubectl resolves every relative path a kubeconfig names -- certificate-authority, client-certificate, client-key, and the exec plugin command when it is a path -- against the directory of the kubeconfig file that names it. Kubernetes::REST::Kubeconfig passes those strings through untouched (Kubeconfig.pm, _resolve_cert and api), so they end up resolved against the process working directory.
+
+For a single ~/.kube/config with absolute paths, which is what the file kubectl writes contains, this never shows. It shows for a kubeconfig checked into a project next to its certs -- "certificate-authority: ca.crt" works when you run from the project root and breaks from anywhere else -- and it got more visible with #10: a merged KUBECONFIG list draws entries from several directories at once, so there is no single directory the whole configuration is relative to any more, and a relative cert in the second file of the list means something different to kubectl than to us.
+
+Fixing it means remembering, per parsed file, which path it came from, and resolving the *-data-less cert fields against that directorys before they reach Kubernetes::REST::Server. The merge in _merge_configs keeps whole entries from one file, so the file each entry came from is still knowable there -- the resolution has to happen while the file is being read, or the entry has to carry its origin.
+
+This changes the meaning of an existing relative path in an existing kubeconfig, so it is a behaviour change with a Changes bullet, not a silent fix. #10 documents the current cwd-relative behaviour in the MERGING section of Kubeconfig.pm; that paragraph goes away with this.
