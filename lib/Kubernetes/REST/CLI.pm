@@ -26,7 +26,7 @@ with 'Kubernetes::REST::CLI::Role::Connection';
 
 Base class for the C<kube_client> command-line tool. Provides common functionality for managing Kubernetes resources from the command line.
 
-This tool uses L<Kubernetes::REST::Kubeconfig> to connect to the cluster, so it reads from C<~/.kube/config> by default.
+This tool uses L<Kubernetes::REST::Kubeconfig> to connect to the cluster: C<--kubeconfig> if given, otherwise the C<KUBECONFIG> environment variable, otherwise C<~/.kube/config>.
 
 =head1 COMMANDS
 

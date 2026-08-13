@@ -13,16 +13,25 @@ Consumed by L<Kubernetes::REST::CLI> and L<Kubernetes::REST::CLI::Watch>.
 
 =cut
 
+# Deliberately without a default: an option that always has a value is always
+# passed on, and Kubernetes::REST::Kubeconfig never reaches its own default of
+# $ENV{KUBECONFIG} // ~/.kube/config. Leaving it undef when the user did not ask
+# for a path is what lets the environment variable through.
 option kubeconfig => (
     is => 'ro',
     format => 's',
-    doc => 'Path to kubeconfig file',
-    default => sub { "$ENV{HOME}/.kube/config" },
+    doc => 'Path to kubeconfig file (default: $KUBECONFIG, else ~/.kube/config)',
 );
 
 =opt kubeconfig
 
-Path to kubeconfig file. Defaults to C<~/.kube/config>.
+Path to kubeconfig file. Without it the C<KUBECONFIG> environment variable is
+used, and without that C<~/.kube/config> - the same precedence C<kubectl> and
+L<Kubernetes::REST::Kubeconfig> apply. An explicitly given C<--kubeconfig> wins
+over C<KUBECONFIG>.
+
+Note that C<KUBECONFIG> is honoured as a single path here, not as the
+C<:>-separated list of files C<kubectl> merges.
 
 =cut
 
@@ -45,8 +54,11 @@ has api => (
     is => 'lazy',
     builder => sub {
         my $self = shift;
+        # kubeconfig_path is only passed when --kubeconfig was given, so an
+        # unset option falls through to Kubeconfig's own $ENV{KUBECONFIG}
+        # default rather than being overridden by a home-directory guess.
         my $kc = Kubernetes::REST::Kubeconfig->new(
-            kubeconfig_path => $self->kubeconfig,
+            (defined $self->kubeconfig ? (kubeconfig_path => $self->kubeconfig) : ()),
             ($self->context ? (context_name => $self->context) : ()),
         );
         return $kc->api;
@@ -56,6 +68,9 @@ has api => (
 =attr api
 
 Lazy L<Kubernetes::REST> instance built from the kubeconfig.
+
+The kubeconfig it is built from is C<--kubeconfig> if given, otherwise
+C<$ENV{KUBECONFIG}>, otherwise C<~/.kube/config>.
 
 =cut
 

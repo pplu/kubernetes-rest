@@ -116,7 +116,11 @@ has k8s => (
         inflate
         json_to_object
         struct_to_object
+        object_to_json
+        object_to_struct
         expand_class
+        load
+        load_yaml
     )],
 );
 
@@ -124,7 +128,27 @@ has k8s => (
 
 L<IO::K8s> instance configured with the same resource map. Automatically created when needed.
 
-Provides delegated methods: C<new_object>, C<inflate>, C<json_to_object>, C<struct_to_object>, C<expand_class>.
+Provides delegated methods: C<new_object>, C<inflate>, C<json_to_object>, C<struct_to_object>, C<object_to_json>, C<object_to_struct>, C<expand_class>, C<load>, C<load_yaml>.
+
+Delegation is a convenience only, every one of them behaves exactly as it does on L<IO::K8s>, including its argument contract:
+
+=over
+
+=item *
+
+C<inflate> takes a hashref, or JSON as B<UTF-8 bytes> - its decoder is C<utf8 =E<gt> 1>.
+
+=item *
+
+C<load_yaml> takes a file name or YAML as B<characters>. Handing it bytes turns every non-ASCII value into mojibake, so decode first (C<Encode::decode('UTF-8', $yaml)>). A newline-free argument is taken as a file name.
+
+=item *
+
+C<load> reads a C<.pk8s> manifest, which is Perl code and is C<eval>ed in-process. Only load C<.pk8s> files you trust; for data-only manifests use C<load_yaml>.
+
+=back
+
+Not delegated: C<add>, which registers extra classes in the L<IO::K8s> resource map. That map is mirrored by this client's own L</resource_map> attribute, and mutating one behind the other's back makes the two disagree - reach through C<< $api->k8s->add(...) >> if you really mean to.
 
 =cut
 
@@ -1890,6 +1914,11 @@ To use an async event loop, provide your own IO backend:
 Optional. L<IO::K8s> instance configured with the same resource map as this client.
 Automatically created when needed.
 
+Its object methods are delegated onto this client, so C<< $api->load_yaml(...) >>
+and C<< $api->k8s->load_yaml(...) >> are the same call: C<new_object>,
+C<inflate>, C<json_to_object>, C<struct_to_object>, C<object_to_json>,
+C<object_to_struct>, C<expand_class>, C<load> and C<load_yaml>.
+
 =head2 resource_map_from_cluster
 
 Optional boolean. If true, loads the resource map dynamically from the cluster's
@@ -1922,6 +1951,107 @@ and either a hashref or a hash of attributes.
 
     # With hash
     my $ns = $api->new_object(Namespace => metadata => { name => 'foo' });
+
+Delegated to L<IO::K8s/new_object>.
+
+=head2 inflate($data)
+
+Inflate a JSON string or hashref into a typed L<IO::K8s> object. The class is
+auto-detected from the data's C<kind> field (and C<apiVersion>, where present).
+
+    my $pod = $api->inflate($json_string);
+    my $pod = $api->inflate(\%hashref);
+
+Delegated to L<IO::K8s/inflate>.
+
+=head2 json_to_object($class, $json)
+
+Decode a JSON string into a typed L<IO::K8s> object. Called with a single
+argument (just C<$json>), auto-detects the class from the decoded C<kind>
+field, like C<inflate>.
+
+    my $pod = $api->json_to_object($json_with_kind);
+    my $pod = $api->json_to_object('Pod', $json_string);
+
+Delegated to L<IO::K8s/json_to_object>.
+
+=head2 struct_to_object($class, $hashref)
+
+Inflate a plain hashref into a typed L<IO::K8s> object. Called with a single
+argument (just C<$hashref>), auto-detects the class from the hashref's
+C<kind> field, like C<inflate>.
+
+    my $pod = $api->struct_to_object($hashref_with_kind);
+    my $pod = $api->struct_to_object('Pod', \%hashref);
+
+Delegated to L<IO::K8s/struct_to_object>.
+
+=head2 object_to_json($object)
+
+Serialise a typed L<IO::K8s> object back to a JSON string. The inverse of
+C<json_to_object>.
+
+    my $json = $api->object_to_json($pod);
+
+Delegated to L<IO::K8s/object_to_json>.
+
+=head2 object_to_struct($object)
+
+Serialise a typed L<IO::K8s> object back to a plain hashref. The inverse of
+C<struct_to_object>.
+
+    my $hashref = $api->object_to_struct($pod);
+
+Delegated to L<IO::K8s/object_to_struct>.
+
+=head2 load_yaml($file_or_string, %opts)
+
+Parse a YAML manifest - a file name or a YAML string - into an arrayref of
+typed L<IO::K8s> objects, validated against the Kubernetes types.
+C<--->-separated multi-document YAML is supported and is the common case for
+Kubernetes manifests, so this returns an arrayref even for a single document.
+
+    for my $obj (@{ $api->load_yaml('deployment.yaml') }) {
+        $api->create($obj);
+    }
+
+Mind the argument contract, which differs from C<inflate>: C<load_yaml> parses
+B<characters>, while C<inflate>'s decoder is C<utf8 =E<gt> 1> and takes B<UTF-8
+bytes>. YAML read off disk or off C<STDIN> is bytes and has to be decoded
+first, or every non-ASCII value comes back as mojibake:
+
+    my $objects = $api->load_yaml(Encode::decode('UTF-8', $yaml_bytes));
+
+An argument containing no newline is taken as a file name, which is worth a
+trailing C<"\n"> on a one-line manifest built in memory.
+
+Delegated to L<IO::K8s/load_yaml>.
+
+=head2 load($file)
+
+Load a C<.pk8s> manifest file and return an arrayref of typed L<IO::K8s>
+objects.
+
+    my $objects = $api->load('myapp.pk8s');
+
+B<A C<.pk8s> manifest is Perl code, not data>: it is C<eval>ed in-process and
+can do anything the running program can. Only load files you trust; for
+data-only manifests use C<load_yaml>.
+
+Delegated to L<IO::K8s/load>.
+
+=head2 expand_class($short_name)
+
+Resolve a short resource name (e.g. C<'Pod'>), a domain-qualified name (e.g.
+C<'cilium.io/v2/NetworkPolicy'>), or an already-loaded class name to its
+fully-qualified L<IO::K8s> class, using this client's C<resource_map>. Used
+internally by every method that accepts a short class name; also useful for
+async wrappers that build request paths themselves — see L</build_path>.
+
+    my $class = $api->expand_class('Pod');
+    # => IO::K8s::Api::Core::V1::Pod
+
+Delegated to L<IO::K8s>.
 
 =head2 list($class, %args)
 

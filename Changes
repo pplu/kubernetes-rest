@@ -74,6 +74,30 @@ Revision history for Kubernetes-REST
    suffix, "kube_client raw CoreV1 ListNamespace". The groups are called
    Core, Apps, Batch and so on, without a version, so anyone following the
    example got an error.
+ - Fix kube_client and kube_watch ignoring the KUBECONFIG environment
+   variable. Their shared --kubeconfig option defaulted to
+   "$ENV{HOME}/.kube/config" and passed that value on unconditionally, so
+   Kubernetes::REST::Kubeconfig never reached its own default and anyone
+   selecting a cluster through KUBECONFIG -- the normal way to juggle
+   several -- was silently pointed at the home one. The option now has no
+   default of its own and is only passed on when given, making the
+   precedence --kubeconfig, then KUBECONFIG, then ~/.kube/config, which is
+   what kubectl does and what the library already documented. Note that
+   KUBECONFIG is read as a single path here, not as the ":"-separated list
+   of files kubectl merges. Scripts that relied on --kubeconfig always being
+   set are unaffected; the option is only undef when it was not given.
+ - Kubernetes::REST delegates four more IO::K8s methods to its k8s
+   attribute: load_yaml, load, object_to_json and object_to_struct. The
+   first two mean a YAML or .pk8s manifest can be read with
+   $api->load_yaml($yaml) instead of reaching through
+   $api->k8s->load_yaml($yaml), and the last two complete the pairs whose
+   inflating halves, json_to_object and struct_to_object, were delegated
+   already. This is purely additive: reaching through k8s keeps working and
+   is the same call. Mind that load_yaml parses characters while inflate
+   takes UTF-8 bytes, and that a .pk8s manifest handed to load is Perl code
+   that gets evaluated in-process. IO::K8s' add() is deliberately not
+   delegated, because it mutates a resource map this client mirrors in its
+   own resource_map attribute.
 
 1.106     2026-08-08 19:03:58Z
 

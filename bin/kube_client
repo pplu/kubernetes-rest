@@ -68,7 +68,8 @@ your kubeconfig file (typically F<~/.kube/config>).
 
 =item B<--kubeconfig>=PATH
 
-Path to kubeconfig file. Defaults to F<~/.kube/config>.
+Path to kubeconfig file. Without it the C<KUBECONFIG> environment variable is
+used, and without that F<~/.kube/config>.
 
 =item B<-c>, B<--context>=NAME
 

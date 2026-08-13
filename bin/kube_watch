@@ -103,7 +103,24 @@ Kubernetes context to use from the kubeconfig.
 
 =item B<--kubeconfig>=PATH
 
-Path to kubeconfig file. Defaults to F<~/.kube/config>.
+Path to kubeconfig file. Without it the C<KUBECONFIG> environment variable is
+used, and without that F<~/.kube/config>.
+
+=back
+
+=head1 ENVIRONMENT
+
+=over 4
+
+=item C<KUBECONFIG>
+
+Path to the kubeconfig file to use when C<--kubeconfig> is not given. Unlike
+C<kubectl> this is a single path, not a C<:>-separated list of files to merge.
+
+=item C<HOME>
+
+Used to locate the default kubeconfig at F<~/.kube/config> when neither
+C<--kubeconfig> nor C<KUBECONFIG> is set.
 
 =back
 
