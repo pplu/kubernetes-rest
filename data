@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-08-13T05:04:37Z
+created: 2026-08-13T04:51:12Z
+id: 5
+priority: low
+started: 2026-08-13T05:04:37Z
+status: done
+tags:
+- cli
+- doku
+title: CLI::Cmd::Create kann kein YAML, nur JSON
+updated: 2026-08-13T05:04:37Z
+---
+
+kube_client create liest die Manifest-Datei und gibt sie an $api->inflate(), das ein reines JSON-Decode macht -- es ist kein YAML-Parser im Pfad, obwohl YAML das uebliche Manifest-Format ist und die POD es behauptet hat.
+
+Die POD ist beim Doku-Durchgang 2026-08-13 auf "JSON manifest" korrigiert worden, die Funktionsluecke bleibt. bin/kube_clients eigene POD hat denselben Fehler noch.
+
+YAML::XS ist bereits eine Abhaengigkeit (Kubeconfig nutzt es), ein Fix waere also klein.
