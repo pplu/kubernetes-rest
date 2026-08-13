@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-08-13T17:35:51Z
+created: 2026-08-13T17:17:17Z
+id: 14
+priority: low
+started: 2026-08-13T17:26:49Z
+status: archived
+tags:
+- kubeconfig
+- auth
+title: 'Token files are read once: a client outlives the rotation of the token it
+  authenticates with'
+updated: 2026-08-13T17:35:51Z
+---
+
+A bearer token that comes from a file -- a user tokenFile, or the service account token the in-cluster fallback reads from /var/run/secrets/kubernetes.io/serviceaccount/token -- is read once, while Kubernetes::REST::Kubeconfig->api builds the client, and copied into a Kubernetes::REST::AuthToken, whose token attribute is a plain immutable Str. The Kubernetes::REST instance then carries that one string for its whole life.
+
+Kubernetes rotates both files. The kubelet rewrites a projected service account token well before it expires (the default is an hour, and it is rewritten at 80% of the lifetime), and client-go copes by re-reading: NewCachedFileTokenSource wraps the file in a cachingTokenSource with period one minute, and the comment there says outright that the period is chosen to match how Kubernetes refreshes projected tokens. bearerAuthRoundTripper asks that source on every request.
+
+We do not, so a long-running process -- an operator, a watch loop, anything that builds one client at startup and keeps it -- goes on sending the token it read at startup and starts collecting 401s once it expires, while the file next to it holds a valid one. Nothing in the error says "your token is stale", and it only shows up after an hour of running, which is the worst shape a bug can have.
+
+The natural place is the credentials side, not the kubeconfig side: Kubernetes::REST calls $self->credentials->token for every request (see prepare_request), and the credentials attribute already accepts any object with a token() method. So a Kubernetes::REST::AuthTokenFile -- file path, a cached token, a max age after which the next token() call re-reads, keeping the last good content if a read fails mid-rotation -- drops in without touching the pipeline. Kubeconfig::api would hand back one of those for a user with a tokenFile, and _in_cluster_api one for the service account token, instead of an AuthToken holding a string.
+
+Two things to decide when picking this up: whether the re-read interval is fixed (client-go: one minute) or configurable, and whether a read failure after a successful first read is fatal or keeps the previous token -- client-go keeps the previous one, which is the right call during a rotation that briefly leaves the file half-written.
+
+New public class, so: its own file with its own $VERSION and ABSTRACT, POD, a Changes bullet, and t/ coverage that fakes a rotation by rewriting the file between two requests. The limitation is documented in the meantime under TOKEN FILES AND ROTATION in Kubernetes::REST::Kubeconfig; that section shrinks to a pointer when this lands.
