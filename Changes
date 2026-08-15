@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.107     2026-08-15 16:15:27Z
 
  - New patch_status() and update_status(), writing through the /status
    subresource. A resource with a status subresource -- every CRD carrying a
