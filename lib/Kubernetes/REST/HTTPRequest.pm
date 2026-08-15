@@ -1,5 +1,5 @@
 package Kubernetes::REST::HTTPRequest;
-our $VERSION = '1.107';
+our $VERSION = '1.108';
 # ABSTRACT: HTTP request object
 use Moo;
 use Types::Standard qw/Str HashRef/;

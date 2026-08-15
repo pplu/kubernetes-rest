@@ -1,5 +1,5 @@
 package Kubernetes::REST::RemoteError;
-our $VERSION = '1.107';
+our $VERSION = '1.108';
 # ABSTRACT: Compatibility helper for deprecated v0 remote errors
   use Moo;
   use Types::Standard qw/Int/;

@@ -1,5 +1,5 @@
 package Kubernetes::REST::Admissionregistration;
-our $VERSION = '1.107';
+our $VERSION = '1.108';
 # ABSTRACT: Compatibility helper for deprecated v0 Admission Registration calls
 use Moo;
 extends 'Kubernetes::REST::V0Group';

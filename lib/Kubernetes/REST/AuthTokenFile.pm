@@ -1,5 +1,5 @@
 package Kubernetes::REST::AuthTokenFile;
-our $VERSION = '1.107';
+our $VERSION = '1.108';
 # ABSTRACT: Bearer token read from a file, re-read when the file changes
 use Moo;
 use Carp qw(croak);
