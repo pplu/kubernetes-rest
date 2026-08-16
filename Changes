@@ -2,6 +2,19 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - A kubeconfig that parses but is unusable now says which way it is
+   unusable. "kubectl config view" on a machine that never joined a cluster
+   writes "contexts: null" and an empty "current-context", and
+   Kubernetes::REST::Kubeconfig answered that file with an uninitialized-value
+   warning followed by "Context not found: " and nothing behind the colon.
+   context(), cluster() and user() now separate the three cases: the
+   kubeconfig defines no contexts/clusters/users at all, there is no name to
+   look for (no current-context, or a context naming no cluster or user), or
+   the name given is simply not in the file -- the last one keeping the
+   existing "Context not found: NAME" message. Each of the new messages names
+   the kubeconfig, or all of them when several were merged. Still fatal, as
+   before; only the diagnosis changed.
+
 1.107     2026-08-15 16:15:27Z
 
  - New patch_status() and update_status(), writing through the /status
