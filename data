@@ -1,0 +1,63 @@
+---
+claimed_at: 2026-08-18T17:50:58Z
+claimed_by: claude-rest
+class: standard
+completed: 2026-08-18T17:50:53Z
+created: 2026-08-16T02:00:27Z
+id: 16
+priority: high
+started: 2026-08-18T17:48:27Z
+status: done
+tags:
+- inflate
+- robustness
+- api
+title: _inflate_list verwirft nicht inflatebare Eintraege still - Liste schrumpft
+  unbemerkt
+updated: 2026-08-18T17:50:58Z
+---
+
+Gemeldet aus dem OCP-Repo (~/dev/perl/kubernetes-ocp), 2026-08-16, beim Fix von
+OCP karr #80. Dort ging es um genau diese Fehlerform eine Ebene hoeher, und beim
+Bauen der Tests ist sie hier unten aufgefallen - reproduziert, nicht vermutet.
+
+Kubernetes::REST::_inflate_list macht sinngemaess:
+
+    my $obj = eval { ... inflate ... };
+    push @objects, $obj if $obj;
+
+FOLGE: Ein Listeneintrag, der sich nicht inflaten laesst, wird STILL VERWORFEN.
+Keine Warnung, kein Zaehler, kein Unterschied im Rueckgabewert. Die Liste ist
+einfach kuerzer.
+
+WIE ES AUFGEFALLEN IST: Beim Schreiben eines Tests fuer OCPs list_nodes kam eine
+Node-Fixture als LEERE Liste zurueck. Ursache war ein fehlendes Pflichtfeld unter
+nodeInfo - IO::K8s hat den Eintrag abgelehnt, _inflate_list hat ihn weggeworfen,
+und der Aufrufer bekam eine wohlgeformte leere Liste.
+
+WARUM DAS GEFAEHRLICH IST: Ein Cluster, dessen Nodes ein Feld tragen, das die
+gepinnte IO::K8s-Version nicht kennt, liest sich als KLEINERER Cluster - oder als
+leerer. Fuer einen Aufrufer ist "keine Nodes" nicht von "einige Nodes waren nicht
+lesbar" zu unterscheiden. Genau diese Ununterscheidbarkeit hat OCP in seinem
+karr #80 als Fehler behandelt und beseitigt; hier unten kann der Aufrufer sie
+nicht sehen und deshalb auch nicht beheben.
+
+Das trifft besonders bei Versions-Drift: eine neue Kubernetes-Version fuegt ein
+Feld hinzu, IO::K8s kennt es noch nicht, und statt eines lauten Fehlers schrumpft
+still die Liste.
+
+ZU ENTSCHEIDEN:
+ a) Laut scheitern - der Aufrufer erfaehrt, dass die Antwort unvollstaendig ist.
+    Am ehrlichsten, aber es macht einen bisher tolerierten Fall zum Fehler.
+ b) Weiter tolerieren, aber SICHTBAR: warnen, und/oder die Zahl der verworfenen
+    Eintraege am Listenobjekt mitfuehren, damit ein Aufrufer sie pruefen kann.
+ c) Konfigurierbar (strict/lax), Default laut.
+b) ist vermutlich der beste Kompromiss fuer eine Bibliothek: nichts bricht, aber
+die Information geht nicht mehr verloren.
+
+Die Stelle steht in Kubernetes::REST (dieses Repo). OCP kann daran nichts
+reparieren - sein eigener Fix (list_nodes gibt Fehler durch statt [] zu liefern)
+sieht an dieser Stelle nicht vorbei.
+
+Kein Eingriff von aussen erfolgt.
+Fixed in 5e60c38: option b from the ticket - dropping stays (a library must not turn one drifted object into a fatal list()), but one carp per list counts dropped vs total, names each dropped item by index and metadata.name with the underlying inflation error, and states the list is INCOMPLETE. Callers can promote to fatal via SIG{__WARN__} (documented in the inflate_list seam POD). The 'counter on the list object' half of option b would need an IO::K8s::List attribute, i.e. an io-k8s-p5 change - not taken here. Regression test t/37_inflate_list_drops.t.
