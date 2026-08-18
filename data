@@ -1,0 +1,123 @@
+---
+claimed_at: 2026-08-18T17:48:22Z
+claimed_by: claude-rest
+class: standard
+completed: 2026-08-18T17:48:04Z
+created: 2026-08-15T22:07:53Z
+id: 15
+priority: medium
+started: 2026-08-18T17:43:31Z
+status: done
+tags:
+- performance
+- api
+title: expand_class() forces a full /openapi/v2 download — pure name resolution costs
+  a cluster roundtrip
+updated: 2026-08-18T17:48:22Z
+---
+
+expand_class is delegated (handles => [...]) to the lazy 'k8s' attribute, which builds IO::K8s->new(resource_map => $self->resource_map). resource_map defaults to resource_map_from_cluster => 1, so the first expand_class call runs _load_resource_map_from_cluster -> fetch_resource_map -> GET /openapi/v2 and decodes the full OpenAPI spec (multi-MB on a real cluster).
+
+A caller that only wants 'Pod' -> IO::K8s::Api::Core::V1::Pod, an answer already sitting in %DEFAULT_RESOURCE_MAP, pays for the whole spec. Same for new_object, inflate, load — every delegated method drags resource_map in.
+
+Note the irony: IO::K8s 1.107 explicitly stopped loading ~110 modules in BUILD because it 'cost ~0.4s even for a caller that only wanted a ConfigMap' (comment above %DEFAULT_RESOURCE_MAP). The cluster fetch reintroduces that cost one layer up, over the network.
+
+It is lazy and cached per instance, so it is once per process, and _load_resource_map_from_cluster carps rather than dying. Not a correctness bug — a layering one.
+
+Options: resolve against IO::K8s->default_resource_map first and only fall through to the cluster map on a miss; or split name resolution from the cluster-backed map so expand_class does not force the fetch.
+
+Found while auditing p5-mcp-k8s, whose plural lookup calls expand_class per unknown Kind and then discards the result.
+ANALYSIS 2026-08-16 - the question is not "default map first or cluster map first"
+
+Re-checked against IO::K8s 1.108 (../io-k8s-p5, installed; cpanfile pins 1.107). The
+premise of this ticket - "the answer is already sitting in %DEFAULT_RESOURCE_MAP" - holds
+for built-in kinds only. For everything else the cluster map is not merely expensive, it
+is wrong, and resolving default-first would freeze that wrongness in place instead of
+removing it. What has to be decided is whether this distribution keeps deriving class
+names at all.
+
+1. The cluster map invents class names that do not exist
+------------------------------------------------------------------
+fetch_resource_map (lib/Kubernetes/REST.pm:272-298) derives the class from the group name
+by string rule, via _io_k8s_namespace_for_group: group 'cert-manager.io' becomes
+'Api::Certmanager::V1::Certificate'. That rule is only correct for the kinds IO::K8s ships
+under IO::K8s::Api::. cert-manager lives at IO::K8s::CertManager::V1::Certificate, Cilium
+at IO::K8s::Cilium::..., and a user CRD has no generated class at all.
+
+Measured against IO::K8s 1.108 with a cluster-shaped map
+{ Certificate => 'Api::Certmanager::V1::Certificate' }:
+
+  expand_class('Certificate')                            -> IO::K8s::Api::Certmanager::V1::Certificate  (no such module)
+  expand_class('Certificate', 'cert-manager.io/v1')      -> undef
+  IO::K8s->new(with => ['IO::K8s::CertManager'])
+    expand_class('Certificate', 'cert-manager.io/v1')    -> IO::K8s::CertManager::V1::Certificate       (correct)
+
+The client resolves short names only (list/get/... call expand_class($short_class), then
+_inflate_object at lib/Kubernetes/REST.pm:555-558 passes the resulting class straight to
+json_to_object), so it takes the first line: a dead class name, and the failure surfaces
+at load time inside IO::K8s, not at map build time.
+
+Worse, the bad entry is sticky. add() qualifies both sides of a short-name collision and
+leaves the incumbent on the bare key (lib/IO/K8s.pm:386-400), so registering the correct
+provider afterwards does not repair it:
+
+  $k8s->add('IO::K8s::CertManager')
+    expand_class('Certificate')                          -> IO::K8s::Api::Certmanager::V1::Certificate  (still dead)
+    expand_class('Certificate', 'cert-manager.io/v1')    -> IO::K8s::CertManager::V1::Certificate
+
+So on the exact kinds resource_map_from_cluster exists for, the cluster map is worse than
+no cluster map, and it cannot be fixed from the outside on the path this client uses.
+
+2. IO::K8s already solves this, and we hand it none of it
+------------------------------------------------------------------
+IO::K8s 1.108 takes openapi_spec => $spec and auto-generates working classes for unknown
+kinds (IO::K8s::AutoGen, reached from expand_class and _resolve_mapped whenever
+has_openapi_spec), takes with => [...] / add() for shipped providers, takes
+class_namespaces => [...] for the consumer's own classes, and carries domain-qualified
+'$apiVersion/$Kind' keys in its own map.
+
+lib/Kubernetes/REST.pm:108-113 passes exactly one of these: resource_map. has_openapi_spec
+is therefore false for every client this distribution builds, and AutoGen is dead code from
+here. We download the very spec that would make it work, throw the spec away, and keep a
+name table derived from it by a rule that only covers the built-ins.
+
+That is the layering defect. #15's cost is a symptom of it.
+
+3. What is actually on the table
+------------------------------------------------------------------
+A. Keep deriving names, resolve default-first (the option in the ticket body).
+   Cheap. Removes the fetch for built-ins. Locks in section 1: CRDs keep resolving to
+   dead classes, and the flag half-stops meaning what its POD says
+   ("may not match your cluster version").
+
+B. Hand IO::K8s the spec instead of a derived map, when resource_map_from_cluster is on.
+   Fixes section 1 - CRDs get real classes from AutoGen. Does NOT fix the cost: openapi_spec
+   is a plain ro attribute, so it has to be there at IO::K8s construction, and the lazy k8s
+   attribute still triggers the download on the first delegated call. Correctness and cost
+   are separate decisions.
+
+C. Default resource_map_from_cluster to 0, and make 1 mean B.
+   Nobody pays for a spec they did not ask for, whoever asks gets cluster-accurate
+   resolution that actually works for CRDs. Breaking change on a documented default,
+   needs its own release and a Changes bullet. Closest to the direction IO::K8s 1.107
+   already took ("do not load 110 modules for a caller who wants a ConfigMap").
+
+D. Orthogonal, worth deciding at the same time: should new() pass class_namespaces and
+   with/add through to IO::K8s? Today the POD (lib/Kubernetes/REST.pm:151) sends people to
+   $api->k8s->add(...), and section 1 shows that is a dead end once the cluster map has
+   claimed the short name.
+
+Constraints on any of these: fetch_resource_map is a documented public =method, so removing
+it is the tombstone protocol in Kubernetes-REST-Deprecated, not a deletion. _io_k8s_namespace_for_group
+has exactly one caller (fetch_resource_map, lib/Kubernetes/REST.pm:289) plus t/27_v0_group_classes.t;
+_io_k8s_namespace_for_group_path serves the v0 layer and is untouched by all of this.
+Net::Async::Kubernetes could not be checked - ../p5-net-async-kubernetes is not checked out
+here - but the resource map is not among its seven published seam methods.
+
+Not urgent by any reading: the map is lazy and cached per instance, _load_resource_map_from_cluster
+carps rather than dies, and p5-mcp-k8s (MCP/K8s.pm:416-425) has already guarded its call and
+points back at this ticket. See also #17 for the duplicate /openapi/v2 download, which is
+decision-free and can land regardless of what is chosen here.
+Beziehung zu io-k8s karr #35 geprueft (2026-08-16): verwandt, aber nicht gekoppelt. Beide sind Symptome davon, dass expand_class mehr tut als reine Namensaufloesung -- dort ein require-Probe auf beliebige \@INC-Pakete, hier ein Cluster-Roundtrip ueber die resource_map. Die Fixes sind disjunkt: #35 lebt vollstaendig in lib/IO/K8s.pm, #15 vollstaendig hier im Layering des lazy k8s-Attributs. Einziger Beruehrungspunkt: #35 Teil 2 (struct_to_object re-expandiert nicht mehr) halbiert die expand_class-Aufrufe pro new_object von 2 auf 1 -- mildert #15 marginal, loest es nicht, da der Fetch lazy und pro Instanz gecached ist. #15 ist also weiterhin eigenstaendig anzugehen.
+Nachtrag: die Messungen oben liefen gegen den Arbeitsstand von ../io-k8s-p5 (1.108, unveroeffentlicht). Auf dem released IO::K8s 1.107, das cpanfile pinnt, kommen exakt dieselben vier Ergebnisse heraus - tote Klasse auf dem Kurznamen, undef auf dem qualifizierten Pfad, add() repariert den Kurznamen nicht, with-Provider loest korrekt auf. Die Analyse haengt also an keinem unveroeffentlichten IO::K8s-Verhalten. openapi_spec und IO::K8s::AutoGen (Option B) sind in 1.107 bereits enthalten, ein Versionsbump waere dafuer nicht noetig.
+Fixed in fe376de: expand_class is now a client method with a cheap path against the built-in IO::K8s map (class-method expand_class), falling through to the cluster-backed k8s instance only when the built-in map cannot produce a loadable class. Caller-supplied resource_map and post-fetch behavior unchanged. Regression test t/36_expand_class_no_fetch.t. Options B-D from the 2026-08-16 analysis (handing IO::K8s the spec / flag default change / class_namespaces passthrough) deliberately not taken - out of scope for the roundtrip fix.
