@@ -607,10 +607,33 @@ sub _inflate_object {
 sub _inflate_list {
     my ($self, $class, $response) = @_;
     my $struct = $self->_json->decode($response->content);
-    my @objects;
-    for my $item (@{$struct->{items} // []}) {
+    my $items = $struct->{items} // [];
+    my (@objects, @dropped);
+    for my $i (0 .. $#$items) {
+        my $item = $items->[$i];
         my $obj = eval { $self->k8s->struct_to_object($class, $item) };
-        push @objects, $obj if $obj;
+        if (defined $obj) {
+            push @objects, $obj;
+            next;
+        }
+        # An item the object model rejects must not disappear without a
+        # trace: the caller would read a cluster with N unreadable Pods as a
+        # cluster with N fewer Pods (karr #16). Say which items were dropped
+        # and why - typically the installed IO::K8s not knowing a field the
+        # cluster version serves.
+        my $err = $@ || 'inflated to undef';
+        $err =~ s/\s+\z//;
+        my $name = ref $item eq 'HASH' && ref $item->{metadata} eq 'HASH'
+            ? $item->{metadata}{name}
+            : undef;
+        push @dropped,
+            "item $i" . (defined $name ? " (name '$name')" : '') . ": $err";
+    }
+    if (@dropped) {
+        carp sprintf
+            "inflate_list: dropped %d of %d %s items - the returned list is"
+            . " INCOMPLETE (often IO::K8s version drift against the cluster):\n  %s",
+            scalar @dropped, scalar @$items, $class, join("\n  ", @dropped);
     }
     return IO::K8s::List->new(items => \@objects, item_class => $class);
 }
@@ -769,6 +792,13 @@ sub inflate_list {
     my $list = $api->inflate_list($class, $response);
 
 Decode the JSON response body and inflate the C<items> array into an L<IO::K8s::List> of typed objects.
+
+An item the object model rejects - typically because the installed L<IO::K8s>
+does not know a field the cluster version serves - is dropped from the list,
+and a warning names every dropped item (index, C<metadata.name>, the
+inflation error) so an incomplete list is never silent. Promote it to a fatal
+error with C<< local $SIG{__WARN__} = sub { die @_ } >> if partial results
+are unacceptable to you.
 
 =cut
 

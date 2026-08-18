@@ -2,6 +2,17 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - inflate_list() no longer discards uninflatable list items silently. An
+   item the object model rejects - typically a field the installed IO::K8s
+   does not know because the cluster is newer - used to vanish without a
+   warning, a counter, or any difference in the return value, so a cluster
+   with N unreadable Pods read as a cluster with N fewer Pods, or an empty
+   one. Rejected items are still dropped rather than failing the whole
+   list(), but now one warning per list names every dropped item (index,
+   metadata.name and the inflation error) and states that the returned list
+   is incomplete. Strict callers can promote the warning to a fatal error
+   through $SIG{__WARN__}.
+
  - expand_class() no longer costs a cluster roundtrip for a name the built-in
    IO::K8s map already answers. It used to be delegated to the lazy k8s
    attribute, whose construction forces the resource map - on the default
