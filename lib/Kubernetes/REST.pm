@@ -306,15 +306,20 @@ Fetch the resource map from the cluster's OpenAPI spec (C</openapi/v2> endpoint)
 
 Called automatically if C<resource_map_from_cluster> is enabled.
 
+The spec itself is downloaded and decoded once per instance and shared with
+L</schema_for> and L</compare_schema>; calling this again rebuilds the map
+from the cached spec rather than fetching it anew.
+
 =cut
 
-    my $response = $self->_request('GET', '/openapi/v2');
+    # The spec is multi-MB on a real cluster. _openapi_spec fetches and
+    # decodes it once per instance and is what schema_for/compare_schema read
+    # too, so building the map from it spares the second download this method
+    # used to make with a private request (karr #17). The failure keeps this
+    # method's documented wording; the underlying error rides along.
+    my $spec = eval { $self->_openapi_spec };
+    croak "Could not load resource map from cluster: $@" unless $spec;
 
-    if ($response->status >= 400) {
-        croak "Could not load resource map from cluster: " . $response->status;
-    }
-
-    my $spec = $self->_json->decode($response->content);
     my %map;
 
     for my $path (keys %{$spec->{paths} // {}}) {

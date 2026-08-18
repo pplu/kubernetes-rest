@@ -2,6 +2,16 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - fetch_resource_map() no longer downloads /openapi/v2 a second time. It
+   used to issue its own request and decode the answer, while the cached
+   spec that schema_for() and compare_schema() read makes the identical
+   request - a client on the default resource_map_from_cluster => 1 that
+   also called schema_for() downloaded and decoded the multi-MB spec twice
+   per process. The map is now built from that cached spec: one download,
+   shared by all readers, and a repeated fetch_resource_map() rebuilds from
+   the cache. The failure message keeps its "Could not load resource map
+   from cluster:" wording, now carrying the underlying fetch error behind it.
+
  - inflate_list() no longer discards uninflatable list items silently. An
    item the object model rejects - typically a field the installed IO::K8s
    does not know because the cluster is newer - used to vanish without a
