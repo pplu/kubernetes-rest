@@ -2,6 +2,17 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - expand_class() no longer costs a cluster roundtrip for a name the built-in
+   IO::K8s map already answers. It used to be delegated to the lazy k8s
+   attribute, whose construction forces the resource map - on the default
+   resource_map_from_cluster => 1 that meant downloading and decoding the
+   whole /openapi/v2 spec to resolve 'Pod'. It is now a method on the client:
+   while the map has not been fetched yet (and none was passed to the
+   constructor), names the built-in map resolves to a loadable class are
+   answered from it directly; only a name it cannot answer falls through to
+   the cluster-backed map, fetching it on first use exactly as before. A
+   caller-supplied resource_map is consulted as before, never shadowed.
+
  - A kubeconfig that parses but is unusable now says which way it is
    unusable. "kubectl config view" on a machine that never joined a cluster
    writes "contexts: null" and an empty "current-context", and

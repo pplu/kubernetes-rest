@@ -118,7 +118,6 @@ has k8s => (
         struct_to_object
         object_to_json
         object_to_struct
-        expand_class
         load
         load_yaml
     )],
@@ -128,7 +127,7 @@ has k8s => (
 
 L<IO::K8s> instance configured with the same resource map. Automatically created when needed.
 
-Provides delegated methods: C<new_object>, C<inflate>, C<json_to_object>, C<struct_to_object>, C<object_to_json>, C<object_to_struct>, C<expand_class>, C<load>, C<load_yaml>.
+Provides delegated methods: C<new_object>, C<inflate>, C<json_to_object>, C<struct_to_object>, C<object_to_json>, C<object_to_struct>, C<load>, C<load_yaml>. (C<expand_class> is implemented here rather than delegated, so that pure name resolution does not force the cluster resource-map fetch - see L</expand_class>.)
 
 Delegation is a convenience only, every one of them behaves exactly as it does on L<IO::K8s>, including its argument contract:
 
@@ -183,9 +182,12 @@ Read-only. The Kubernetes cluster version string (e.g., C<v1.31.0>). Fetched aut
 =cut
 
 # Resource map - loads from cluster by default, cached per instance (lazy)
+# The predicate is true once the map exists: passed in by the caller, or
+# built (fetched) on first use. expand_class() keys its cheap path off it.
 has resource_map => (
     is => 'ro',
     lazy => 1,
+    predicate => '_has_resource_map',
     default => sub {
         my $self = shift;
         return IO::K8s->default_resource_map unless $self->resource_map_from_cluster;
@@ -207,6 +209,51 @@ Override for custom resources:
 The C<+> prefix tells L<IO::K8s> that this is a custom class (not in the IO::K8s:: namespace).
 
 =cut
+
+# Deliberately NOT delegated to the k8s attribute like the other IO::K8s
+# methods: building that instance forces the lazy resource_map, which on the
+# default resource_map_from_cluster => 1 is a full GET /openapi/v2 - paid for
+# resolving a name like 'Pod' whose answer already sits in the built-in map
+# (karr #15).
+sub expand_class {
+    my ($self, @args) = @_;
+
+=method expand_class
+
+    my $class = $api->expand_class('Pod');
+    # => IO::K8s::Api::Core::V1::Pod
+
+Resolve a short resource name (C<'Pod'>), a domain-qualified name
+(C<'cilium.io/v2/NetworkPolicy'>), a C<+>-prefixed or an already
+fully-qualified class name to its L<IO::K8s> class - the same contract as
+L<IO::K8s/expand_class>, against this client's L</resource_map>.
+
+Pure name resolution does not cost a cluster roundtrip: as long as the
+resource map has not been fetched yet (and none was passed to the
+constructor), a name the built-in L<IO::K8s> map resolves to a loadable
+class is answered from that map directly. Only a name the built-in map
+cannot answer falls through to the cluster-backed map, fetching it on first
+use exactly as before.
+
+=cut
+
+    if ($self->resource_map_from_cluster && !$self->_has_resource_map
+        && defined $args[0] && !ref $args[0]) {
+        # '+Full::Class::Name' names an exact class - no map consulted either
+        # way, and by contract it is returned without being loaded.
+        return substr($args[0], 1) if $args[0] =~ /^\+/;
+        # As a class method, IO::K8s->expand_class resolves against the
+        # built-in map. Its fallback for an unknown Kind is the *name*
+        # 'IO::K8s::<Kind>' whether or not such a class exists, so a cheap
+        # answer only counts when it names a class that actually loads.
+        # Anything else falls through to the cluster-backed instance below,
+        # which fetches the cluster map exactly as it always did.
+        my $class = IO::K8s->expand_class(@args);
+        return $class if defined $class
+            && ($class->can('new') || eval { require_module($class); 1 });
+    }
+    return $self->k8s->expand_class(@args);
+}
 
 # Kubernetes groups whose IO::K8s classes do NOT live under IO::K8s::Api::.
 # Their namespace follows the upstream Go staging repository the types are
@@ -1917,7 +1964,9 @@ Automatically created when needed.
 Its object methods are delegated onto this client, so C<< $api->load_yaml(...) >>
 and C<< $api->k8s->load_yaml(...) >> are the same call: C<new_object>,
 C<inflate>, C<json_to_object>, C<struct_to_object>, C<object_to_json>,
-C<object_to_struct>, C<expand_class>, C<load> and C<load_yaml>.
+C<object_to_struct>, C<load> and C<load_yaml>. C<expand_class> is implemented
+on this client rather than delegated, so that pure name resolution does not
+force the cluster resource-map fetch.
 
 =head2 resource_map_from_cluster
 
@@ -2051,7 +2100,12 @@ async wrappers that build request paths themselves — see L</build_path>.
     my $class = $api->expand_class('Pod');
     # => IO::K8s::Api::Core::V1::Pod
 
-Delegated to L<IO::K8s>.
+Same contract as L<IO::K8s/expand_class>, but pure name resolution never
+forces the cluster resource-map fetch: while the map has not been fetched yet
+(and none was passed to the constructor), names the built-in L<IO::K8s> map
+resolves to a loadable class are answered from it directly. Only a name the
+built-in map cannot answer falls through to the cluster-backed map, fetching
+it on first use as before.
 
 =head2 list($class, %args)
 
