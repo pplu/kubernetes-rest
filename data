@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-08-18T17:53:10Z
+claimed_by: claude-rest
+class: standard
+completed: 2026-08-18T17:53:06Z
+created: 2026-08-16T05:17:04Z
+id: 17
+priority: medium
+started: 2026-08-18T17:51:20Z
+status: done
+tags:
+- performance
+- api
+title: fetch_resource_map downloads /openapi/v2 a second time instead of using _openapi_spec
+updated: 2026-08-18T17:53:10Z
+---
+
+fetch_resource_map (lib/Kubernetes/REST.pm:263) issues its own GET /openapi/v2 and decodes the answer. The lazy _openapi_spec attribute (lib/Kubernetes/REST.pm:303-311) does exactly the same request and caches it, and is what schema_for/compare_to_schema use.
+
+A client on the default resource_map_from_cluster => 1 that also calls schema_for() therefore downloads and decodes the multi-MB spec twice per process. Nothing reads a state the other write; the second fetch is pure duplication.
+
+Fix is mechanical: build the map from $self->_openapi_spec instead of a private request. No semantics change, no layering decision, independent of #15 (it halves that cost without deciding anything).
+
+One visible difference: the failure path. fetch_resource_map croaks "Could not load resource map from cluster: <status>", _openapi_spec croaks "Could not fetch OpenAPI spec: <status>", and _load_resource_map_from_cluster carps whatever it gets. Either keep the wording by catching and re-croaking, or accept the changed text and say so in Changes.
+
+Mock harness: the request count per test changes where both paths are exercised - check t/ for fixtures that assert on the number of /openapi/v2 calls.
+Fixed in a67d5f7: fetch_resource_map builds from $self->_openapi_spec (eval + re-croak keeps the documented message prefix, underlying error appended). Repeat calls rebuild from the cached spec instead of re-downloading. No mock fixture asserted on request counts before; new t/38_openapi_single_fetch.t pins one-download-per-instance across fetch_resource_map + schema_for and the failure wording.
