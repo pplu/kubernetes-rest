@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-09-01T04:03:52Z
+created: 2026-09-01T03:16:45Z
+id: 20
+priority: high
+started: 2026-09-01T04:03:52Z
+status: done
+tags:
+- release
+- changes
+title: Changes missing bullet for IO::K8s 1.108 dependency bump
+updated: 2026-09-01T04:03:52Z
+---
+
+The {{$NEXT}} section in Changes has no bullet for the IO::K8s 1.107 -> 1.108 cpanfile bump, even though it is a user-visible dependency change: IO::K8s 1.108 is the Kubernetes v1.37 sync (22 new Kinds, 10 fields optional->required at construction: apps/v1 workload specs, ControllerRevision.data, five flowcontrol/v1 fields, plus new Quantity-map validation).
+
+House rule (getty-perl-core skill): "Add a bullet under {{$NEXT}} in the SAME commit as any user-facing change... If a CPAN consumer would notice, it belongs there." A minimum IO::K8s version bump belongs there regardless of whether this repo constructs any of the newly-required-field classes itself (it currently does not - checked).
+
+Blocked on the sibling ticket about the unreleased 1.108 pin - write this bullet once that is resolved and the real target version is known.
+
+No fix applied - audit only.
