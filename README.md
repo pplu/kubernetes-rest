@@ -337,7 +337,7 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 ## Links
 
 - [CPAN](https://metacpan.org/pod/Kubernetes::REST)
-- [Kubernetes API Documentation](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/)
+- [Kubernetes API Documentation](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/)
 
 ## License
 

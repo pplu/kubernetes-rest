@@ -7,7 +7,7 @@ use warnings;
 
 use Kubernetes::REST::CLI::Watch;
 
-our $VERSION = '1.107';
+our $VERSION = '1.108';
 
 my $watcher = Kubernetes::REST::CLI::Watch->new_with_options;
 $watcher->run(shift @ARGV);

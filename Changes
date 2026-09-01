@@ -2,50 +2,30 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
- - fetch_resource_map() no longer downloads /openapi/v2 a second time. It
-   used to issue its own request and decode the answer, while the cached
-   spec that schema_for() and compare_schema() read makes the identical
-   request - a client on the default resource_map_from_cluster => 1 that
-   also called schema_for() downloaded and decoded the multi-MB spec twice
-   per process. The map is now built from that cached spec: one download,
-   shared by all readers, and a repeated fetch_resource_map() rebuilds from
-   the cache. The failure message keeps its "Could not load resource map
-   from cluster:" wording, now carrying the underlying fetch error behind it.
+ - Require IO::K8s 1.108 (Kubernetes v1.37 sync: new Kinds, ten fields now
+   required at construction, stricter Quantity validation).
 
- - inflate_list() no longer discards uninflatable list items silently. An
-   item the object model rejects - typically a field the installed IO::K8s
-   does not know because the cluster is newer - used to vanish without a
-   warning, a counter, or any difference in the return value, so a cluster
-   with N unreadable Pods read as a cluster with N fewer Pods, or an empty
-   one. Rejected items are still dropped rather than failing the whole
-   list(), but now one warning per list names every dropped item (index,
-   metadata.name and the inflation error) and states that the returned list
-   is incomplete. Strict callers can promote the warning to a fatal error
-   through $SIG{__WARN__}.
+ - fetch_resource_map() now builds the map from the cached OpenAPI spec that
+   schema_for()/compare_schema() already fetch, instead of downloading
+   /openapi/v2 a second time - one download per process, shared by all
+   readers. The "Could not load resource map from cluster:" message is
+   unchanged, now carrying the underlying fetch error behind it.
 
- - expand_class() no longer costs a cluster roundtrip for a name the built-in
-   IO::K8s map already answers. It used to be delegated to the lazy k8s
-   attribute, whose construction forces the resource map - on the default
-   resource_map_from_cluster => 1 that meant downloading and decoding the
-   whole /openapi/v2 spec to resolve 'Pod'. It is now a method on the client:
-   while the map has not been fetched yet (and none was passed to the
-   constructor), names the built-in map resolves to a loadable class are
-   answered from it directly; only a name it cannot answer falls through to
-   the cluster-backed map, fetching it on first use exactly as before. A
-   caller-supplied resource_map is consulted as before, never shadowed.
+ - inflate_list() now warns once per list, naming every item it drops (index,
+   metadata.name, inflation error) and that the list is incomplete, instead
+   of discarding uninflatable items silently. Items are still dropped, not
+   fatal; strict callers can promote the warning via $SIG{__WARN__}.
 
- - A kubeconfig that parses but is unusable now says which way it is
-   unusable. "kubectl config view" on a machine that never joined a cluster
-   writes "contexts: null" and an empty "current-context", and
-   Kubernetes::REST::Kubeconfig answered that file with an uninitialized-value
-   warning followed by "Context not found: " and nothing behind the colon.
-   context(), cluster() and user() now separate the three cases: the
-   kubeconfig defines no contexts/clusters/users at all, there is no name to
-   look for (no current-context, or a context naming no cluster or user), or
-   the name given is simply not in the file -- the last one keeping the
-   existing "Context not found: NAME" message. Each of the new messages names
-   the kubeconfig, or all of them when several were merged. Still fatal, as
-   before; only the diagnosis changed.
+ - expand_class() is now a client method that resolves names the built-in
+   IO::K8s map already knows without forcing a cluster resource-map fetch;
+   only an unknown name falls through to the cluster-backed map. A
+   caller-supplied resource_map is still consulted first.
+
+ - Kubeconfig context()/cluster()/user() now distinguish "no
+   contexts/clusters/users defined", "no name to look up" (no current-context,
+   or a context naming no cluster/user) and "name not found" (keeping "Context
+   not found: NAME"), each naming the kubeconfig(s), instead of an
+   uninitialized-value warning plus an empty "Context not found: ". Still fatal.
 
 1.107     2026-08-15 16:15:27Z
 
