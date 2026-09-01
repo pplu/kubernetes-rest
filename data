@@ -1,0 +1,28 @@
+---
+class: standard
+completed: 2026-09-01T04:03:48Z
+created: 2026-09-01T03:16:41Z
+id: 19
+priority: high
+started: 2026-09-01T04:03:48Z
+status: done
+tags:
+- release
+- version
+title: bin/ scripts stale at $VERSION 1.107 vs lib/ at 1.108
+updated: 2026-09-01T04:03:48Z
+---
+
+grep -rh "our \$VERSION" lib bin | sort -u yields TWO lines instead of one:
+
+  bin/kube_client:10  our $VERSION = '1.107';
+  bin/kube_watch:10   our $VERSION = '1.107';
+  (all 40 lib/*.pm files correctly at 1.108)
+
+Root cause (found via git log): commit baf2fbe "increment $VERSION after 1.107 release" (the BumpVersionAfterRelease auto-commit) bumped all 41 lib/ files 1.107 -> 1.108 but did not touch bin/kube_client / bin/kube_watch. This happened before too - an earlier commit message explicitly notes "Also carries the $VERSION bump to 1.107 in bin/kube_client and bin/kube_watch" as a manual follow-up, implying the automated bump does not cover bin/ and someone has to remember to do it by hand every release.
+
+Mitigating: verified `dzil build` DOES correctly rewrite bin/'s $VERSION to 1.108 in the build output (RewriteVersion::Transitional overwrites at build time regardless of the committed source value) - the shipped tarball would NOT actually be broken this time. But the committed source is inconsistent, fails the release-checker's consistency check verbatim, and will drift again next release unless bin/ is bumped by hand or the [@Author::GETTY] BumpVersionAfterRelease file-finder is fixed to include bin/.
+
+Fix: bump bin/kube_client and bin/kube_watch $VERSION to 1.108 before release; consider whether BumpVersionAfterRelease config should cover bin/ automatically going forward.
+
+No fix applied - audit only.
