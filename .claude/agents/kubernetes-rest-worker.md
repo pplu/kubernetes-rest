@@ -9,7 +9,7 @@ briefing:
     - getty-perl-moo
     - kubernetes-rest-core
     - perl-kubernetes-rest
-    - getty-perl-kubernetes-classes
+    - perl-io-k8s-kubernetes-classes
     - kubernetes-concepts
     - kanban-issues-karr-cli
 ---

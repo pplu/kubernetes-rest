@@ -8,7 +8,7 @@ briefing:
     - getty-perl-core
     - kubernetes-rest-core
     - perl-kubernetes-rest
-    - getty-perl-kubernetes-classes
+    - perl-io-k8s-kubernetes-classes
     - kanban-issues-karr-cli
 ---
 

@@ -10,7 +10,7 @@ model: sonnet
 
 Consumer-facing usage (`list`/`get`/`create`/`watch`/`log`, connecting, CRDs) lives in
 skill `perl-kubernetes-rest`. The typed objects this client returns come from `IO::K8s` —
-skill `getty-perl-kubernetes-classes`. This skill is about *changing* the distribution.
+skill `perl-io-k8s-kubernetes-classes`. This skill is about *changing* the distribution.
 
 The division of labour matters: **this distribution owns HTTP, URLs and streaming;
 IO::K8s owns the objects.** Field names, types and required-ness are never decided here.
