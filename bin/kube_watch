@@ -16,10 +16,6 @@ __END__
 
 =encoding UTF-8
 
-=head1 NAME
-
-kube_watch - Watch Kubernetes resources for changes
-
 =head1 SYNOPSIS
 
     # Watch all pods in a namespace

@@ -13,10 +13,6 @@ Kubernetes::REST::CLI->new_with_cmd;
 
 __END__
 
-=head1 NAME
-
-kube_client - Kubernetes CLI client using Kubernetes::REST
-
 =head1 SYNOPSIS
 
     # List all pods in default namespace
