@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-01T05:22:02Z
+claimed_by: doc-writer
+class: standard
+completed: 2026-09-01T05:22:02Z
+created: 2026-09-01T05:11:10Z
+id: 21
+priority: low
+started: 2026-09-01T05:13:13Z
+status: done
+tags:
+- pod
+- cleanup
+title: REST.pm hand-maintained =head1 ATTRIBUTES block duplicates inline =attr
+updated: 2026-09-01T05:22:02Z
+---
+
+Same pattern as the just-removed =head1 METHODS block: lib/Kubernetes/REST.pm carries a second, hand-maintained =head1 ATTRIBUTES block (around line 2076+ after the METHODS-block removal) that duplicates every inline =attr (server, credentials, io, k8s, resource_map_from_cluster, cluster_version, resource_map, ...). Found while removing the METHODS duplicate block per the 1.108 doc pass. Not touched in that pass - out of scope, flagged as a follow-up. Same treatment applies: verify every fact/example in the hand-maintained block is present inline (or migrate first), then delete the block, then sweep for cross-links (L<...>) that might target its headings.
