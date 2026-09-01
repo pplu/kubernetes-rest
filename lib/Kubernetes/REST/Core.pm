@@ -25,8 +25,6 @@ The new v1 API uses simple methods directly on the main L<Kubernetes::REST> obje
     $api->update($pod)
     $api->delete($pod)
 
-All calls to this module emit deprecation warnings unless C<$ENV{HIDE_KUBERNETES_REST_V0_API_WARNING}> is set.
-
 See L<Kubernetes::REST/"UPGRADING FROM 0.02"> for migration guide.
 
 =seealso

@@ -234,9 +234,11 @@ Watches resources of C<$kind>, printing each event as it arrives (formatted
 per C<--output>). Calls L<Kubernetes::REST/watch> in an infinite loop: a
 normal server-side timeout restarts the watch from the last seen
 C<resourceVersion>, and a C<410 Gone> (the C<resourceVersion> has expired)
-warns and restarts a fresh watch from scratch. Any other error is rethrown.
-Dies with a usage message if C<$kind> is missing. This method never returns
-under normal operation - it is the entry point called by C<bin/kube_watch>.
+warns and restarts a fresh watch from scratch. Any other error is re-raised as
+C<"Watch error: $@\n"> - the original message wrapped with that prefix, not
+rethrown unchanged. Dies with a usage message if C<$kind> is missing. This
+method never returns under normal operation - it is the entry point called by
+C<bin/kube_watch>.
 
 =cut
 

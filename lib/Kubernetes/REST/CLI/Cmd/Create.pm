@@ -20,8 +20,9 @@ cluster. L<MooX::Cmd> finds and loads this class, you do not use it directly.
 
 The format is detected from the content, not from the file name, so C<-f -> is
 covered as well as C<-f file.yaml>: a manifest starting with C<{> after
-optional whitespace goes to L<Kubernetes::REST/inflate> as before, anything
-else is parsed as YAML by L<Kubernetes::REST/load_yaml>.
+optional whitespace goes to C<inflate> as before, anything else is parsed as
+YAML by C<load_yaml> - see L<Kubernetes::REST/k8s> for both methods' argument
+contracts.
 
 Multi-document YAML (C<--->-separated) is supported and is the common case for
 Kubernetes manifests. Each document is created in the order it appears in the
@@ -136,7 +137,7 @@ command chain, whose first element is the L<Kubernetes::REST::CLI> root object.
 
 =item * L<Kubernetes::REST::CLI> - CLI base class
 
-=item * L<Kubernetes::REST/load_yaml> - The YAML reader this command parses manifests with
+=item * L<Kubernetes::REST/k8s> - Documents C<load_yaml>, the YAML reader this command parses manifests with
 
 =back
 

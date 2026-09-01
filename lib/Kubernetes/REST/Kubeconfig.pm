@@ -606,8 +606,8 @@ the first request after the rotation.
 
 What "changed" means, and what it costs, is
 L<Kubernetes::REST::AuthTokenFile/token>: one C<stat> per request, comparing
-inode, size and modification time, so the C<..data> symlink swap the kubelet
-performs is seen as the different file it is. A read that fails after a
+device, inode, size and modification time, so the C<..data> symlink swap the
+kubelet performs is seen as the different file it is. A read that fails after a
 successful one - the file gone for a moment mid-rotation - keeps the last good
 token rather than breaking the client. Only the first read, when the client is
 built, is fatal.

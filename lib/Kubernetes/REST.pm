@@ -135,15 +135,39 @@ Delegation is a convenience only, every one of them behaves exactly as it does o
 
 =item *
 
+C<new_object> takes a short or full class name and either a hashref or a flat hash of attributes:
+
+    my $ns = $api->new_object(Namespace => { metadata => { name => 'foo' } });
+    my $ns = $api->new_object(Namespace => metadata => { name => 'foo' });
+
+=item *
+
 C<inflate> takes a hashref, or JSON as B<UTF-8 bytes> - its decoder is C<utf8 =E<gt> 1>.
 
 =item *
 
-C<load_yaml> takes a file name or YAML as B<characters>. Handing it bytes turns every non-ASCII value into mojibake, so decode first (C<Encode::decode('UTF-8', $yaml)>). A newline-free argument is taken as a file name.
+C<json_to_object> and C<struct_to_object> auto-detect the class from the decoded C<kind> field when called with a single argument (JSON or hashref, respectively) - a leading class name is only needed to override that detection:
+
+    my $pod = $api->json_to_object($json_with_kind);
+    my $pod = $api->json_to_object('Pod', $json_string);
+
+C<object_to_json> and C<object_to_struct> are their inverses, serialising a typed object back to JSON or to a plain hashref.
 
 =item *
 
-C<load> reads a C<.pk8s> manifest, which is Perl code and is C<eval>ed in-process. Only load C<.pk8s> files you trust; for data-only manifests use C<load_yaml>.
+C<load_yaml> takes a file name or YAML as B<characters>. Handing it bytes turns every non-ASCII value into mojibake, so decode first (C<Encode::decode('UTF-8', $yaml)>). A newline-free argument is taken as a file name. C<--->-separated multi-document YAML is supported - the common case for Kubernetes manifests - so this always returns an arrayref, even for a single document:
+
+    for my $obj (@{ $api->load_yaml('deployment.yaml') }) {
+        $api->create($obj);
+    }
+
+=item *
+
+C<load> reads a C<.pk8s> manifest, which is Perl code and is C<eval>ed in-process:
+
+    my $objects = $api->load('myapp.pk8s');
+
+Only load C<.pk8s> files you trust; for data-only manifests use C<load_yaml>.
 
 =back
 
@@ -1039,21 +1063,44 @@ sub patch {
         patch => { metadata => { labels => { env => 'staging' } } },
     );
 
+    # JSON Patch (RFC 6902) instead: an array of operations, not a hashref
+    my $patched = $api->patch('Deployment', 'my-app',
+        namespace => 'default',
+        type      => 'json',
+        patch     => [
+            { op => 'replace', path => '/spec/replicas', value => 3 },
+            { op => 'add', path => '/metadata/labels/env', value => 'prod' },
+        ],
+    );
+
 Partially update a resource. Unlike C<update()> which replaces the entire object, C<patch()> only modifies specified fields.
 
-Supports three patch strategies via the C<type> parameter:
+Required: C<patch> (a hashref, or an arrayref of operations when C<type> is
+C<json>) and, when passing a class rather than an object, C<name>.
+
+Optional: C<namespace> (for namespaced resources) and C<type>, the patch
+strategy:
 
 =over 4
 
-=item C<strategic> (default) - Strategic Merge Patch (Kubernetes-native, understands array merge semantics)
+=item C<strategic> (default)
 
-=item C<merge> - JSON Merge Patch (RFC 7396, simple recursive merge)
+Strategic Merge Patch. The Kubernetes-native patch type, which understands
+array merge semantics (e.g. adding a container to a pod spec without removing
+the existing ones).
 
-=item C<json> - JSON Patch (RFC 6902, array of operations)
+=item C<merge>
+
+JSON Merge Patch (RFC 7396). Simple recursive merge where C<null> values
+delete keys; arrays are replaced entirely.
+
+=item C<json>
+
+JSON Patch (RFC 6902): an array of operations, as in the third example above.
 
 =back
 
-See L<Kubernetes::REST/"patch($class_or_object, %args)"> for detailed examples.
+Returns the full updated object from the server.
 
 =cut
 
@@ -1413,9 +1460,55 @@ sub watch {
 
 Watch for changes to resources. Uses the Kubernetes Watch API with chunked transfer encoding to stream events. The call blocks until the server-side timeout expires.
 
-Returns the last C<resourceVersion> seen. Croaks on 410 Gone (resourceVersion too old).
+Required: C<on_event>, a callback invoked with a L<Kubernetes::REST::WatchEvent> for each event.
 
-See L<Kubernetes::REST/"watch($class, %args)"> for detailed documentation and resumable watch patterns.
+Optional:
+
+=over 4
+
+=item timeout
+
+Server-side timeout in seconds (default: 300). The API server closes the
+connection after this many seconds.
+
+=item resourceVersion
+
+Resume watching from a specific resource version - pass the return value of a
+previous C<watch()> call to avoid missing events.
+
+=item labelSelector
+
+Filter by label selector (e.g. C<'app=web,env=prod'>).
+
+=item fieldSelector
+
+Filter by field selector (e.g. C<'status.phase=Running'>).
+
+=item namespace
+
+For namespaced resources, the namespace to watch.
+
+=back
+
+Returns the last C<resourceVersion> seen. Croaks on 410 Gone once the given
+C<resourceVersion> has expired - re-list to get a fresh one and resume from
+there:
+
+    my $rv;
+    while (1) {
+        $rv = eval {
+            $api->watch('Pod',
+                namespace       => 'default',
+                resourceVersion => $rv,
+                on_event        => \&handle_event,
+            );
+        };
+        if ($@ && $@ =~ /410 Gone/) {
+            # resourceVersion expired, re-list to get fresh version
+            my $list = $api->list('Pod', namespace => 'default');
+            $rv = undef;  # start fresh
+        }
+    }
 
 =cut
 
@@ -1494,6 +1587,12 @@ guaranteed to be UTF-8, or even text. Decode it yourself when you know it is:
 C<< Encode::decode('UTF-8', $text) >>. See L</ENCODING>.
 
 The streaming mode is designed for event-based systems like L<IO::Async> — see L<Net::Async::Kubernetes> for async integration.
+
+Also accepts, for namespaced resources, C<namespace>; and as further optional
+arguments: C<container> (name, for multi-container pods), C<sinceSeconds> /
+C<sinceTime> (show only recent output), C<timestamps> (prepend a timestamp to
+each line), C<previous> (logs from the container's previous run, after a
+restart), and C<limitBytes> (byte cap on the response).
 
 =cut
 
@@ -1578,6 +1677,14 @@ sub port_forward {
 
 Start a full-duplex pod port-forward session.
 
+Required: C<name> and C<ports> - one port number or an arrayref of them (e.g.
+C<[8080, 8443]>).
+
+Optional: C<namespace> (for namespaced resources), C<subprotocol> (WebSocket
+subprotocol, default C<v4.channel.k8s.io>), and the duplex transport callbacks
+C<on_open>, C<on_frame>, C<on_close>, C<on_error>, passed through to the IO
+backend.
+
 This method requires an IO backend that implements C<call_duplex>. The default
 L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> backends do not
 currently provide duplex transport.
@@ -1656,6 +1763,15 @@ sub exec {
     );
 
 Start a full-duplex pod exec session via the C</exec> subresource.
+
+Required: C<name> and C<command> - a single string or an arrayref (e.g.
+C<['sh', '-c', 'id']>).
+
+Optional: C<namespace>, C<container> (for multi-container pods), the stream
+toggles C<stdin>/C<stdout>/C<stderr>/C<tty> shown above (defaults: stdin and
+tty off, stdout and stderr on), C<subprotocol> (WebSocket subprotocol, default
+C<v4.channel.k8s.io>), and the duplex transport callbacks C<on_open>,
+C<on_frame>, C<on_close>, C<on_error>, passed through to the IO backend.
 
 This method requires an IO backend that implements C<call_duplex>. The default
 L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> backends do not
@@ -1750,6 +1866,14 @@ sub attach {
     );
 
 Start a full-duplex pod attach session via the C</attach> subresource.
+
+Required: C<name>.
+
+Optional: C<namespace>, C<container> (for multi-container pods), the stream
+toggles C<stdin>/C<stdout>/C<stderr>/C<tty> shown above (defaults: stdin and
+tty off, stdout and stderr on), C<subprotocol> (WebSocket subprotocol, default
+C<v4.channel.k8s.io>), and the duplex transport callbacks C<on_open>,
+C<on_frame>, C<on_close>, C<on_error>, passed through to the IO backend.
 
 This method requires an IO backend that implements C<call_duplex>. The default
 L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> backends do not
@@ -2023,640 +2147,6 @@ uses L<IO::K8s> built-in map. Can be overridden for custom resources.
 
 Read-only. The Kubernetes cluster version string (e.g., "v1.31.0"). Fetched
 automatically from the /version endpoint when first accessed.
-
-=head1 METHODS
-
-=head2 new_object($class, \%attrs) or new_object($class, %attrs)
-
-Create a new IO::K8s object. Accepts short class names (e.g., 'Pod', 'Namespace')
-and either a hashref or a hash of attributes.
-
-    # With hashref
-    my $ns = $api->new_object(Namespace => { metadata => { name => 'foo' } });
-
-    # With hash
-    my $ns = $api->new_object(Namespace => metadata => { name => 'foo' });
-
-Delegated to L<IO::K8s/new_object>.
-
-=head2 inflate($data)
-
-Inflate a JSON string or hashref into a typed L<IO::K8s> object. The class is
-auto-detected from the data's C<kind> field (and C<apiVersion>, where present).
-
-    my $pod = $api->inflate($json_string);
-    my $pod = $api->inflate(\%hashref);
-
-Delegated to L<IO::K8s/inflate>.
-
-=head2 json_to_object($class, $json)
-
-Decode a JSON string into a typed L<IO::K8s> object. Called with a single
-argument (just C<$json>), auto-detects the class from the decoded C<kind>
-field, like C<inflate>.
-
-    my $pod = $api->json_to_object($json_with_kind);
-    my $pod = $api->json_to_object('Pod', $json_string);
-
-Delegated to L<IO::K8s/json_to_object>.
-
-=head2 struct_to_object($class, $hashref)
-
-Inflate a plain hashref into a typed L<IO::K8s> object. Called with a single
-argument (just C<$hashref>), auto-detects the class from the hashref's
-C<kind> field, like C<inflate>.
-
-    my $pod = $api->struct_to_object($hashref_with_kind);
-    my $pod = $api->struct_to_object('Pod', \%hashref);
-
-Delegated to L<IO::K8s/struct_to_object>.
-
-=head2 object_to_json($object)
-
-Serialise a typed L<IO::K8s> object back to a JSON string. The inverse of
-C<json_to_object>.
-
-    my $json = $api->object_to_json($pod);
-
-Delegated to L<IO::K8s/object_to_json>.
-
-=head2 object_to_struct($object)
-
-Serialise a typed L<IO::K8s> object back to a plain hashref. The inverse of
-C<struct_to_object>.
-
-    my $hashref = $api->object_to_struct($pod);
-
-Delegated to L<IO::K8s/object_to_struct>.
-
-=head2 load_yaml($file_or_string, %opts)
-
-Parse a YAML manifest - a file name or a YAML string - into an arrayref of
-typed L<IO::K8s> objects, validated against the Kubernetes types.
-C<--->-separated multi-document YAML is supported and is the common case for
-Kubernetes manifests, so this returns an arrayref even for a single document.
-
-    for my $obj (@{ $api->load_yaml('deployment.yaml') }) {
-        $api->create($obj);
-    }
-
-Mind the argument contract, which differs from C<inflate>: C<load_yaml> parses
-B<characters>, while C<inflate>'s decoder is C<utf8 =E<gt> 1> and takes B<UTF-8
-bytes>. YAML read off disk or off C<STDIN> is bytes and has to be decoded
-first, or every non-ASCII value comes back as mojibake:
-
-    my $objects = $api->load_yaml(Encode::decode('UTF-8', $yaml_bytes));
-
-An argument containing no newline is taken as a file name, which is worth a
-trailing C<"\n"> on a one-line manifest built in memory.
-
-Delegated to L<IO::K8s/load_yaml>.
-
-=head2 load($file)
-
-Load a C<.pk8s> manifest file and return an arrayref of typed L<IO::K8s>
-objects.
-
-    my $objects = $api->load('myapp.pk8s');
-
-B<A C<.pk8s> manifest is Perl code, not data>: it is C<eval>ed in-process and
-can do anything the running program can. Only load files you trust; for
-data-only manifests use C<load_yaml>.
-
-Delegated to L<IO::K8s/load>.
-
-=head2 expand_class($short_name)
-
-Resolve a short resource name (e.g. C<'Pod'>), a domain-qualified name (e.g.
-C<'cilium.io/v2/NetworkPolicy'>), or an already-loaded class name to its
-fully-qualified L<IO::K8s> class, using this client's C<resource_map>. Used
-internally by every method that accepts a short class name; also useful for
-async wrappers that build request paths themselves — see L</build_path>.
-
-    my $class = $api->expand_class('Pod');
-    # => IO::K8s::Api::Core::V1::Pod
-
-Same contract as L<IO::K8s/expand_class>, but pure name resolution never
-forces the cluster resource-map fetch: while the map has not been fetched yet
-(and none was passed to the constructor), names the built-in L<IO::K8s> map
-resolves to a loadable class are answered from it directly. Only a name the
-built-in map cannot answer falls through to the cluster-backed map, fetching
-it on first use as before.
-
-=head2 list($class, %args)
-
-List resources. Returns an L<IO::K8s::List>.
-
-    my $pods = $api->list('Pod', namespace => 'default');
-
-=head2 get($class, %args)
-
-Get a single resource by name.
-
-    my $pod = $api->get('Pod', name => 'my-pod', namespace => 'default');
-
-=head2 create($object)
-
-Create a resource from an IO::K8s object.
-
-    my $created = $api->create($pod);
-
-=head2 update($object)
-
-Update an existing resource.
-
-    my $updated = $api->update($pod);
-
-=head2 patch($class_or_object, %args)
-
-Partially update a resource. Unlike C<update()> which replaces the entire
-object, C<patch()> only modifies the fields you specify.
-
-    # Add a label (strategic merge patch - default)
-    my $patched = $api->patch('Pod', 'my-pod',
-        namespace => 'default',
-        patch     => { metadata => { labels => { env => 'staging' } } },
-    );
-
-    # Same thing with an object reference
-    my $patched = $api->patch($pod,
-        patch => { metadata => { labels => { env => 'staging' } } },
-    );
-
-    # Explicit patch type
-    my $patched = $api->patch('Deployment', 'my-app',
-        namespace => 'default',
-        type      => 'merge',
-        patch     => { spec => { replicas => 5 } },
-    );
-
-B<Required arguments:>
-
-=over 4
-
-=item patch
-
-A hashref (or arrayref for JSON Patch) describing the changes to apply.
-
-=item name
-
-The resource name (when using class name, not object reference).
-
-=back
-
-B<Optional arguments:>
-
-=over 4
-
-=item type
-
-The patch strategy. One of:
-
-=over 4
-
-=item C<strategic> (default)
-
-Strategic Merge Patch. The Kubernetes-native patch type that understands
-array merge semantics (e.g., adding a container to a pod spec without
-removing existing containers).
-
-=item C<merge>
-
-JSON Merge Patch (RFC 7396). Simple recursive merge where C<null> values
-delete keys. Arrays are replaced entirely.
-
-=item C<json>
-
-JSON Patch (RFC 6902). An array of operations:
-
-    patch => [
-        { op => 'replace', path => '/spec/replicas', value => 3 },
-        { op => 'add', path => '/metadata/labels/env', value => 'prod' },
-    ]
-
-=back
-
-=item namespace
-
-For namespaced resources, the namespace.
-
-=back
-
-Returns the full updated object from the server.
-
-=head2 patch_status($class_or_object, %args)
-
-Partially update a resource's status through the C</status> subresource.
-
-    my $node = $api->patch_status('OCPNode', 'cp-1',
-        namespace => 'ocp',
-        patch     => { status => { phase => 'Ready', ip => '10.0.0.7' } },
-    );
-
-    # Same thing with an object reference
-    my $node = $api->patch_status($node,
-        patch => { status => { phase => 'Ready' } },
-    );
-
-B<You need this whenever the resource has a status subresource.> A
-CustomResourceDefinition that declares
-
-    subresources:
-      status: {}
-
-makes the API server strip the C<status> stanza from every write to the main
-endpoint. C<create()>, C<update()>, C<patch()> and server-side apply are all
-affected, and all of them still answer 2xx - the call looks like it worked and
-nothing was stored. The same is true for the built-in kinds that have always
-had a status subresource (Pod, Node, Deployment, PersistentVolumeClaim, ...).
-
-Arguments are the same as L</patch>: an object or a class plus C<name>, both
-call forms, and the same C<type> values. The patch document is sent unchanged,
-so it carries its own C<status> key.
-
-The one difference is the default patch type, which is C<merge> rather than
-C<strategic>. Custom resources do not support strategic merge patch - the API
-server answers 415 Unsupported Media Type - while JSON Merge Patch works for
-custom and built-in kinds alike. Pass C<type =E<gt> 'strategic'> explicitly if
-you are patching a built-in resource's status and need array merge semantics.
-
-Returns the full updated object from the server.
-
-=head2 update_status($object)
-
-Replace a resource's status through the C</status> subresource.
-
-    my $node = $api->get('Node', 'cp-1');
-    $node->status->phase('Ready');
-    my $updated = $api->update_status($node);
-
-Sends the whole object like L</update> does, but the server takes only its
-C<status> and leaves C<spec> and C<metadata> alone. Being a full replace, it
-needs a current C<resourceVersion> and answers 409 when the object changed in
-the meantime; L</patch_status> is the better tool for setting individual
-fields.
-
-Returns the updated object from the server.
-
-=head2 delete($class_or_object, %args)
-
-Delete a resource.
-
-    $api->delete($pod);
-    $api->delete('Pod', name => 'my-pod', namespace => 'default');
-
-=head2 ensure($object)
-
-    my $obj = $api->ensure($pod);
-    # or from a plain hashref (treated as a Kubernetes manifest):
-    my $secret = $api->ensure({
-        apiVersion => 'v1',
-        kind       => 'Secret',
-        metadata   => { name => 'foo', namespace => 'default' },
-        stringData => { password => 'hunter2' },
-    });
-
-Idempotent create-or-update. Fetches the resource by kind/name/namespace; if
-it exists, updates it (preserving C<resourceVersion>), otherwise creates it.
-Returns the resulting IO::K8s object.
-
-Accepts either a typed IO::K8s object or a plain hashref. A hashref must carry
-a C<kind> field and is inflated to a typed object via L<IO::K8s/struct_to_object>.
-Hashref keys follow the Kubernetes API convention (camelCase, e.g.
-C<stringData>, not C<string_data>).
-
-B<Handles common race conditions:>
-
-=over 4
-
-=item * 404 on the initial get is treated as "does not exist" and falls
-through to create.
-
-=item * 409 AlreadyExists on create (resource appeared between get and
-create) is retried as an update.
-
-=item * 409 Conflict on update (C<resourceVersion> changed server-side, e.g.
-a controller wrote status) is retried by re-fetching and re-applying.
-
-=back
-
-B<Special-cases two kinds where the server rejects a plain update:>
-
-=over 4
-
-=item * C<PersistentVolumeClaim> - spec is immutable after creation, so an
-existing PVC is returned unchanged.
-
-=item * C<Job> - spec is immutable; an existing Job that is active or has
-succeeded is returned unchanged. A failed Job is deleted and recreated.
-
-=back
-
-=head2 ensure_all(@objects)
-
-    my @results = $api->ensure_all(@objects);
-
-Batch version of L</ensure>. Applies create-or-update to each object in order
-and returns the list of resulting objects.
-
-=head2 ensure_only(%args)
-
-    $api->ensure_only(
-        label      => 'app.kubernetes.io/component=queen',
-        objects    => \@objects,
-        kinds      => [qw(Role RoleBinding ClusterRoleBinding)],
-        namespaces => ['default', 'kube-system', undef],
-    );
-
-Like L</ensure_all>, but also B<deletes> any resources matching the label
-selector in the given kinds and namespaces that are not present in
-C<objects>. Use this for resources where stale objects must not survive
-(e.g. RBAC).
-
-Pass C<undef> inside C<namespaces> to scan cluster-scoped resources. If
-C<namespaces> is omitted, only cluster-scoped resources are scanned.
-
-Returns the list of applied objects (from L</ensure_all>).
-
-=head2 watch($class, %args)
-
-Watch for changes to resources. Uses the Kubernetes Watch API with chunked
-transfer encoding to stream events. The call blocks until the server-side
-timeout expires.
-
-    my $last_rv = $api->watch('Pod',
-        namespace       => 'default',
-        on_event        => sub {
-            my ($event) = @_;
-            say $event->type;                    # ADDED, MODIFIED, DELETED
-            say $event->object->metadata->name;  # inflated IO::K8s object
-        },
-        timeout         => 300,           # server-side timeout (default: 300)
-        resourceVersion => '12345',       # resume from this version
-        labelSelector   => 'app=web',     # optional label filter
-        fieldSelector   => 'status.phase=Running',  # optional field filter
-    );
-
-    # $last_rv is the last resourceVersion seen - use it to resume watching
-
-B<Required arguments:>
-
-=over 4
-
-=item on_event
-
-Callback called for each watch event with a L<Kubernetes::REST::WatchEvent>
-object.
-
-=back
-
-B<Optional arguments:>
-
-=over 4
-
-=item timeout
-
-Server-side timeout in seconds (default: 300). The API server will close
-the connection after this many seconds.
-
-=item resourceVersion
-
-Resume watching from a specific resource version. Use the return value from
-a previous C<watch()> call to avoid missing events.
-
-=item labelSelector
-
-Filter by label selector (e.g., C<'app=web,env=prod'>).
-
-=item fieldSelector
-
-Filter by field selector (e.g., C<'status.phase=Running'>).
-
-=item namespace
-
-For namespaced resources, the namespace to watch.
-
-=back
-
-B<Resumable watch pattern:>
-
-    my $rv;
-    while (1) {
-        $rv = eval {
-            $api->watch('Pod',
-                namespace       => 'default',
-                resourceVersion => $rv,
-                on_event        => \&handle_event,
-            );
-        };
-        if ($@ && $@ =~ /410 Gone/) {
-            # resourceVersion expired, re-list to get fresh version
-            my $list = $api->list('Pod', namespace => 'default');
-            $rv = undef;  # start fresh
-        }
-    }
-
-Returns the last C<resourceVersion> seen. Croaks on 410 Gone with a
-message to re-list.
-
-=head2 log($class, $name, %args)
-
-Retrieve logs from a pod. Two modes:
-
-B<One-shot> (without C<on_line>): Returns the full log text as a string.
-
-    my $text = $api->log('Pod', 'my-pod',
-        namespace => 'default',
-        tailLines => 100,
-    );
-
-B<Streaming> (with C<on_line>): Calls the callback for each log line with a
-L<Kubernetes::REST::LogEvent> object. Blocks until the stream ends.
-
-    $api->log('Pod', 'my-pod',
-        namespace => 'default',
-        follow    => 1,
-        on_line   => sub {
-            my ($event) = @_;
-            say $event->line;
-        },
-    );
-
-B<Optional arguments:>
-
-=over 4
-
-=item container - Container name (for multi-container pods)
-
-=item follow - Stream logs (like C<kubectl logs -f>)
-
-=item tailLines - Number of lines from the end to show
-
-=item sinceSeconds - Logs from the last N seconds
-
-=item sinceTime - Logs since RFC3339 timestamp
-
-=item timestamps - Prepend timestamps to each line
-
-=item previous - Logs from the previous container restart
-
-=item limitBytes - Byte limit for the response
-
-=back
-
-=head2 port_forward($class, $name, %args)
-
-Start a Kubernetes pod port-forward session via the C</portforward>
-subresource.
-
-    my $session = $api->port_forward('Pod', 'my-pod',
-        namespace => 'default',
-        ports     => [8080, 8443],
-        on_frame  => sub { my ($channel, $payload) = @_; ... },
-        on_close  => sub { ... },
-        on_error  => sub { my ($err) = @_; ... },
-    );
-
-B<Required arguments:>
-
-=over 4
-
-=item name - Pod name
-
-=item ports - Local/remote port list as arrayref or scalar (e.g. C<[8080, 8443]>)
-
-=back
-
-B<Optional arguments:>
-
-=over 4
-
-=item namespace - Namespace (for namespaced resources)
-
-=item subprotocol - WebSocket subprotocol (default: C<v4.channel.k8s.io>)
-
-=item on_open, on_frame, on_close, on_error - Duplex transport callbacks passed to IO backend
-
-=back
-
-Requires an IO backend implementing C<call_duplex>. The default sync backends
-currently do not provide duplex transport.
-
-=head2 exec($class, $name, %args)
-
-Start a Kubernetes pod exec session via the C</exec> subresource.
-
-    my $session = $api->exec('Pod', 'my-pod',
-        namespace => 'default',
-        command   => ['sh', '-c', 'echo hello'],
-        on_frame  => sub { my ($channel, $payload) = @_; ... },
-        on_close  => sub { ... },
-        on_error  => sub { my ($err) = @_; ... },
-    );
-
-B<Required arguments:>
-
-=over 4
-
-=item name - Pod name
-
-=item command - Command as arrayref or scalar (e.g. C<['sh', '-c', 'id']>)
-
-=back
-
-B<Optional arguments:>
-
-=over 4
-
-=item namespace - Namespace (for namespaced resources)
-
-=item container - Container name (for multi-container pods)
-
-=item stdin, stdout, stderr, tty - Stream toggles (defaults: stdin=false, stdout=true, stderr=true, tty=false)
-
-=item subprotocol - WebSocket subprotocol (default: C<v4.channel.k8s.io>)
-
-=item on_open, on_frame, on_close, on_error - Duplex transport callbacks passed to IO backend
-
-=back
-
-Requires an IO backend implementing C<call_duplex>. The default sync backends
-currently do not provide duplex transport.
-
-=head2 attach($class, $name, %args)
-
-Start a Kubernetes pod attach session via the C</attach> subresource.
-
-    my $session = $api->attach('Pod', 'my-pod',
-        namespace => 'default',
-        container => 'app',
-        stdin     => 1,
-        stdout    => 1,
-        stderr    => 1,
-        tty       => 0,
-        on_frame  => sub { my ($channel, $payload) = @_; ... },
-        on_close  => sub { ... },
-        on_error  => sub { my ($err) = @_; ... },
-    );
-
-B<Required arguments:>
-
-=over 4
-
-=item name - Pod name
-
-=back
-
-B<Optional arguments:>
-
-=over 4
-
-=item namespace - Namespace (for namespaced resources)
-
-=item container - Container name (for multi-container pods)
-
-=item stdin, stdout, stderr, tty - Stream toggles (defaults: stdin=false, stdout=true, stderr=true, tty=false)
-
-=item subprotocol - WebSocket subprotocol (default: C<v4.channel.k8s.io>)
-
-=item on_open, on_frame, on_close, on_error - Duplex transport callbacks passed to IO backend
-
-=back
-
-Requires an IO backend implementing C<call_duplex>. The default sync backends
-currently do not provide duplex transport.
-
-=head2 fetch_resource_map()
-
-Fetch the resource map from the cluster's OpenAPI spec. Returns a hashref
-mapping short resource names (e.g., "Pod") to full IO::K8s class paths. This
-method is called automatically if C<resource_map_from_cluster> is enabled.
-
-The OpenAPI spec itself is downloaded and decoded once per instance and
-shared with L</schema_for> and L</compare_schema>; calling
-C<fetch_resource_map> again rebuilds the map from that cached spec rather
-than issuing a new C</openapi/v2> request.
-
-=head2 schema_for($kind)
-
-    my $schema = $api->schema_for('Pod');
-
-Get the OpenAPI schema definition for a resource type from the cluster.
-Accepts short names (C<Pod>), full class names
-(C<IO::K8s::Api::Core::V1::Pod>), or OpenAPI definition names
-(C<io.k8s.api.core.v1.Pod>).
-
-Returns a hashref with the OpenAPI v2 schema definition.
-
-=head2 compare_schema($kind)
-
-    my $result = $api->compare_schema('Pod');
-
-Compare the local IO::K8s class definition against the cluster's OpenAPI
-schema. Useful for detecting version skew between your IO::K8s installation
-and the cluster's Kubernetes version.
-
-Returns the comparison result from C<< IO::K8s::Resource->compare_to_schema >>.
 
 =head1 BUILDING BLOCKS FOR ASYNC WRAPPERS
 

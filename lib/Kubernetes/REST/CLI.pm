@@ -68,7 +68,7 @@ Delete a resource by name.
 
     kube_client raw <Group> <Method> [key=value ...]
 
-Make a raw call through the deprecated v0 API.
+Make a raw call through the v0 compatibility layer.
 
 =head1 GLOBAL OPTIONS
 

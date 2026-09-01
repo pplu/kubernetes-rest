@@ -33,6 +33,8 @@ This role defines the interface that HTTP backends must implement. L<Kubernetes:
 
 The default backend is L<Kubernetes::REST::LWPIO> (using L<LWP::UserAgent>). An alternative L<Kubernetes::REST::HTTPTinyIO> (using L<HTTP::Tiny>) is provided. To use an async event loop, implement this role with e.g. L<Net::Async::HTTP>.
 
+This is not how L<Net::Async::Kubernetes>, this distribution's own async client, integrates: it does not consume this role or call C<call>/C<call_streaming> at all. Instead it drives L<Kubernetes::REST>'s request pipeline directly, through the published C<build_path>, C<prepare_request>, C<check_response>, C<inflate_object>, C<inflate_list>, C<process_watch_chunk> and C<process_log_chunk> methods, running its own HTTP transport underneath them.
+
 Both shipped backends are synchronous, request/response-only transports: neither
 implements C<call_duplex> (see L</supports_duplex> below), so L<Kubernetes::REST>
 methods that need full-duplex transport (C<port_forward>, C<exec>, C<attach>)

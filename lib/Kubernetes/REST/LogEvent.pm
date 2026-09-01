@@ -25,7 +25,10 @@ has line => (is => 'ro', isa => Str, required => 1);
 
 =attr line
 
-Required. The log line text. Does not include the trailing newline.
+Required. The log line text, as raw bytes rather than decoded characters -
+container output is not guaranteed to be UTF-8, or even text (see
+L<Kubernetes::REST::Role::IO/"Encoding contract">). Does not include the
+trailing newline.
 
 =cut
 
