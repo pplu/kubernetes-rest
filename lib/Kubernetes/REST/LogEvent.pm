@@ -41,7 +41,7 @@ Required. The log line text. Does not include the trailing newline.
 
 =item * L<Kubernetes::REST::WatchEvent> - Analogous event object for the Watch API
 
-=item * L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#read-log-pod-v1-core> - Kubernetes Pod log API reference
+=item * L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/#read-log-pod-v1-core> - Kubernetes Pod log API reference
 
 =back
 

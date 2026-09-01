@@ -1053,7 +1053,7 @@ Supports three patch strategies via the C<type> parameter:
 
 =back
 
-See L<Kubernetes::REST/patch> for detailed examples.
+See L<Kubernetes::REST/"patch($class_or_object, %args)"> for detailed examples.
 
 =cut
 
@@ -1415,7 +1415,7 @@ Watch for changes to resources. Uses the Kubernetes Watch API with chunked trans
 
 Returns the last C<resourceVersion> seen. Croaks on 410 Gone (resourceVersion too old).
 
-See L<Kubernetes::REST/watch> for detailed documentation and resumable watch patterns.
+See L<Kubernetes::REST/"watch($class, %args)"> for detailed documentation and resumable watch patterns.
 
 =cut
 
@@ -1933,8 +1933,9 @@ warnings. Set C<$ENV{HIDE_KUBERNETES_REST_V0_API_WARNING}> to suppress warnings.
 Results are now returned as typed L<IO::K8s> objects instead of raw hashrefs.
 Lists are returned as L<IO::K8s::List> objects.
 
-B<Note:> L<IO::K8s> has also been completely rewritten (Moose to Moo, updated
-to Kubernetes v1.31 API). See L<IO::K8s/"UPGRADING FROM 0.04"> for details.
+B<Note:> L<IO::K8s> has also been completely rewritten (Moose to Moo, API
+objects updated to a current Kubernetes release). See
+L<IO::K8s/"UPGRADING FROM PREVIOUS VERSIONS"> for details.
 
 =item * B<Short resource names>
 
@@ -2627,10 +2628,14 @@ currently do not provide duplex transport.
 
 =head2 fetch_resource_map()
 
-Fetch the resource map from the cluster's OpenAPI spec (/openapi/v2 endpoint).
-Returns a hashref mapping short resource names (e.g., "Pod") to full IO::K8s
-class paths. This method is called automatically if C<resource_map_from_cluster>
-is enabled.
+Fetch the resource map from the cluster's OpenAPI spec. Returns a hashref
+mapping short resource names (e.g., "Pod") to full IO::K8s class paths. This
+method is called automatically if C<resource_map_from_cluster> is enabled.
+
+The OpenAPI spec itself is downloaded and decoded once per instance and
+shared with L</schema_for> and L</compare_schema>; calling
+C<fetch_resource_map> again rebuilds the map from that cached spec rather
+than issuing a new C</openapi/v2> request.
 
 =head2 schema_for($kind)
 
@@ -2671,7 +2676,9 @@ public methods provide this:
 
 =item * C<inflate_object($class, $response)> - JSON to typed object
 
-=item * C<inflate_list($class, $response)> - JSON to typed list
+=item * C<inflate_list($class, $response)> - JSON to typed list (an item the
+object model rejects is dropped and carped about, not silently lost - see
+L</inflate_list>)
 
 =item * C<process_watch_chunk($class, \$buf, $chunk)> - Parse NDJSON watch stream
 
@@ -2838,7 +2845,7 @@ backends must honour that; see L<Kubernetes::REST::Role::IO/Encoding contract>.
 
 =item * L<Kubernetes::REST::Example> - Comprehensive examples with Minikube/K3s
 
-=item * L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/> - Kubernetes API reference
+=item * L<https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.36/> - Kubernetes API reference
 
 =back
 

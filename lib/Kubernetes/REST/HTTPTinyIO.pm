@@ -167,7 +167,7 @@ sub call_streaming {
 
 Execute an HTTP request with streaming response. The C<$data_callback> is called with each chunk of data as it arrives.
 
-Used internally by L<Kubernetes::REST/watch> for the Watch API.
+Used internally by L<Kubernetes::REST/watch> and L<Kubernetes::REST/log> for the Watch and Pod Log APIs.
 
 =cut
 

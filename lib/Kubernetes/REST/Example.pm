@@ -785,8 +785,7 @@ This is the foundation for building Kubernetes controllers.
     $api->delete('Namespace',  'perl-test');
 
 When cleaning up a full namespace, delete dependent resources first to
-avoid errors (e.g. delete Pods and Deployments before the ServiceAccount
-they reference):
+avoid errors (e.g. delete the RoleBinding before the Role it references):
 
     for my $r (
         ['CronJob',              'scheduled-job'],
