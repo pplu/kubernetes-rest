@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-03T23:06:10Z
+claimed_by: main
+class: standard
+completed: 2026-09-03T23:06:10Z
+created: 2026-09-01T19:51:09Z
+id: 23
+priority: medium
+started: 2026-09-03T23:03:10Z
+status: done
+tags:
+- cli
+- bug
+title: 'kube_watch: Kind must be the first argument - options before it are taken
+  as the Kind'
+updated: 2026-09-03T23:06:10Z
+---
+
+bin/kube_watch does `shift @ARGV` after new_with_options, but MooX::Options protects @ARGV by default (protect_argv => 1), so the parsed options are still in it. `kube_watch -n default Pod` therefore watches kind "-n" instead of Pod; only `kube_watch Pod -n default` works. Found while building kube_test_minikube (k22), which sidesteps it via split_argv. Fix options: take the first non-option argument (Kubernetes::REST::CLI::Minikube->split_argv-style pre-split), or protect_argv => 0 in CLI::Watch. Needs a regression test in t/16_cli_watch.t or t/29_cli_kubeconfig_env.t.
