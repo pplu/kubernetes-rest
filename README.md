@@ -283,6 +283,33 @@ kube_watch Pod -F time      # 14:23:01
 kube_watch Pod -F iso       # 2025-02-12T14:23:01+0100
 ```
 
+### kube_test_minikube
+
+Bring up a throwaway minikube cluster and run the live test suite (or any
+command) against it. minikube is downloaded on first use (checksum verified)
+into `~/.cache/kube_test_minikube`; the cluster gets its own kubeconfig file,
+so `~/.kube/config` is never read or written. The same runner serves all
+sibling distributions: it exports `KUBECONFIG`,
+`TEST_KUBERNETES_REST_KUBECONFIG` (this client and Net::Async::Kubernetes) and
+`TEST_IO_K8S_KUBECONFIG` (IO::K8s) for the command it runs.
+
+```bash
+# Run the whole suite live (cluster stays up for the next run)
+kube_test_minikube prove -lr t/
+
+# One script, then stop the cluster
+kube_test_minikube --stop perl t/11_watch_live.t
+
+# Extra gate name for another distribution
+kube_test_minikube -e TEST_MY_DIST_KUBECONFIG prove -lr t/
+
+# Just bring it up and print the exports for your shell
+eval "$(kube_test_minikube)"
+
+# Tear it down completely
+kube_test_minikube --delete
+```
+
 ## Custom Resource Definitions (CRDs)
 
 Register your own CRD classes and use them with the same API:
@@ -325,7 +352,7 @@ See `Kubernetes::REST::Example` for full CRD documentation including AutoGen fro
 - **CRD support**: Use custom resource classes with the standard API
 - **Short class names**: Use `'Pod'` instead of `'IO::K8s::Api::Core::V1::Pod'`
 - **Type safety**: All objects are strongly typed using IO::K8s classes
-- **CLI tools**: `kube_client` for CRUD, `kube_watch` for live event streaming
+- **CLI tools**: `kube_client` for CRUD, `kube_watch` for live event streaming, `kube_test_minikube` for a disposable live test cluster
 - **Backwards compatibility**: Deprecated pre-v1 API still works (with warnings)
 
 ## See Also

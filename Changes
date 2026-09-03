@@ -2,6 +2,15 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - New CLI tool kube_test_minikube (Kubernetes::REST::CLI::Minikube): downloads
+   minikube on first use (SHA-256 verified), starts a profile with its own
+   kubeconfig file - ~/.kube/config is never touched - exports KUBECONFIG,
+   TEST_KUBERNETES_REST_KUBECONFIG and TEST_IO_K8S_KUBECONFIG (plus any --env
+   NAME) and runs the given command, e.g. "kube_test_minikube prove -lr t/".
+   The cluster stays up between runs; --stop / --delete tear it down. One
+   runner for the live tests of Kubernetes::REST, Net::Async::Kubernetes and
+   IO::K8s.
+
  - Require IO::K8s 1.108 (Kubernetes v1.37 sync: new Kinds, ten fields now
    required at construction, stricter Quantity validation).
 
