@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-03T23:06:14Z
+claimed_by: main
+class: standard
+completed: 2026-09-03T23:06:14Z
+created: 2026-09-03T17:01:16Z
+id: 25
+priority: medium
+started: 2026-09-03T23:03:14Z
+status: done
+tags:
+- cli
+- testing
+- minikube
+title: 'kube_test_minikube: Podman-/rootless-Umgebung unterstuetzen'
+updated: 2026-09-03T23:06:14Z
+---
+
+In der aktuellen Umgebung ist das docker-CLI (29.7.2) auf ein Podman-Backend (5.8.4) verdrahtet; minikube docker-Driver weist das ab. Rootless-podman-Driver braucht --container-runtime=containerd --rootless und scheitert hier am kicbase-Image (kic artifacts not yet implemented). Damit kube_test_minikube hier live nutzbar wird: (a) Auto-Driver-Erkennung oder Doku, dass --driver podman noetig ist; (b) Passthrough fuer --container-runtime und --rootless in _start_args; (c) Umgang mit fehlendem kicbase-Preload. Entdeckt bei k22.
