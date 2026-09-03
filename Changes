@@ -15,7 +15,9 @@ Revision history for Kubernetes-REST
    NAME) and runs the given command, e.g. "kube_test_minikube prove -lr t/".
    The cluster stays up between runs; --stop / --delete tear it down. One
    runner for the live tests of Kubernetes::REST, Net::Async::Kubernetes and
-   IO::K8s.
+   IO::K8s. --container-runtime and --rootless pass through to minikube start,
+   so a Podman backend can be driven with
+   "--driver podman --container-runtime containerd --rootless".
 
  - Require IO::K8s 1.108 (Kubernetes v1.37 sync: new Kinds, ten fields now
    required at construction, stricter Quantity validation).

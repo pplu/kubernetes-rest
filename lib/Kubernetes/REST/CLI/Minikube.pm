@@ -140,6 +140,33 @@ Short option: C<-m>
 
 =cut
 
+option container_runtime => (
+    is => 'ro',
+    format => 's',
+    doc => 'Container runtime for the cluster (passed as --container-runtime)',
+);
+
+=opt container_runtime
+
+Container runtime for the cluster, passed as C<--container-runtime=> to
+C<minikube start> when set. On a Podman backend the rootless driver needs
+C<--driver podman --container-runtime containerd --rootless>.
+
+=cut
+
+option rootless => (
+    is => 'ro',
+    doc => 'Run the cluster rootless (passed as --rootless)',
+);
+
+=opt rootless
+
+Pass C<--rootless> to C<minikube start>. Required by the rootless C<podman>
+driver, which additionally needs C<--container-runtime containerd> (see
+L</container_runtime>).
+
+=cut
+
 option install_dir => (
     is => 'lazy',
     format => 's',
@@ -549,6 +576,8 @@ sub _start_args {
         (defined $self->kubernetes_version ? ('--kubernetes-version=' . $self->kubernetes_version) : ()),
         (defined $self->cpus               ? ('--cpus=' . $self->cpus)                             : ()),
         (defined $self->memory             ? ('--memory=' . $self->memory)                         : ()),
+        (defined $self->container_runtime  ? ('--container-runtime=' . $self->container_runtime)   : ()),
+        ($self->rootless                   ? ('--rootless')                                        : ()),
     );
 }
 

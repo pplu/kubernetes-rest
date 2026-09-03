@@ -340,7 +340,40 @@ subtest '_start_args - optional flags are simply absent when unset' => sub {
         'start', '-p', 'kube-rest-test',
         '--driver=docker',
         '--interactive=false',
-    ], 'no --kubernetes-version/--cpus/--memory without a value for them';
+    ], 'no --kubernetes-version/--cpus/--memory/--container-runtime/--rootless without a value for them';
+};
+
+subtest '_start_args - container_runtime and rootless appear only when set (Podman/rootless)' => sub {
+    my $runner = Kubernetes::REST::CLI::Minikube->new(
+        minikube_bin      => '/x',
+        driver            => 'podman',
+        container_runtime => 'containerd',
+        rootless          => 1,
+    );
+    is_deeply [$runner->_start_args], [
+        'start', '-p', 'kube-rest-test',
+        '--driver=podman',
+        '--interactive=false',
+        '--container-runtime=containerd',
+        '--rootless',
+    ], 'set values produce --container-runtime=<value> and --rootless';
+
+    my $bare = Kubernetes::REST::CLI::Minikube->new(minikube_bin => '/x');
+    my @bare_args = $bare->_start_args;
+    ok !(grep { /^--container-runtime/ } @bare_args),
+        'no --container-runtime when container_runtime is unset';
+    ok !(grep { $_ eq '--rootless' } @bare_args),
+        'no --rootless when rootless is unset';
+
+    my $rt_only = Kubernetes::REST::CLI::Minikube->new(
+        minikube_bin      => '/x',
+        container_runtime => 'containerd',
+    );
+    my @rt_args = $rt_only->_start_args;
+    ok scalar(grep { $_ eq '--container-runtime=containerd' } @rt_args),
+        '--container-runtime present when only it is set';
+    ok !(grep { $_ eq '--rootless' } @rt_args),
+        '--rootless still absent when only container_runtime is set';
 };
 
 subtest '_status_args / _stop_args / _delete_args / _version_args' => sub {
