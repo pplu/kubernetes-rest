@@ -2,7 +2,12 @@ package Kubernetes::REST::CLI::Watch;
 our $VERSION = '1.108';
 # ABSTRACT: CLI for watching Kubernetes resources
 use Moo;
-use MooX::Options;
+# protect_argv => 0 so parsed options are removed from @ARGV, leaving the
+# positional Kind as the first remaining element. bin/kube_watch reads the Kind
+# with `shift @ARGV` after new_with_options; with the default protect_argv => 1
+# the options stay in @ARGV and `kube_watch -n default Pod` would shift off '-n'
+# instead of 'Pod'.
+use MooX::Options protect_argv => 0;
 use JSON::MaybeXS;
 use POSIX qw(strftime);
 

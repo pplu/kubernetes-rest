@@ -2,6 +2,12 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - kube_watch now resolves the Kind correctly when options precede it:
+   "kube_watch -n default Pod" watched Kind "-n" because MooX::Options keeps the
+   parsed options in @ARGV by default, so bin/kube_watch's shift @ARGV took the
+   option instead of the Kind. Fixed with protect_argv => 0 in CLI::Watch; both
+   orders (Kind first or options first) now work.
+
  - New CLI tool kube_test_minikube (Kubernetes::REST::CLI::Minikube): downloads
    minikube on first use (SHA-256 verified), starts a profile with its own
    kubeconfig file - ~/.kube/config is never touched - exports KUBECONFIG,
