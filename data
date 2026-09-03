@@ -1,0 +1,29 @@
+---
+assignee: main
+class: standard
+completed: 2026-09-03T17:01:20Z
+created: 2026-09-01T19:39:21Z
+id: 22
+priority: high
+started: 2026-09-03T17:01:20Z
+status: done
+tags:
+- cli
+- testing
+- minikube
+title: 'bin/kube_test_minikube: minikube-Runner für Live-Tests aller vier Dists'
+updated: 2026-09-03T17:01:20Z
+---
+
+Neues CLI-Tool bin/kube_test_minikube + Kubernetes::REST::CLI::Minikube (MooX::Options).
+
+- minikube bei Bedarf in Cache-Dir herunterladen (SHA256 pruefen), Profil starten (docker-Driver default)
+- isolierte Kubeconfig-Datei, ~/.kube/config bleibt unberuehrt
+- setzt KUBECONFIG, TEST_KUBERNETES_REST_KUBECONFIG, TEST_IO_K8S_KUBECONFIG (+ --env NAME) und fuehrt das uebergebene Kommando aus
+- Cluster bleibt stehen (schnelle Iteration); --stop / --delete raeumen auf
+- Tests gegen gestubbten Runner, kein echtes minikube in t/
+- Danach: echter Lauf gegen minikube hier, Live-Tests bewerten
+
+Runner+Modul+README+Changes committet (c8f999d); gestubbte Tests t/39_cli_minikube.t (27 Subtests) committet. Volle Suite 37 Dateien/573 Tests gruen, auch gegen das lokal installierte neue IO::K8s (D10 API vorhanden) - keine Anpassung dieser Dist noetig. Live-Lauf: docker-Driver scheitert, weil das docker-CLI hier auf ein Podman-Backend (5.8.4) zeigt und minikube das als 'Docker < 18.09' abweist; kvm2 mangels /dev/kvm ausgeschlossen. Rootless-podman-Bringup laeuft/wird bewertet.
+
+Live-Bewertung abgeschlossen: In DIESER Umgebung kann kein Cluster hochkommen - (1) docker-CLI zeigt auf Podman-Backend 5.8.4, minikube weist es als 'Docker < 18.09' ab; (2) kein /dev/kvm -> kvm2 aus; (3) rootless-podman-Driver scheitert am kicbase-Image-Pull ('Error downloading kic artifacts: not yet implemented', podman start exit 125). Der Runner selbst ist korrekt: laedt minikube, isoliert die Kubeconfig (~/.kube unberuehrt), baut korrekte start-Args, dispatcht, raeumt auf. Kein Tool-Defekt. Follow-up fuer Podman-Support als eigenes Ticket.
