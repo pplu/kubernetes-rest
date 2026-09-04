@@ -13,6 +13,7 @@ use Kubernetes::REST::LWPIO;
 use Kubernetes::REST::HTTPRequest;
 use IO::K8s;
 use IO::K8s::List;
+use IO::K8s::Unstructured ();
 use Kubernetes::REST::WatchEvent;
 use Kubernetes::REST::LogEvent;
 use namespace::clean;
@@ -328,16 +329,137 @@ use exactly as before.
     # The discovery-built map (see _resource_map_from_catalog) no longer
     # short-circuits this order with invented IO::K8s::Api::<Group> names for
     # groups this distribution does not ship (D12): a foreign Kind with no
-    # provider and no loaded spec now reaches rung 5 instead of resolving to a
-    # bogus class.
+    # provider and no loaded spec now reaches rung 4/5 instead of resolving to
+    # a bogus class.
+    my $class = $self->k8s->expand_class(@args);
+
+    # How IO::K8s signals "nothing resolved this Kind" depends on the argument
+    # shape, and only that exact signal may be diverted to rung 4 -- every real
+    # resolution (rungs 1-3: a '+Full::Class', a provider from `with`, a builtin
+    # or an AutoGen class) must be returned untouched, including a '+'-class
+    # that names a class not yet loaded (returned by contract without loading,
+    # so a load probe would wrongly reject it -- karr t/36 subtest 3).
     #
-    # TODO D16 / io-k8s step 5: rung 4 slots in HERE, between AutoGen (rung 3)
-    # and the fail-closed error (rung 5) -- a GVK the cluster confirms through
-    # discovery but nothing else resolves becomes IO::K8s::Unstructured (plural
-    # and scope from the discovery catalog). It needs IO::K8s::Unstructured
-    # from io-k8s step 5 and must not change behaviour until then, so it is a
-    # seam, not code.
-    return $self->k8s->expand_class(@args);
+    # For a bare Kind IO::K8s fails *open*: it fabricates the name
+    # 'IO::K8s::<Kind>' whether or not such a class exists, and the fail-closed
+    # error only surfaces later when require_module() cannot load it. For an
+    # exact-GVK or domain-qualified request it fails *closed*, returning undef.
+    # Both -- and nothing else -- mean unresolved.
+    my ($kind, $api_version) = $self->_kind_from_expand_args(@args);
+    my $unresolved =
+        !defined $class
+        || (defined $kind
+            && $class eq "IO::K8s::$kind"
+            && !($class->can('new') || eval { require_module($class); 1 }));
+
+    return $class unless $unresolved && defined $kind;
+
+    # Rung 4 (D16): the Kind resolved to nothing that ships. If the cluster
+    # confirms this GVK through aggregated discovery, resolve to
+    # IO::K8s::Unstructured -- its plural and scope come from the discovery
+    # catalog at path-build time (_build_path), since Unstructured carries no
+    # api_version()/resource_plural()/Namespaced role of its own. On by default
+    # (no opt-in here, unlike bare IO::K8s): D16 gates it on discovery
+    # confirmation instead. _discovery_path_meta is a no-op (undef) unless
+    # resource_map_from_cluster is set, and by the time control reaches here the
+    # catalog was already fetched building the cluster map, so this consults a
+    # cache and never adds a round-trip. A Kind discovery does not serve stays
+    # fail-closed (rung 5): the fabricated name (or undef) is returned so the
+    # load error still names the Kind.
+    return 'IO::K8s::Unstructured'
+        if $self->_discovery_path_meta($kind, $api_version);
+
+    return $class;
+}
+
+# Extract the Kubernetes Kind (and any explicitly supplied apiVersion) from an
+# expand_class() argument list, for the D16 rung-4 discovery-confirmation
+# check. Only bare short names ('Widget') and domain-qualified strings
+# ('example.com/v1/Widget') name a Kind that Unstructured should stand in for;
+# a '+Full::Class', an 'IO::K8s::...' name or any multi-segment package name is
+# an explicit class request and must never be diverted to Unstructured.
+sub _kind_from_expand_args {
+    my ($self, $name, $api_version) = @_;
+    return () unless defined $name && !ref $name;
+    return () if $name =~ /^\+/;
+    return () if $name =~ /^IO::K8s::/;
+    if ($name =~ m{/}) {   # 'group/version/Kind' -> ('Kind', 'group/version')
+        my ($av, $kind) = $name =~ m{\A(.*)/([^/]+)\z};
+        return ($kind, $av);
+    }
+    return () if $name =~ /::/;   # a multi-segment class name, not a Kind
+    return ($name, $api_version);
+}
+
+# Path metadata (apiVersion, resource plural, namespaced) for a Kind, read from
+# the cached discovery catalog. This is how a Kind resolved to
+# IO::K8s::Unstructured (D16 rung 4) gets what _build_path needs: Unstructured
+# has apiVersion/kind on the *instance* but no api_version()/resource_plural()
+# class method and no Namespaced role, so plural and scope cannot come from the
+# class the way a typed resource's do -- they come from here.
+#
+# Returns undef (fail-closed) unless resource_map_from_cluster is set: with no
+# cluster there is no discovery to confirm a GVK, and this must never trigger a
+# fetch on the fetch-free path. When it does run, the catalog is already cached
+# (building the cluster resource map fetched it), so the lookup is free.
+#
+# $want_api_version, when given (an Unstructured object's own apiVersion),
+# pins the group/version; otherwise the group's discovery-preferred version
+# wins, matching _resource_map_from_catalog and D17.
+sub _discovery_path_meta {
+    my ($self, $kind, $want_api_version) = @_;
+    return unless $self->resource_map_from_cluster;
+    my $catalog = eval { $self->_discovery };
+    return unless $catalog && $catalog->{groups};
+
+    my $meta_for = sub {
+        my ($group, $version, $res) = @_;
+        return {
+            api_version => ($group eq '' ? $version : "$group/$version"),
+            resource    => $res->{resource},
+            namespaced  => ($res->{scope} && $res->{scope} eq 'Namespaced' ? 1 : 0),
+        };
+    };
+
+    # An explicit apiVersion pins the exact group/version first.
+    if (defined $want_api_version && length $want_api_version) {
+        my ($g, $v) = $want_api_version =~ m{/}
+            ? split(m{/}, $want_api_version, 2)
+            : ('', $want_api_version);
+        my $res = $catalog->{groups}{$g}{versions}{$v}{kinds}{$kind};
+        return $meta_for->($g, $v, $res) if $res;
+    }
+
+    # Otherwise the preferred version of whichever group serves the Kind.
+    for my $group (sort keys %{$catalog->{groups}}) {
+        my $gdata = $catalog->{groups}{$group};
+        my @order = @{$gdata->{version_order} // []};
+        my $pref  = $gdata->{preferred};
+        @order = ($pref, grep { $_ ne $pref } @order)
+            if defined $pref && grep { $_ eq $pref } @order;
+        for my $version (@order) {
+            my $res = $gdata->{versions}{$version}{kinds}{$kind};
+            return $meta_for->($group, $version, $res) if $res;
+        }
+    }
+    return;
+}
+
+# The extra _build_path arguments an IO::K8s::Unstructured resolution needs,
+# derived from whatever identifier expand_class was given: an IO::K8s object
+# (its kind/apiVersion accessors) or a name string (the Kind is its last
+# '/'-delimited segment). Empty for every typed class, so typed path building
+# is completely unchanged.
+sub _unstructured_hint {
+    my ($self, $class, $ident) = @_;
+    return () unless defined $class && $class eq 'IO::K8s::Unstructured';
+    if (blessed($ident)) {
+        return (
+            kind => $ident->kind,
+            (defined $ident->apiVersion ? (api_version => $ident->apiVersion) : ()),
+        );
+    }
+    return (kind => (split m{/}, $ident)[-1]);
 }
 
 # Kubernetes groups whose IO::K8s classes do NOT live under IO::K8s::Api::.
@@ -806,25 +928,52 @@ sub _build_path {
 
     require_module($class);
 
-    # Get metadata from class
-    my $api_version = $class->can('api_version') ? $class->api_version : undef;
-    croak "Cannot determine api_version for $class - override api_version() in your CRD class"
-        unless defined $api_version;
-    my $kind = $class->can('kind') ? $class->kind : (split('::', $class))[-1];
-    my $is_namespaced = $class->does('IO::K8s::Role::Namespaced');
-
-    # Use explicit resource_plural if available, otherwise auto-pluralize
-    my $resource;
-    if ($class->can('resource_plural') && $class->resource_plural) {
-        $resource = $class->resource_plural;
+    # An Unstructured resolution (D16 rung 4) carries no api_version()/
+    # resource_plural()/Namespaced role -- its Kind is data on the instance,
+    # not a class identity -- so the path metadata comes from the discovery
+    # catalog instead of the class. The caller (a CRUD method, or a seam
+    # consumer) passes the Kind (and an object's own apiVersion) via
+    # _unstructured_hint; api_version/resource/namespaced overrides are honoured
+    # directly when given, which keeps build_path usable by async wrappers.
+    my ($api_version, $resource, $is_namespaced);
+    my ($kind_hint, $av_hint) = (delete $args{kind}, delete $args{api_version});
+    my $override_resource   = delete $args{resource};
+    my $override_namespaced = delete $args{namespaced};
+    if ($class eq 'IO::K8s::Unstructured') {
+        if (defined $override_resource && defined $override_namespaced
+            && defined $av_hint) {
+            ($api_version, $resource, $is_namespaced) =
+                ($av_hint, $override_resource, $override_namespaced);
+        } else {
+            defined $kind_hint
+                or croak "IO::K8s::Unstructured needs a Kind to build a path"
+                    . " (pass kind => 'Kind')";
+            my $meta = $self->_discovery_path_meta($kind_hint, $av_hint)
+                or croak "no discovery entry for Kind '$kind_hint' - cannot"
+                    . " build a path for IO::K8s::Unstructured";
+            ($api_version, $resource, $is_namespaced) =
+                @{$meta}{qw(api_version resource namespaced)};
+        }
     } else {
-        $resource = lc($kind);
-        if ($resource =~ /(?:ss|sh|ch|x|z)$/) {
-            $resource .= 'es';        # class -> classes, ingress -> ingresses
-        } elsif ($resource =~ /[^aeiou]y$/) {
-            $resource =~ s/y$/ies/;   # policy -> policies
-        } elsif ($resource !~ /s$/) {
-            $resource .= 's';         # pod -> pods
+        # Get metadata from class
+        $api_version = $class->can('api_version') ? $class->api_version : undef;
+        croak "Cannot determine api_version for $class - override api_version() in your CRD class"
+            unless defined $api_version;
+        my $kind = $class->can('kind') ? $class->kind : (split('::', $class))[-1];
+        $is_namespaced = $class->does('IO::K8s::Role::Namespaced');
+
+        # Use explicit resource_plural if available, otherwise auto-pluralize
+        if ($class->can('resource_plural') && $class->resource_plural) {
+            $resource = $class->resource_plural;
+        } else {
+            $resource = lc($kind);
+            if ($resource =~ /(?:ss|sh|ch|x|z)$/) {
+                $resource .= 'es';        # class -> classes, ingress -> ingresses
+            } elsif ($resource =~ /[^aeiou]y$/) {
+                $resource =~ s/y$/ies/;   # policy -> policies
+            } elsif ($resource !~ /s$/) {
+                $resource .= 's';         # pod -> pods
+            }
         }
     }
 
@@ -1204,7 +1353,8 @@ Supports C<labelSelector> and C<fieldSelector> query parameters for server-side 
     my $field_selector = delete $args{fieldSelector};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args);
+    my $path = $self->_build_path($class, %args,
+        $self->_unstructured_hint($class, $short_class));
 
     my %params;
     $params{labelSelector} = $label_selector if defined $label_selector;
@@ -1249,7 +1399,8 @@ Get a single resource by name. Returns a typed L<IO::K8s> object.
     my $class = $self->expand_class($short_class);
     croak "name required for get" unless $args{name};
 
-    my $path = $self->_build_path($class, %args);
+    my $path = $self->_build_path($class, %args,
+        $self->_unstructured_hint($class, $short_class));
     my $response = $self->_request('GET', $path);
     $self->_check_response($response, "get $short_class");
 
@@ -1272,7 +1423,8 @@ Create a resource from an L<IO::K8s> object. Returns the created object with ser
         ? $object->metadata->namespace
         : undef;
 
-    my $path = $self->_build_path($class, namespace => $namespace);
+    my $path = $self->_build_path($class, namespace => $namespace,
+        $self->_unstructured_hint($class, $object));
     my $response = $self->_request('POST', $path, $object->TO_JSON);
     $self->_check_response($response, "create " . ref($object));
 
@@ -1297,7 +1449,8 @@ For partial updates, use L</patch> instead.
     my $name = $metadata->name or croak "object must have metadata.name";
     my $namespace = $metadata->namespace;
 
-    my $path = $self->_build_path($class, name => $name, namespace => $namespace);
+    my $path = $self->_build_path($class, name => $name, namespace => $namespace,
+        $self->_unstructured_hint($class, $object));
     my $response = $self->_request('PUT', $path, $object->TO_JSON);
     $self->_check_response($response, "update " . ref($object));
 
@@ -1414,7 +1567,8 @@ Returns the full updated object from the server.
     my ($class, $name, $namespace, $patch, $content_type)
         = $self->_unpack_patch_args('patch', 'strategic', $class_or_object, @rest);
 
-    my $path = $self->_build_path($class, name => $name, namespace => $namespace);
+    my $path = $self->_build_path($class, name => $name, namespace => $namespace,
+        $self->_unstructured_hint($class, $class_or_object));
     my $response = $self->_request('PATCH', $path, $patch,
         content_type => $content_type);
     $self->_check_response($response, "patch $class");
@@ -1465,6 +1619,7 @@ resource and you need array merge semantics.
         name        => $name,
         namespace   => $namespace,
         subresource => 'status',
+        $self->_unstructured_hint($class, $class_or_object),
     );
     my $response = $self->_request('PATCH', $path, $patch,
         content_type => $content_type);
@@ -1500,6 +1655,7 @@ individual status fields.
         name        => $name,
         namespace   => $namespace,
         subresource => 'status',
+        $self->_unstructured_hint($class, $object),
     );
     my $response = $self->_request('PUT', $path, $object->TO_JSON);
     $self->_check_response($response, "update_status " . ref($object));
@@ -1552,7 +1708,8 @@ Delete a resource. Returns true on success.
         $namespace = $args{namespace};
     }
 
-    my $path = $self->_build_path($class, name => $name, namespace => $namespace);
+    my $path = $self->_build_path($class, name => $name, namespace => $namespace,
+        $self->_unstructured_hint($class, $class_or_object));
     my $response = $self->_request('DELETE', $path);
     $self->_check_response($response, "delete $class");
 
@@ -1623,7 +1780,9 @@ succeeded is returned unchanged. A failed Job is deleted and recreated.
     my $name = $metadata->name or croak "object must have metadata.name";
     my $namespace = $metadata->namespace;
 
-    my $path = $self->_build_path($class, name => $name, namespace => $namespace);
+    my @unstructured_hint = $self->_unstructured_hint($class, $object);
+    my $path = $self->_build_path($class, name => $name, namespace => $namespace,
+        @unstructured_hint);
 
     my $existing = eval {
         my $response = $self->_request('GET', $path);
@@ -1827,7 +1986,8 @@ there:
     my $field_selector   = delete $args{fieldSelector};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args);
+    my $path = $self->_build_path($class, %args,
+        $self->_unstructured_hint($class, $short_class));
 
     my %params = (
         watch          => 'true',
@@ -1927,7 +2087,8 @@ restart), and C<limitBytes> (byte cap on the response).
     my $limit_bytes  = delete $args{limitBytes};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args, subresource => 'log');
+    my $path = $self->_build_path($class, %args, subresource => 'log',
+        $self->_unstructured_hint($class, $short_class));
 
     my %params;
     $params{container}    = $container     if defined $container;
@@ -2029,7 +2190,8 @@ session/handle object managed by that backend).
     my $on_error = delete $args{on_error};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args, subresource => 'portforward');
+    my $path = $self->_build_path($class, %args, subresource => 'portforward',
+        $self->_unstructured_hint($class, $short_class));
 
     my $req = $self->_prepare_request('GET', $path,
         parameters => { ports => $ports },
@@ -2123,7 +2285,8 @@ session/handle object managed by that backend).
     my $on_error = delete $args{on_error};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args, subresource => 'exec');
+    my $path = $self->_build_path($class, %args, subresource => 'exec',
+        $self->_unstructured_hint($class, $short_class));
 
     my %params = (
         command => $command,
@@ -2216,7 +2379,8 @@ session/handle object managed by that backend).
     my $on_error = delete $args{on_error};
 
     my $class = $self->expand_class($short_class);
-    my $path = $self->_build_path($class, %args, subresource => 'attach');
+    my $path = $self->_build_path($class, %args, subresource => 'attach',
+        $self->_unstructured_hint($class, $short_class));
 
     my %params = (
         stdin   => $stdin  ? 'true' : 'false',

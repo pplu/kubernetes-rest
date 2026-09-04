@@ -2,6 +2,19 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - A Kind the cluster reports through discovery, but which resolves to no
+   shipped class, no `with` provider and no AutoGen class, now resolves to
+   IO::K8s::Unstructured instead of failing closed - untyped but usable, with
+   apiVersion/kind/metadata read from the data and any spec/status preserved
+   round-trip. This is on by default and gated on discovery confirmation: a
+   Kind the cluster does not serve, and a client with no cluster
+   (resource_map_from_cluster => 0), still fail closed. A bundled class, a
+   `with` provider or an AutoGen class still wins ahead of Unstructured.
+   build_path takes such a resource's plural and namespaced/cluster scope from
+   the discovery catalog; it accordingly accepts additive `kind` (and optional
+   `api_version`/`resource`/`namespaced`) arguments so async wrappers can build
+   Unstructured paths - existing calls are unaffected.
+
  - The cluster resource map no longer invents an IO::K8s::Api::<Group> class
    name for a CRD group this distribution ships no class for (cilium.io,
    cert-manager.io, ...). Such a Kind is now omitted from the discovery map
