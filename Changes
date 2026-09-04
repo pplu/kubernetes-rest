@@ -50,10 +50,12 @@ Revision history for Kubernetes-REST
    CustomResourceDefinition manifest into typed, documented IO::K8s class
    source - for every served version it renders the k8s DSL block plus a POD
    skeleton, so a cluster's CRDs become checked-in Perl classes without hand
-   writing them (the kopium / cdk8s import path). Reads a file with -f (STDOUT
-   or a tree with -d); the schema-to-DSL work is IO::K8s's (IO::K8s::CRD,
-   IO::K8s::CRD::Emitter). --from-cluster is scaffolded but not yet
-   implemented (it needs the discovery work landing alongside).
+   writing them (the kopium / cdk8s import path). Reads the CRD from a file
+   with -f, or from a live cluster with --from-cluster <Kind> (it lists the
+   cluster's CustomResourceDefinitions and picks the one whose spec.names.kind
+   matches, honouring --kubeconfig/--context); output goes to STDOUT or a tree
+   with -d. The schema-to-DSL work is IO::K8s's (IO::K8s::CRD,
+   IO::K8s::CRD::Emitter).
 
  - kube_watch now resolves the Kind correctly when options precede it:
    "kube_watch -n default Pod" watched Kind "-n" because MooX::Options keeps the

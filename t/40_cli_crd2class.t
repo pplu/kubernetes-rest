@@ -7,8 +7,9 @@
 # ->served_versions / ->generate, IO::K8s::CRD::Emitter ->render). These
 # tests drive a small embedded CRD through run()/_render_crds and assert the
 # actual emitter output - the DSL lines, the Kind, the apiVersion, the field
-# options and the POD - not merely that it ran. The --from-cluster path is
-# scaffolded only and asserted to die.
+# options and the POD - not merely that it ran. The --from-cluster path injects
+# a mocked Kubernetes::REST (Test::Kubernetes::Mock) as the lazy `api` and
+# asserts it renders the same source as -f for the same CRD.
 #
 # IO::K8s::CRD ships with IO::K8s (>= 1.108); run with the neighbouring lib
 # prepended for consistency with the rest of the CRD increment:
@@ -20,8 +21,11 @@ use Test::More;
 use Test::Exception;
 use FindBin;
 use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/lib";
 use File::Temp qw( tempfile tempdir );
 use Path::Tiny qw( path );
+use JSON::MaybeXS;
+use Test::Kubernetes::Mock qw( mock_api );
 
 use Kubernetes::REST::CLI::Crd2Class;
 
@@ -172,12 +176,90 @@ sub write_crd {
 }
 
 # ---------------------------------------------------------------------------
-# --from-cluster is scaffolded only: it must die, not silently no-op.
+# --from-cluster: a mocked Kubernetes::REST serves a CronTab CRD (same shape
+# as $CRD_YAML). Injecting the mock as the lazy `api` attribute keeps the test
+# cluster-free; the CRD is fetched via $api->list('CustomResourceDefinition'),
+# matched on spec.names.kind, and must render byte-for-byte what -f renders
+# from the equivalent manifest.
 # ---------------------------------------------------------------------------
+
+# The cluster's CRD list, mirroring $CRD_YAML: v1 (storage) + v1beta1 (served).
+sub crontab_crd_list {
+    return {
+        apiVersion => 'apiextensions.k8s.io/v1',
+        kind       => 'CustomResourceDefinitionList',
+        items      => [ {
+            apiVersion => 'apiextensions.k8s.io/v1',
+            kind       => 'CustomResourceDefinition',
+            metadata   => { name => 'crontabs.stable.example.com' },
+            spec => {
+                group => 'stable.example.com',
+                scope => 'Namespaced',
+                names => { plural => 'crontabs', kind => 'CronTab' },
+                versions => [
+                    {
+                        name => 'v1', served => JSON->true, storage => JSON->true,
+                        schema => { openAPIV3Schema => { type => 'object', properties => { spec => {
+                            type => 'object', required => ['cronSpec'], properties => {
+                                cronSpec => { type => 'string', description => 'The cron schedule expression.' },
+                                replicas => { type => 'integer', minimum => 0 },
+                                image    => { type => 'string' },
+                            } } } } },
+                    },
+                    {
+                        name => 'v1beta1', served => JSON->true, storage => JSON->false,
+                        schema => { openAPIV3Schema => { type => 'object', properties => { spec => {
+                            type => 'object', properties => { cronSpec => { type => 'string' } },
+                        } } } },
+                    },
+                ],
+            },
+        } ],
+    };
+}
+
+sub mock_crontab_api {
+    my $api = mock_api();
+    $api->io->add_response(
+        'GET', '/apis/apiextensions.k8s.io/v1/customresourcedefinitions',
+        crontab_crd_list(),
+    );
+    return $api;
+}
+
 {
-    my $cli = Kubernetes::REST::CLI::Crd2Class->new(from_cluster => 'CronTab');
-    throws_ok { $cli->run } qr/not yet implemented/,
-        '--from-cluster dies with a not-yet-implemented message';
+    my $ccli = Kubernetes::REST::CLI::Crd2Class->new(
+        from_cluster => 'CronTab', api => mock_crontab_api(),
+    );
+
+    # Same CRD via -f, for the equivalence assertion.
+    my $fcli = Kubernetes::REST::CLI::Crd2Class->new(file => write_crd());
+
+    my $c_blocks = $ccli->_render_crds($ccli->_crds_from_cluster('CronTab'));
+    my $f_blocks = $fcli->_render_crds(IO::K8s::CRD->load($fcli->file));
+
+    is_deeply($c_blocks, $f_blocks,
+        '--from-cluster renders byte-identical source to -f for the same CRD');
+
+    my $out = '';
+    {
+        open my $fh, '>', \$out or die $!;
+        local *STDOUT = $fh;
+        is($ccli->run, 0, 'run returns 0 on the --from-cluster path');
+    }
+    like($out, qr/package IO::K8s::Stable::V1::CronTab;/,
+        'run prints the cluster CRD source to STDOUT');
+    like($out, qr/package IO::K8s::Stable::V1beta1::CronTab;/,
+        'both served versions come from the cluster');
+}
+
+# A Kind the cluster does not serve is a clear error, not an empty run.
+{
+    my $cli = Kubernetes::REST::CLI::Crd2Class->new(
+        from_cluster => 'Widget', api => mock_crontab_api(),
+    );
+    throws_ok { $cli->run } qr/no CustomResourceDefinition on the cluster serves kind 'Widget'/,
+        '--from-cluster with an unknown Kind dies clearly';
 }
 
 # ---------------------------------------------------------------------------

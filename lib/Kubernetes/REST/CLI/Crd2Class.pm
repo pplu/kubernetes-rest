@@ -2,6 +2,7 @@ package Kubernetes::REST::CLI::Crd2Class;
 our $VERSION = '1.108';
 # ABSTRACT: Generate IO::K8s classes from a CustomResourceDefinition
 use Moo;
+with 'Kubernetes::REST::CLI::Role::Connection';
 use MooX::Options;
 use Carp qw( croak );
 use Path::Tiny qw( path );
@@ -30,11 +31,13 @@ L<IO::K8s::CRD/served_versions> and L<IO::K8s::CRD/generate> build the
 classes and L<IO::K8s::CRD::Emitter/render> renders them. This class is only
 the CLI hull: file in, emitter, source out.
 
-The C<-f> path never talks to a cluster and does not consume
-L<Kubernetes::REST::CLI::Role::Connection> - no kubeconfig is read. The
-C</from_cluster> path, which needs aggregated discovery from a live cluster,
-is scaffolded but B<not yet implemented>: it dies with a clear message. It
-lands with the discovery work of the same CRD design increment (D11/D16).
+The C<-f> path never talks to a cluster: it builds the L<api|/api> lazily
+through L<Kubernetes::REST::CLI::Role::Connection>, so reading a file reads no
+kubeconfig. The C</from_cluster> path uses that same C<api> to list the
+cluster's C<CustomResourceDefinition>s, picks the one whose C<spec.names.kind>
+matches the given Kind, and feeds its manifest through the very same emitter
+pipeline as C<-f> - so the two inputs produce identical source for the same
+CRD.
 
 =cut
 
@@ -97,16 +100,20 @@ Short option: C<-d>
 option from_cluster => (
     is => 'ro',
     format => 's',
-    doc => 'NOT YET IMPLEMENTED: generate from a Kind served by a live cluster',
+    doc => 'Generate from a Kind whose CRD a live cluster already serves',
 );
 
 =opt from_cluster
 
-B<Not yet implemented.> The scaffolded option for generating classes from a
-Kind a live cluster already serves, using aggregated discovery to find its
-CRD. Supplying it dies with a clear message; it lands together with the
-discovery work of the same CRD design increment (D11/D16). Use L</file> until
-then.
+A Kubernetes B<Kind> (for example C<CronTab>) that a live cluster already
+serves through a C<CustomResourceDefinition>. The cluster's CRDs are listed
+through L</api> and the one whose C<spec.names.kind> matches is turned into
+class source for every served version, exactly as L</file> would from that
+CRD's manifest. Dies clearly when no CRD - or more than one - serves the Kind.
+
+Reaching the cluster needs a kubeconfig, so this path honours C<--kubeconfig>
+and C<--context> from L<Kubernetes::REST::CLI::Role::Connection>; the L</file>
+path reads neither.
 
 =cut
 
@@ -114,33 +121,39 @@ then.
 
     my $exit_code = $cli->run;
 
-Entry point called by C<bin/kube_crd2class>. Loads the L</file> CRD, and for
-every served version of every CRD in it renders the L<IO::K8s> class source
-through L<IO::K8s::CRD::Emitter> - printing it to STDOUT, or writing it under
+Entry point called by C<bin/kube_crd2class>. Obtains one or more CRD manifests
+- from L</file>, or from the cluster by Kind when L</from_cluster> is given -
+and for every served version of every CRD renders the L<IO::K8s> class source
+through L<IO::K8s::CRD::Emitter>, printing it to STDOUT or writing it under
 L</output_dir> when that is set. Returns 0.
 
-Dies with a clear "not yet implemented" message when L</from_cluster> is
-given, and with usage guidance when neither input is supplied.
+Dies with usage guidance when neither input is supplied, when the L</file> does
+not exist, or when L</from_cluster> names a Kind the cluster does not serve
+through exactly one C<CustomResourceDefinition>.
 
 =cut
 
 sub run {
     my ($self) = @_;
 
-    if (defined $self->from_cluster && length $self->from_cluster) {
-        croak "kube_crd2class: --from-cluster is not yet implemented; it needs "
-            . "aggregated cluster discovery (CRD design D11/D16). Use --file/-f "
-            . "with a CustomResourceDefinition manifest for now.\n";
-    }
+    my $from_cluster = $self->from_cluster;
+    my $file         = $self->file;
 
-    my $file = $self->file;
-    croak "kube_crd2class: no input given; pass --file/-f <crd.yaml>\n"
-        unless defined $file && length $file;
-    croak "kube_crd2class: no such file: $file\n" unless -f $file;
+    my $crds;
+    if (defined $from_cluster && length $from_cluster) {
+        $crds = $self->_crds_from_cluster($from_cluster);
+    }
+    elsif (defined $file && length $file) {
+        croak "kube_crd2class: no such file: $file\n" unless -f $file;
+        $crds = IO::K8s::CRD->load($file);
+    }
+    else {
+        croak "kube_crd2class: no input given; pass --file/-f <crd.yaml> "
+            . "or --from-cluster <Kind>\n";
+    }
 
     binmode STDOUT, ':encoding(UTF-8)';
 
-    my $crds  = IO::K8s::CRD->load($file);
     my $files = $self->_render_crds($crds);
 
     if (defined $self->output_dir && length $self->output_dir) {
@@ -150,6 +163,30 @@ sub run {
         $self->_print_files($files);
     }
     return 0;
+}
+
+# The CRD hashref(s) for one Kind served by the cluster, in the shape
+# IO::K8s::CRD->load returns (so _render_crds drives the same pipeline as -f):
+# list the cluster's CustomResourceDefinitions through the shared api, keep the
+# one whose spec.names.kind matches, and normalize it through ->load - which
+# takes a CustomResourceDefinition object straight, via its TO_JSON. A Kind
+# served by no CRD, or by several (same kind in different groups), dies clearly.
+sub _crds_from_cluster {
+    my ($self, $kind) = @_;
+
+    my $list = $self->api->list('CustomResourceDefinition');
+    my @matches = grep {
+        my $names = $_->spec && $_->spec->names;
+        $names && defined $names->kind && $names->kind eq $kind;
+    } @{ $list->items };
+
+    croak "kube_crd2class: no CustomResourceDefinition on the cluster serves "
+        . "kind '$kind'\n" unless @matches;
+    croak "kube_crd2class: kind '$kind' is served by more than one "
+        . "CustomResourceDefinition (" . join(', ', map { $_->metadata->name } @matches)
+        . "); nothing here can pick between them\n" if @matches > 1;
+
+    return IO::K8s::CRD->load($matches[0]);
 }
 
 # An arrayref of [ relative_path, api_version, source ] blocks for every
