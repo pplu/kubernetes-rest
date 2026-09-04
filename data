@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-09-04T02:57:46Z
+claimed_by: main
+class: standard
+completed: 2026-09-04T02:57:46Z
+created: 2026-09-03T01:26:26Z
+id: 24
+priority: high
+started: 2026-09-04T00:05:01Z
+status: done
+tags:
+- crd
+- discovery
+- cli
+title: 'CRD step 6: discovery-based cluster map, with/openapi_spec passthrough, Unstructured
+  default, ensure_crd, kube_crd2class (D11-D17)'
+updated: 2026-09-04T02:57:46Z
+---
+
+Design: ~/dev/io-k8s-p5/docs/superpowers/specs/2026-09-03-crd-design.md (D11-D17). Plan: to be written once IO::K8s steps 3 and 5 have landed.
+
+- Aggregated discovery (GET /apis, Accept application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList, per-group fallback) replaces /openapi/v2 as the source of the cluster resource map: groups, versions, plural, Kind, scope, preferred version. Cached per instance, invalidated by ensure_crd. /openapi/v2 becomes lazy (AutoGen only).
+- Kubernetes::REST->new(with => [...]) mirrors IO::K8s; the fetched spec is passed as openapi_spec. The cluster map stops inventing IO::K8s::Api::<Group> names for groups the distribution does not ship (today: cilium.io -> nonexistent class, cert-manager.io -> invalid package name).
+- Resolution order: +Class, providers, AutoGen (spec loaded), IO::K8s::Unstructured when discovery confirms the GVK (default on here), else the fail-closed error. Bare Kind resolves to the group's preferred version.
+- ensure_crd(@classes): ensure of each class's to_crd, wait for Established with timeout, invalidate discovery.
+- bin/kube_crd2class -f file.yaml | --from-cluster Kind: CLI over IO::K8s's emitter API.
+- Finish ticket 22 (minikube runner) as the test bed; kubernetes-ocp then replaces register_resource_providers with with => [...].
+Depends on: io-k8s-p5 k94, k96.
+
+IO::K8s step 3 (2026-09-03): AutoGen now generates nested classes for inline objects with properties, so a generated Kind's spec/status are objects, not hashes. t/09_crd_autogen.t keeps working because it builds through struct_to_object/new_object and reads $site->spec->{domain} on a blessed hash; the write $site->spec->{replicas} = 3 (line ~164) is now an unchecked slot write that bypasses the field's type -- switch it to $site->spec->replicas(3) when this dist bumps its IO::K8s pin. A direct Class->new(spec => { ... }) on a generated class would fail (IO::K8s k100); none found here.
+
+IO::K8s step 3 (2026-09-03): IO::K8s::CRD->generate / add_crd cache generated classes by name per IO::K8s instance; re-adding an edited manifest returns the stale class. ensure_crd (D14) should decide how to refresh: simplest is a per-call AutoGen namespace suffix for the regenerated Kind plus overriding the resource_map entries (add() is first-wins, so override explicitly), or documenting that a CRD change needs a new client instance.
+
+Scope aufgeteilt nach io-k8s-Stand (Schritt 4 auf master als Code; Schritt 5 nur Plan-Commit 9af587d2). JETZT baubar: D11 (aggregated discovery -> Cluster-Map, cache, /openapi/v2 lazy), D12 (with/openapi_spec-Passthrough, keine erfundenen IO::K8s::Api::<Group>-Namen mehr), D13 Aufloesung Rungs 1-3+5, D15 (kube_crd2class ueber Step-3-Emitter), D17 (Kurzname -> preferred version). WARTET auf io-k8s Schritt 5 (to_crd/Unstructured): D14 ensure_crd, D16 + D13-Rung-4 Unstructured-Fallback. Dev/Test gegen PERL5LIB=../io-k8s-p5/lib (installiertes io-k8s ist pre-Schritt-4); Getty installiert master neu (dzil install fuer mich vom Classifier blockiert), zweiter Reinstall nach Schritt 5.
+
+Fortschritt: A (D11 aggregated discovery -> Cluster-Map, invalidate_discovery, /openapi/v2 lazy) committet 0898229; D (D15 kube_crd2class -f ueber IO::K8s-Emitter, --from-cluster gestubbt) committet danach. Volle Suite 39 Dateien/613 Tests gruen gegen PERL5LIB=../io-k8s-p5/lib. Naechste: B (D12 with/openapi_spec-Passthrough), dann C (D13 Aufloesungsreihenfolge Rungs 1-3+5 + D17 preferred version, stop inventing IO::K8s::Api::<Group>). Weiterhin offen bis io-k8s Schritt 5: D14 ensure_crd, D16/D13-Rung-4 Unstructured.
+
+Build-now-Slice KOMPLETT: A/D11 (0898229), D/D15 (folgend), B/D12 (9204488), C/D13+D17 (557e817). Volle Suite 41 Dateien/620 Tests gruen gegen installiertes io-k8s (hat inzwischen Step-4-Provider) UND Sibling-lib. Offen, WARTET auf io-k8s Schritt 5: D14 ensure_crd (braucht to_crd), D16/D13-Rung-4 Unstructured-Default (braucht IO::K8s::Unstructured) - die D16-Naht ist im expand_class-Fallthrough als Kommentar markiert. kube_crd2class --from-cluster ist ebenfalls gestubbt und wird mit D16/Discovery-Verdrahtung fertig.
+
+Increment E (D16 rung 4): IO::K8s->expand_class for a discovery-confirmed non-shipped Kind is FAIL-OPEN (returns fabricated 'IO::K8s::<Kind>' string that does not load; the die only happens later at require_module in _build_path/inflate), verified at io-k8s-p5 lib/IO/K8s.pm:654 (main) and :696 (_resolve_mapped). So E wraps the fall-through: use inner class if it loads (rungs 1-3), else if discovery confirms the GVK -> IO::K8s::Unstructured, else keep fail-closed (rung 5). build_path gets plural+scope+api_version from _discovery via new _discovery_path_meta; Unstructured hint threaded from call sites via _unstructured_hint. new_object stays delegated/fail-closed (t/43 line 167).
+
+Increment E DONE (D16 rung 4 + Unstructured path-build). Changed: lib/Kubernetes/REST.pm (expand_class rung-4 fallthrough; new _kind_from_expand_args, _discovery_path_meta, _unstructured_hint; _build_path Unstructured branch taking plural/scope/api_version from discovery; hint threaded through list/get/create/update/patch/patch_status/update_status/delete/ensure/watch/log/exec/attach/port_forward; build_path seam gained additive kind/api_version/resource/namespaced args), Changes bullet, new t/44_unstructured_fallback.t (git add'd). Full suite green 42 files/633 tests. NOT committed (orchestrator). NOTE: lib/.../CLI/Crd2Class.pm + t/40 show as modified in the tree from concurrent from_cluster sibling work - left untouched, not mine.
+
+Step-5-Nachzug: E/D16 Unstructured-Fallback committet 7d0a6ca (fuellt C's Rung-4-Naht; build_path-Seam additiv um kind/api_version/resource/namespaced erweitert - Net::Async-relevant, rueckwaertskompatibel). G/D15 --from-cluster committet bd6970a. Volle Suite 42 Dateien/633 Tests gruen gegen installiertes Step-5-io-k8s. F/D14 ensure_crd laeuft (to_crd -> ensure -> wait Established -> invalidate_discovery; Multi-Version mit Stop-and-Report). Nach F ist D11-D17 komplett.
