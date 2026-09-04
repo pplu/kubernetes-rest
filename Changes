@@ -13,6 +13,15 @@ Revision history for Kubernetes-REST
    the resource map built from it, so a newly installed CustomResourceDefinition
    becomes resolvable without constructing a fresh client.
 
+ - New CLI tool kube_crd2class (Kubernetes::REST::CLI::Crd2Class): turns a
+   CustomResourceDefinition manifest into typed, documented IO::K8s class
+   source - for every served version it renders the k8s DSL block plus a POD
+   skeleton, so a cluster's CRDs become checked-in Perl classes without hand
+   writing them (the kopium / cdk8s import path). Reads a file with -f (STDOUT
+   or a tree with -d); the schema-to-DSL work is IO::K8s's (IO::K8s::CRD,
+   IO::K8s::CRD::Emitter). --from-cluster is scaffolded but not yet
+   implemented (it needs the discovery work landing alongside).
+
  - kube_watch now resolves the Kind correctly when options precede it:
    "kube_watch -n default Pod" watched Kind "-n" because MooX::Options keeps the
    parsed options in @ARGV by default, so bin/kube_watch's shift @ARGV took the

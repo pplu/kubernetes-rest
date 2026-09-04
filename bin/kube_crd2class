@@ -1,0 +1,75 @@
+#!/usr/bin/env perl
+# PODNAME: kube_crd2class
+# ABSTRACT: Generate IO::K8s classes from a CustomResourceDefinition
+
+use strict;
+use warnings;
+
+use Kubernetes::REST::CLI::Crd2Class;
+
+our $VERSION = '1.108';
+
+my $cli = Kubernetes::REST::CLI::Crd2Class->new_with_options;
+exit $cli->run;
+
+__END__
+
+=encoding UTF-8
+
+=head1 SYNOPSIS
+
+    # Print the class source for every served version to STDOUT
+    kube_crd2class -f crontabs.crd.yaml
+
+    # Choose the base package the classes are rendered under
+    kube_crd2class -f crontabs.crd.yaml -n My::K8s
+
+    # Write the .pm files to a directory tree instead of printing
+    kube_crd2class -f crontabs.crd.yaml -d generated/
+
+=head1 DESCRIPTION
+
+B<kube_crd2class> turns a C<CustomResourceDefinition> manifest into typed,
+documented L<IO::K8s> class source: for every B<served> version of the CRD it
+prints a C<.pm> per modeled structure - the C<k8s> DSL block plus a POD
+skeleton - so a cluster's CRDs become checked-in Perl classes without writing
+them by hand (the kopium / C<cdk8s import> path).
+
+The schema-to-DSL work is L<IO::K8s>'s (L<IO::K8s::CRD>,
+L<IO::K8s::CRD::Emitter>); this tool is the CLI hull. The C<-f> path never
+talks to a cluster and reads no kubeconfig.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-f>, B<--file>=PATH
+
+Path to a file holding one or more C<CustomResourceDefinition> manifests
+(YAML, possibly multi-document, or JSON).
+
+=item B<-n>, B<--namespace>=PACKAGE
+
+Base package for the generated classes, without the version segment. Default:
+C<IO::K8s::> plus the CamelCased leading DNS label of the CRD group. The
+served version name is appended per version.
+
+=item B<-d>, B<--output_dir>=PATH
+
+Write each rendered class to F<PATH/relative/path.pm> instead of printing it,
+logging every written path to STDERR.
+
+=item B<--from_cluster>=KIND
+
+B<Not yet implemented.> The scaffolded path for generating from a Kind a live
+cluster already serves; it dies with a clear message. Use C<--file> until it
+lands with the CRD discovery work.
+
+=back
+
+=head1 SEE ALSO
+
+L<Kubernetes::REST>, L<Kubernetes::REST::CLI::Crd2Class>,
+L<IO::K8s::CRD>, L<IO::K8s::CRD::Emitter>, L<kube_client>, L<kube_watch>
+
+=cut
