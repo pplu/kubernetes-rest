@@ -15,6 +15,7 @@ use IO::K8s;
 use IO::K8s::List;
 use Kubernetes::REST::WatchEvent;
 use Kubernetes::REST::LogEvent;
+use namespace::clean;
 
 has server => (
     is => 'ro',
@@ -101,6 +102,32 @@ has _json => (
     },
 );
 
+# External IO::K8s resource-map providers, mirrored onto the inner instance.
+has with => (
+    is => 'ro',
+    default => sub { [] },
+);
+
+=attr with
+
+Arrayref of external L<IO::K8s> resource-map providers (CRD bundles), passed
+straight through to the inner L<IO::K8s/with>. Each entry is a provider class
+name (or object, or plain hashref) whose typed classes are merged into the
+resource map, so the cluster's CRD Kinds resolve to real classes:
+
+    my $api = Kubernetes::REST->new(
+        server      => { endpoint => 'https://k8s.local:6443' },
+        credentials => { token => $token },
+        with        => ['IO::K8s::GatewayAPI'],
+    );
+
+    my $gw = $api->new_object(Gateway => { metadata => { name => 'gw' } });
+    # => IO::K8s::GatewayAPI::V1::Gateway
+
+Defaults to C<[]>. See L<IO::K8s/with> for the accepted provider forms.
+
+=cut
+
 # IO::K8s instance - configured with same resource_map
 has k8s => (
     is => 'ro',
@@ -111,6 +138,13 @@ has k8s => (
         my $self = shift;
         return IO::K8s->new(
             resource_map => $self->resource_map,
+            with         => [ @{ $self->with } ],
+            # openapi_spec is an eager hashref on IO::K8s: handing it over here
+            # only once it has actually been fetched keeps constructing/using
+            # the inner instance from forcing the /openapi/v2 download (D12).
+            # Until then it is absent; _openapi_spec's builder rebuilds this
+            # instance once the spec exists.
+            ($self->_has_openapi_spec ? (openapi_spec => $self->_openapi_spec) : ()),
         );
     },
     handles => [qw(
@@ -217,7 +251,11 @@ has resource_map => (
     clearer => '_clear_resource_map',
     default => sub {
         my $self = shift;
-        return IO::K8s->default_resource_map unless $self->resource_map_from_cluster;
+        # A private copy, never IO::K8s's shared global map: the inner IO::K8s
+        # is handed this hashref and merges any `with` providers into it with
+        # add(), which mutates it in place. Returning the global ref would leak
+        # provider Kinds into IO::K8s->default_resource_map process-wide.
+        return { %{ IO::K8s->default_resource_map } } unless $self->resource_map_from_cluster;
         return $self->_load_resource_map_from_cluster;
     },
 );
@@ -555,14 +593,25 @@ is installed or changed, to make the new Kind visible to this client instance.
     return 1;
 }
 
-# Fetch full OpenAPI spec from cluster (cached)
+# Fetch full OpenAPI spec from cluster (cached). Kept lazy on purpose: the
+# only /openapi/v2 download in the client, paid for by schema_for/compare_schema
+# and (once resolution needs it) AutoGen, never by construction.
 has _openapi_spec => (
     is => 'lazy',
+    predicate => '_has_openapi_spec',
     builder => sub {
         my $self = shift;
         my $response = $self->_request('GET', '/openapi/v2');
         croak "Could not fetch OpenAPI spec: " . $response->status if $response->status >= 400;
-        return $self->_json->decode($response->content);
+        my $spec = $self->_json->decode($response->content);
+        # D12: the inner IO::K8s was built without a spec (so building it never
+        # forced this fetch). Now that the spec exists, drop the cached instance
+        # so its next build passes it through as openapi_spec for AutoGen -- the
+        # same rebuild-on-next-use pattern invalidate_discovery uses. The clear
+        # only marks it for rebuild; nothing here re-reads k8s, so the rebuild
+        # happens after Moo has stored this spec, not during the builder.
+        $self->_clear_k8s if $self->_has_k8s;
+        return $spec;
     },
 );
 

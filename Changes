@@ -2,6 +2,13 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - New constructor attribute `with`: an arrayref of external IO::K8s
+   resource-map providers (CRD bundles), passed straight through to the inner
+   IO::K8s so a cluster's CRD Kinds resolve to real classes, e.g.
+   with => ['IO::K8s::GatewayAPI']. The lazily fetched /openapi/v2 spec is now
+   also handed to the inner IO::K8s as openapi_spec once it has been fetched,
+   without forcing that download at construction time.
+
  - The cluster resource map is now built from aggregated discovery (GET /api +
    GET /apis with the apidiscovery.k8s.io v2 Accept header, with a per-group
    APIResourceList fallback for pre-1.27 clusters) instead of the multi-MB
