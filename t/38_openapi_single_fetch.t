@@ -1,10 +1,15 @@
 #!/usr/bin/env perl
-# karr #17: fetch_resource_map used to issue its own GET /openapi/v2 and
-# decode the answer, while the lazy _openapi_spec attribute - what schema_for
-# and compare_schema read - makes exactly the same request and caches it. A
-# client on the default resource_map_from_cluster => 1 that also called
-# schema_for() downloaded and decoded the multi-MB spec twice per process.
-# The map is now built from _openapi_spec: one download, shared by all.
+# Since design D11 (karr k24) the cluster resource map is built from aggregated
+# discovery (GET /api + GET /apis), NOT from GET /openapi/v2. This test used to
+# assert that fetch_resource_map and schema_for shared a single /openapi/v2
+# download (karr #17); that premise is gone - the map no longer touches the
+# spec at all. The reformulated claim:
+#   * building the map fetches discovery (/api + /apis), never /openapi/v2;
+#   * schema_for still fetches /openapi/v2, lazily and exactly once, and the
+#     map build does not fetch it for it.
+# The old shared-single-download assertion is retired because it no longer
+# describes the code; the /openapi/v2-stays-lazy half of the intent survives
+# here and the discovery half is pinned in t/39_aggregated_discovery.t.
 use strict;
 use warnings;
 use Test::More;
@@ -33,21 +38,38 @@ use Kubernetes::REST::AuthToken;
     };
 }
 
-sub openapi_fetches {
-    my ($io) = @_;
-    return scalar grep { $_ eq 'GET /openapi/v2' } @{$io->calls};
+sub count_calls {
+    my ($io, $wanted) = @_;
+    return scalar grep { $_ eq $wanted } @{$io->calls};
 }
 
-my %OPENAPI_SPEC = (
-    paths => {
-        '/api/v1/namespaces/{namespace}/pods' => {
-            get => {
-                'x-kubernetes-group-version-kind' => {
-                    group => '', version => 'v1', kind => 'Pod',
+my %CORE_DISCOVERY = (
+    kind  => 'APIGroupDiscoveryList',
+    items => [
+        {
+            metadata => { name => '' },
+            versions => [
+                {
+                    version   => 'v1',
+                    resources => [
+                        {
+                            resource     => 'pods',
+                            responseKind => { group => '', version => 'v1', kind => 'Pod' },
+                            scope        => 'Namespaced',
+                        },
+                    ],
                 },
-            },
+            ],
         },
-    },
+    ],
+);
+
+my %GROUPED_DISCOVERY = (
+    kind  => 'APIGroupDiscoveryList',
+    items => [],
+);
+
+my %OPENAPI_SPEC = (
     definitions => {
         'io.k8s.api.core.v1.Pod' => {
             description => 'Pod is a collection of containers',
@@ -56,8 +78,10 @@ my %OPENAPI_SPEC = (
     },
 );
 
-subtest 'the spec is fetched once, however many readers it has' => sub {
+subtest 'the map builds from discovery, schema_for still uses /openapi/v2 once' => sub {
     my $io = Counting::Mock::IO->new;
+    $io->add_response('GET', '/api',  \%CORE_DISCOVERY);
+    $io->add_response('GET', '/apis', \%GROUPED_DISCOVERY);
     $io->add_response('GET', '/openapi/v2', \%OPENAPI_SPEC);
     my $api = Kubernetes::REST->new(
         server => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
@@ -66,22 +90,31 @@ subtest 'the spec is fetched once, however many readers it has' => sub {
     );
 
     my $map = $api->fetch_resource_map;
-    is $map->{Pod}, 'Api::Core::V1::Pod', 'fetch_resource_map still builds the map';
-    is openapi_fetches($io), 1, 'one /openapi/v2 download for the map';
+    is $map->{Pod}, 'Api::Core::V1::Pod', 'fetch_resource_map builds the map from discovery';
+    is count_calls($io, 'GET /api'),  1, 'GET /api for the map';
+    is count_calls($io, 'GET /apis'), 1, 'GET /apis for the map';
+    is count_calls($io, 'GET /openapi/v2'), 0,
+        'the map build never downloaded /openapi/v2';
 
     my $schema = $api->schema_for('io.k8s.api.core.v1.Pod');
     is $schema->{description}, 'Pod is a collection of containers',
-        'schema_for answers from the same spec';
-    is openapi_fetches($io), 1, 'and did not download it again';
+        'schema_for answers from the lazily-fetched spec';
+    is count_calls($io, 'GET /openapi/v2'), 1, 'one /openapi/v2 download for schema_for';
+
+    $api->schema_for('io.k8s.api.core.v1.Pod');
+    is count_calls($io, 'GET /openapi/v2'), 1,
+        'the spec is cached - schema_for does not download it again';
 
     $api->fetch_resource_map;
-    is openapi_fetches($io), 1,
-        'a repeated fetch_resource_map rebuilds from the cached spec';
+    is count_calls($io, 'GET /openapi/v2'), 1,
+        'a repeated fetch_resource_map still does not touch /openapi/v2';
+    is count_calls($io, 'GET /api'),  1,
+        'a repeated fetch_resource_map rebuilds from the cached discovery catalog';
 };
 
 subtest 'the failure path keeps its documented wording' => sub {
     my $api = mock_api();
-    # mock_api has no /openapi/v2 response -> 404
+    # mock_api has no /api or /apis discovery response -> 404
     throws_ok { $api->fetch_resource_map }
         qr/Could not load resource map from cluster:/,
         'fetch_resource_map croaks with its own message';

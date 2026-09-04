@@ -251,36 +251,72 @@ subtest 'group namespace lookup matches the full group name exactly' => sub {
 subtest 'fetch_resource_map keeps colliding CRD groups out of the exception' => sub {
     my $api = mock_api();
 
-    $api->io->add_response('GET', '/openapi/v2', {
-        paths => {
-            '/apis/apiextensions.k8s.io/v1/customresourcedefinitions' => {
-                get => {
-                    'x-kubernetes-group-version-kind' => {
-                        group => 'apiextensions.k8s.io',
-                        version => 'v1',
-                        kind => 'CustomResourceDefinition',
+    # The cluster map is built from aggregated discovery (design D11), so mock
+    # GET /api (empty core list) and GET /apis (APIGroupDiscoveryList) rather
+    # than /openapi/v2.
+    $api->io->add_response('GET', '/api',
+        { kind => 'APIGroupDiscoveryList', items => [] });
+    $api->io->add_response('GET', '/apis', {
+        kind  => 'APIGroupDiscoveryList',
+        items => [
+            {
+                metadata => { name => 'apiextensions.k8s.io' },
+                versions => [
+                    {
+                        version   => 'v1',
+                        resources => [
+                            {
+                                resource     => 'customresourcedefinitions',
+                                responseKind => {
+                                    group => 'apiextensions.k8s.io',
+                                    version => 'v1',
+                                    kind => 'CustomResourceDefinition',
+                                },
+                                scope => 'Cluster',
+                            },
+                        ],
                     },
-                },
+                ],
             },
-            '/apis/apiextensions.example.com/v1/widgets' => {
-                get => {
-                    'x-kubernetes-group-version-kind' => {
-                        group => 'apiextensions.example.com',
-                        version => 'v1',
-                        kind => 'Widget',
+            {
+                metadata => { name => 'apiextensions.example.com' },
+                versions => [
+                    {
+                        version   => 'v1',
+                        resources => [
+                            {
+                                resource     => 'widgets',
+                                responseKind => {
+                                    group => 'apiextensions.example.com',
+                                    version => 'v1',
+                                    kind => 'Widget',
+                                },
+                                scope => 'Namespaced',
+                            },
+                        ],
                     },
-                },
+                ],
             },
-            '/apis/apiregistration.acme.io/v1/gadgets' => {
-                get => {
-                    'x-kubernetes-group-version-kind' => {
-                        group => 'apiregistration.acme.io',
-                        version => 'v1',
-                        kind => 'Gadget',
+            {
+                metadata => { name => 'apiregistration.acme.io' },
+                versions => [
+                    {
+                        version   => 'v1',
+                        resources => [
+                            {
+                                resource     => 'gadgets',
+                                responseKind => {
+                                    group => 'apiregistration.acme.io',
+                                    version => 'v1',
+                                    kind => 'Gadget',
+                                },
+                                scope => 'Namespaced',
+                            },
+                        ],
                     },
-                },
+                ],
             },
-        },
+        ],
     });
 
     my $map = $api->fetch_resource_map;

@@ -32,29 +32,55 @@ use Kubernetes::REST::AuthToken;
     };
 }
 
-my %OPENAPI_SPEC = (
-    paths => {
-        '/api/v1/namespaces/{namespace}/pods' => {
-            get => {
-                'x-kubernetes-group-version-kind' => {
-                    group => '', version => 'v1', kind => 'Pod',
+# Aggregated discovery bodies: the cluster map is built from these (design
+# D11), never from /openapi/v2. Core Pod on /api, example.com/v1 Widget on /apis.
+my %CORE_DISCOVERY = (
+    kind  => 'APIGroupDiscoveryList',
+    items => [
+        {
+            metadata => { name => '' },
+            versions => [
+                {
+                    version   => 'v1',
+                    resources => [
+                        {
+                            resource     => 'pods',
+                            responseKind => { group => '', version => 'v1', kind => 'Pod' },
+                            scope        => 'Namespaced',
+                        },
+                    ],
                 },
-            },
+            ],
         },
-        '/apis/example.com/v1/widgets' => {
-            get => {
-                'x-kubernetes-group-version-kind' => {
-                    group => 'example.com', version => 'v1', kind => 'Widget',
+    ],
+);
+
+my %GROUPED_DISCOVERY = (
+    kind  => 'APIGroupDiscoveryList',
+    items => [
+        {
+            metadata => { name => 'example.com' },
+            versions => [
+                {
+                    version   => 'v1',
+                    resources => [
+                        {
+                            resource     => 'widgets',
+                            responseKind => { group => 'example.com', version => 'v1', kind => 'Widget' },
+                            scope        => 'Namespaced',
+                        },
+                    ],
                 },
-            },
+            ],
         },
-    },
+    ],
 );
 
 sub cluster_api {
     my (%extra) = @_;
     my $io = Counting::Mock::IO->new;
-    $io->add_response('GET', '/openapi/v2', \%OPENAPI_SPEC);
+    $io->add_response('GET', '/api',  \%CORE_DISCOVERY);
+    $io->add_response('GET', '/apis', \%GROUPED_DISCOVERY);
     my $api = Kubernetes::REST->new(
         server => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
         credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
@@ -85,14 +111,16 @@ subtest 'a name the built-in map cannot answer still fetches the cluster map' =>
 
     is $api->expand_class('Widget'), 'IO::K8s::Api::Example::V1::Widget',
         'unknown Kind falls through to the cluster-derived map';
-    is scalar(grep { $_ eq 'GET /openapi/v2' } @{$io->calls}), 1,
-        'exactly one /openapi/v2 fetch for the fallthrough';
+    is scalar(grep { $_ eq 'GET /apis' } @{$io->calls}), 1,
+        'exactly one discovery fetch (/apis) for the fallthrough';
+    is scalar(grep { $_ eq 'GET /openapi/v2' } @{$io->calls}), 0,
+        'and it never touched /openapi/v2';
 
     # Once the map is fetched, resolution goes through it - as before #15.
     is $api->expand_class('Pod'), 'IO::K8s::Api::Core::V1::Pod',
         'built-in name still resolves after the map is loaded';
-    is scalar(grep { $_ eq 'GET /openapi/v2' } @{$io->calls}), 1,
-        'and the spec is not fetched again';
+    is scalar(grep { $_ eq 'GET /apis' } @{$io->calls}), 1,
+        'and discovery is not fetched again';
 };
 
 subtest 'a caller-supplied resource_map is never shadowed by the built-in map' => sub {

@@ -105,6 +105,8 @@ has _json => (
 has k8s => (
     is => 'ro',
     lazy => 1,
+    predicate => '_has_k8s',
+    clearer => '_clear_k8s',
     default => sub {
         my $self = shift;
         return IO::K8s->new(
@@ -212,6 +214,7 @@ has resource_map => (
     is => 'ro',
     lazy => 1,
     predicate => '_has_resource_map',
+    clearer => '_clear_resource_map',
     default => sub {
         my $self = shift;
         return IO::K8s->default_resource_map unless $self->resource_map_from_cluster;
@@ -318,7 +321,7 @@ sub _io_k8s_namespace_for_group_path {
     return $NON_API_NAMESPACE_BY_GROUP_PATH{$group_path} // "Api::${group_path}";
 }
 
-# Public method to fetch resource map from cluster's OpenAPI spec
+# Public method to build the resource map from the cluster's discovery catalog
 sub fetch_resource_map {
     my ($self) = @_;
 
@@ -326,53 +329,230 @@ sub fetch_resource_map {
 
     my $map = $api->fetch_resource_map;
 
-Fetch the resource map from the cluster's OpenAPI spec (C</openapi/v2> endpoint). Returns a hashref mapping short resource names (e.g., C<Pod>) to full L<IO::K8s> class paths.
+Build the resource map from the cluster's aggregated discovery documents
+(C<GET /api> and C<GET /apis>). Returns a hashref mapping short resource names
+(e.g., C<Pod>) to full L<IO::K8s> class paths.
 
 Called automatically if C<resource_map_from_cluster> is enabled.
 
-The spec itself is downloaded and decoded once per instance and shared with
-L</schema_for> and L</compare_schema>; calling this again rebuilds the map
-from the cached spec rather than fetching it anew.
+Discovery is fetched and cached once per instance (see L</invalidate_discovery>);
+calling this again rebuilds the map from the cached catalog rather than
+re-querying the cluster. It does B<not> download C</openapi/v2> - that spec is
+fetched lazily only when L</schema_for> or L</compare_schema> need it.
 
 =cut
 
-    # The spec is multi-MB on a real cluster. _openapi_spec fetches and
-    # decodes it once per instance and is what schema_for/compare_schema read
-    # too, so building the map from it spares the second download this method
-    # used to make with a private request (karr #17). The failure keeps this
-    # method's documented wording; the underlying error rides along.
-    my $spec = eval { $self->_openapi_spec };
-    croak "Could not load resource map from cluster: $@" unless $spec;
+    # The cluster resource map is built from aggregated discovery, not from the
+    # multi-MB /openapi/v2 spec (design D11): a small GET /api + GET /apis gives
+    # every group, version, plural, Kind and scope. The catalog is cached in the
+    # _discovery attribute and shared by later rebuilds; /openapi/v2 stays lazy
+    # for schema_for/compare_schema only. The failure keeps this method's
+    # documented wording; the underlying error rides along.
+    my $catalog = eval { $self->_discovery };
+    croak "Could not load resource map from cluster: $@" unless $catalog;
+
+    return $self->_resource_map_from_catalog($catalog);
+}
+
+# Turn the cached discovery catalog into the short-name -> IO::K8s class map.
+# The class-name mapping is unchanged from the OpenAPI-sourced version: the
+# namespace comes from _io_k8s_namespace_for_group (exception tables included),
+# List kinds are skipped, and a stable version wins over an alpha/beta one for
+# the same kind.
+sub _resource_map_from_catalog {
+    my ($self, $catalog) = @_;
 
     my %map;
+    for my $group (keys %{$catalog->{groups} // {}}) {
+        my $gdata = $catalog->{groups}{$group};
+        for my $version (@{$gdata->{version_order} // []}) {
+            my $kinds = $gdata->{versions}{$version}{kinds};
+            for my $kind (keys %$kinds) {
+                next if $kind =~ /List$/;
 
-    for my $path (keys %{$spec->{paths} // {}}) {
-        my $methods = $spec->{paths}{$path};
-        for my $method (keys %$methods) {
-            my $op = $methods->{$method};
-            next unless ref $op eq 'HASH';
-            my $gvk = $op->{'x-kubernetes-group-version-kind'};
-            next unless $gvk;
+                my $version_path = ucfirst($version);
+                my $new_path = $self->_io_k8s_namespace_for_group($group)
+                    . "::${version_path}::${kind}";
 
-            my $kind = $gvk->{kind} // '';
-            my $version = $gvk->{version} // '';
-            my $group = $gvk->{group} // '';
-
-            next if $kind =~ /List$/;
-            next unless $kind && $version;
-
-            my $version_path = ucfirst($version);
-            my $new_path = $self->_io_k8s_namespace_for_group($group)
-                . "::${version_path}::${kind}";
-
-            # Prefer stable versions
-            if (!$map{$kind} || $version !~ /alpha|beta/) {
-                $map{$kind} = $new_path;
+                if (!$map{$kind} || $version !~ /alpha|beta/) {
+                    $map{$kind} = $new_path;
+                }
             }
         }
     }
 
     return \%map;
+}
+
+# Per-instance discovery catalog, keyed by group. Shape:
+#   { groups => { <group> => {
+#       preferred     => <version>,            # first version the cluster serves
+#       version_order => [ <version>, ... ],   # discovery order, preferred first
+#       versions      => { <version> => { kinds => {
+#           <Kind> => { resource => <plural>, scope => 'Namespaced'|'Cluster' },
+#       } } },
+#   } } }
+# Built lazily on first use and invalidated by invalidate_discovery.
+has _discovery => (
+    is => 'lazy',
+    predicate => '_has_discovery',
+    clearer => '_clear_discovery',
+    builder => sub { $_[0]->_fetch_discovery },
+);
+
+# Aggregated discovery v2 (Kubernetes >= 1.27): GET /api and GET /apis with an
+# Accept header selecting APIGroupDiscoveryList answer every group, version,
+# resource plural, Kind and scope in one small response each. A server that does
+# not understand the header ignores the as= parameter and returns the legacy
+# document (APIVersions / APIGroupList) - detected by the kind - and the
+# per-group APIResourceList fallback fills the catalog instead.
+my $DISCOVERY_ACCEPT =
+    'application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList';
+
+sub _fetch_discovery {
+    my ($self) = @_;
+
+    my $catalog = { groups => {} };
+
+    for my $root ('/api', '/apis') {
+        my $response = $self->_request('GET', $root, undef,
+            headers => { Accept => $DISCOVERY_ACCEPT });
+        croak "discovery GET $root failed: " . $response->status
+            if $response->status >= 400;
+
+        my $body = $self->_json->decode($response->content);
+        my $kind = ref $body eq 'HASH' ? ($body->{kind} // '') : '';
+
+        if ($kind eq 'APIGroupDiscoveryList') {
+            $self->_absorb_discovery_list($catalog, $body);
+        } elsif ($root eq '/api') {
+            $self->_fetch_discovery_legacy_core($catalog, $body);
+        } else {
+            $self->_fetch_discovery_legacy_groups($catalog, $body);
+        }
+    }
+
+    return $catalog;
+}
+
+# APIGroupDiscoveryList (aggregated discovery v2). Each item is one group; the
+# order of its versions is the cluster's preference, so the first is preferred.
+sub _absorb_discovery_list {
+    my ($self, $catalog, $body) = @_;
+
+    for my $group_item (@{$body->{items} // []}) {
+        my $group = $group_item->{metadata}{name} // '';
+        my @versions = @{$group_item->{versions} // []};
+        for my $i (0 .. $#versions) {
+            my $vd = $versions[$i];
+            my $version = $vd->{version};
+            next unless defined $version && length $version;
+            for my $res (@{$vd->{resources} // []}) {
+                my $plural = $res->{resource};
+                my $rkind  = $res->{responseKind}{kind};
+                next unless defined $plural && defined $rkind;
+                $self->_catalog_add($catalog, $group, $version, $rkind,
+                    $plural, $res->{scope} // '');
+            }
+            # First version served = preferred version for the group.
+            $catalog->{groups}{$group}{preferred} = $version
+                if $i == 0 && exists $catalog->{groups}{$group};
+        }
+    }
+}
+
+# Legacy fallback for GET /api: an APIVersions document. Each version's
+# APIResourceList is fetched from /api/<version>.
+sub _fetch_discovery_legacy_core {
+    my ($self, $catalog, $body) = @_;
+
+    my @versions = @{$body->{versions} // []};
+    for my $version (@versions) {
+        my $response = $self->_request('GET', "/api/$version");
+        next if $response->status >= 400;
+        my $list = $self->_json->decode($response->content);
+        $self->_absorb_api_resource_list($catalog, '', $version, $list);
+    }
+    $catalog->{groups}{''}{preferred} = $versions[0]
+        if @versions && exists $catalog->{groups}{''};
+}
+
+# Legacy fallback for GET /apis: an APIGroupList document. Each group/version's
+# APIResourceList is fetched from /apis/<group>/<version>.
+sub _fetch_discovery_legacy_groups {
+    my ($self, $catalog, $body) = @_;
+
+    for my $group (@{$body->{groups} // []}) {
+        my $gname = $group->{name};
+        next unless defined $gname && length $gname;
+        for my $v (@{$group->{versions} // []}) {
+            my $version = $v->{version};
+            next unless defined $version && length $version;
+            my $response = $self->_request('GET', "/apis/$gname/$version");
+            next if $response->status >= 400;
+            my $list = $self->_json->decode($response->content);
+            $self->_absorb_api_resource_list($catalog, $gname, $version, $list);
+        }
+        my $pref = $group->{preferredVersion}{version};
+        $catalog->{groups}{$gname}{preferred} = $pref
+            if defined $pref && exists $catalog->{groups}{$gname};
+    }
+}
+
+# APIResourceList (legacy per-group discovery). Subresource entries carry a
+# slash in their name (pods/status) and are skipped; scope comes from the
+# namespaced boolean.
+sub _absorb_api_resource_list {
+    my ($self, $catalog, $group, $version, $list) = @_;
+
+    for my $res (@{$list->{resources} // []}) {
+        my $name = $res->{name};
+        next unless defined $name && length $name;
+        next if $name =~ m{/};
+        my $kind = $res->{kind};
+        next unless defined $kind;
+        my $scope = $res->{namespaced} ? 'Namespaced' : 'Cluster';
+        $self->_catalog_add($catalog, $group, $version, $kind, $name, $scope);
+    }
+}
+
+# Register one Kind (plural, scope) under a group/version in the catalog,
+# tracking version discovery order.
+sub _catalog_add {
+    my ($self, $catalog, $group, $version, $kind, $plural, $scope) = @_;
+
+    my $gdata = $catalog->{groups}{$group} ||= {
+        preferred => undef, version_order => [], versions => {},
+    };
+    unless (exists $gdata->{versions}{$version}) {
+        $gdata->{versions}{$version} = { kinds => {} };
+        push @{$gdata->{version_order}}, $version;
+    }
+    $gdata->{versions}{$version}{kinds}{$kind} = {
+        resource => $plural,
+        scope    => $scope,
+    };
+}
+
+sub invalidate_discovery {
+    my ($self) = @_;
+
+=method invalidate_discovery
+
+    $api->invalidate_discovery;
+
+Discard the cached discovery catalog and the resource map built from it, so the
+next resolution re-queries the cluster. Use it after a CustomResourceDefinition
+is installed or changed, to make the new Kind visible to this client instance.
+
+=cut
+
+    $self->_clear_discovery;
+    $self->_clear_resource_map if $self->_has_resource_map;
+    # The inner IO::K8s captured the old map at build time; drop it too so it is
+    # rebuilt from the refreshed map on next use.
+    $self->_clear_k8s if $self->_has_k8s;
+    return 1;
 }
 
 # Fetch full OpenAPI spec from cluster (cached)

@@ -2,6 +2,17 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - The cluster resource map is now built from aggregated discovery (GET /api +
+   GET /apis with the apidiscovery.k8s.io v2 Accept header, with a per-group
+   APIResourceList fallback for pre-1.27 clusters) instead of the multi-MB
+   /openapi/v2 spec. Same kinds resolve to the same IO::K8s classes as before;
+   only the source changed. /openapi/v2 is now fetched lazily and only for
+   schema_for/compare_schema. The discovery catalog is cached per instance.
+
+ - New method invalidate_discovery discards the cached discovery catalog and
+   the resource map built from it, so a newly installed CustomResourceDefinition
+   becomes resolvable without constructing a fresh client.
+
  - kube_watch now resolves the Kind correctly when options precede it:
    "kube_watch -n default Pod" watched Kind "-n" because MooX::Options keeps the
    parsed options in @ARGV by default, so bin/kube_watch's shift @ARGV took the
@@ -21,12 +32,6 @@ Revision history for Kubernetes-REST
 
  - Require IO::K8s 1.108 (Kubernetes v1.37 sync: new Kinds, ten fields now
    required at construction, stricter Quantity validation).
-
- - fetch_resource_map() now builds the map from the cached OpenAPI spec that
-   schema_for()/compare_schema() already fetch, instead of downloading
-   /openapi/v2 a second time - one download per process, shared by all
-   readers. The "Could not load resource map from cluster:" message is
-   unchanged, now carrying the underlying fetch error behind it.
 
  - inflate_list() now warns once per list, naming every item it drops (index,
    metadata.name, inflation error) and that the list is incomplete, instead
