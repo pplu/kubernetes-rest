@@ -109,8 +109,14 @@ subtest 'built-in names resolve without any cluster roundtrip' => sub {
 subtest 'a name the built-in map cannot answer still fetches the cluster map' => sub {
     my ($api, $io) = cluster_api();
 
-    is $api->expand_class('Widget'), 'IO::K8s::Api::Example::V1::Widget',
-        'unknown Kind falls through to the cluster-derived map';
+    # 'Widget' (foreign group example.com) is not in the built-in map, so it
+    # falls through and forces the discovery-built cluster map. D12/D13: that
+    # map no longer invents an IO::K8s::Api::Example::V1::Widget class for a
+    # group this distribution does not ship -- the Kind fails open to the bare
+    # fallback. What this subtest pins is the FETCH behaviour of the
+    # fallthrough, so the exact resolved name is left to t/43.
+    unlike $api->expand_class('Widget'), qr/Api::Example/,
+        'unknown foreign Kind is not mapped to an invented Api::<Group> name';
     is scalar(grep { $_ eq 'GET /apis' } @{$io->calls}), 1,
         'exactly one discovery fetch (/apis) for the fallthrough';
     is scalar(grep { $_ eq 'GET /openapi/v2' } @{$io->calls}), 0,

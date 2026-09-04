@@ -70,8 +70,11 @@ my %CORE_DISCOVERY = (
     ],
 );
 
-# GET /apis -> the grouped APIs. 'stable.example' serves v2beta1 (listed first,
-# hence preferred) and v1 (stable); the map must still prefer the stable v1.
+# GET /apis -> the grouped APIs. 'stable.example' is a FOREIGN CRD group with
+# no bundled IO::K8s class; it serves v2beta1 (listed first, hence preferred)
+# and v1. It exercises two things: the catalog still records every version and
+# the preferred one (below), while the built map omits the Kind entirely -- no
+# invented Api::Stable::V1::Thing class (design D12/D13, "stop inventing").
 my %GROUPED_DISCOVERY = (
     kind  => 'APIGroupDiscoveryList',
     items => [
@@ -140,8 +143,8 @@ subtest 'the map is built from discovery, not /openapi/v2' => sub {
     is $map->{Pod},        'Api::Core::V1::Pod',        'core Pod';
     is $map->{Namespace},  'Api::Core::V1::Namespace',  'core Namespace';
     is $map->{Deployment}, 'Api::Apps::V1::Deployment', 'apps Deployment';
-    is $map->{Thing},      'Api::Stable::V1::Thing',
-        'a kind served in a stable and a beta version maps to the stable one';
+    ok !exists $map->{Thing},
+        'a foreign-group Kind with no bundled class is omitted (no invented name)';
 
     is count_calls($io, 'GET /api'),  1, 'GET /api once';
     is count_calls($io, 'GET /apis'), 1, 'GET /apis once';
@@ -183,12 +186,17 @@ subtest 'discovery is fetched once, cached, and re-fetched after invalidation' =
     is count_calls($io, 'GET /apis'), 2, 'invalidate_discovery forces a re-fetch (/apis)';
 };
 
-subtest 'the lazy resource_map builds from discovery on the default flag' => sub {
+subtest 'a name the built-in map cannot answer still fetches discovery' => sub {
     my ($api, $io) = discovery_api();
 
+    # 'Thing' is not in the built-in map, so resolving it falls through and
+    # forces the discovery-built cluster map. That map omits the foreign Kind
+    # (D12), so resolution fails open to the bare IO::K8s::Thing fallback --
+    # crucially NOT to an invented IO::K8s::Api::Stable::V1::Thing. The point of
+    # this subtest is the fetch behaviour: discovery once, /openapi/v2 never.
     my $class = $api->expand_class('Thing');
-    is $class, 'IO::K8s::Api::Stable::V1::Thing',
-        'an unknown kind falls through to the discovery-built cluster map';
+    unlike $class, qr/Api::Stable/,
+        'no invented Api::<Group> class for a foreign Kind';
     is count_calls($io, 'GET /api'),  1, 'built via discovery (/api)';
     is count_calls($io, 'GET /apis'), 1, 'built via discovery (/apis)';
     is count_calls($io, 'GET /openapi/v2'), 0, 'and not via /openapi/v2';

@@ -138,29 +138,45 @@ subtest 'fetch_resource_map - skips List kinds' => sub {
     ok !exists $map->{PodList}, 'List kinds are skipped';
 };
 
-subtest 'fetch_resource_map - prefers stable versions' => sub {
+# D17 (was "prefers stable versions"): the OLD claim was that a fixed
+# "stable beats alpha/beta" heuristic always picked the stable class,
+# regardless of which version the cluster served first. The NEW claim is that
+# the map resolves to the version the CLUSTER marks preferred. Here
+# networking.k8s.io serves ServiceCIDR in v1beta1 (listed first -> preferred)
+# and v1; both classes ship, so the short name must follow the cluster and pick
+# the beta one. (The full stop-inventing / provider-fallthrough matrix lives in
+# t/43_resolution_order.t.)
+subtest 'fetch_resource_map - resolves to the cluster preferred version' => sub {
+    plan skip_all =>
+        'IO::K8s::Api::Networking::V1beta1::ServiceCIDR not shipped by this IO::K8s'
+        unless eval { require IO::K8s::Api::Networking::V1beta1::ServiceCIDR; 1 };
+
     my $api = mock_api();
 
     $api->io->add_response('GET', '/api',
         { kind => 'APIGroupDiscoveryList', items => [] });
-    # v1beta1 is served first (preferred), v1 second; the map still picks stable.
+    # v1beta1 is served first (preferred), v1 second; the map follows the
+    # cluster and picks the beta version.
     $api->io->add_response('GET', '/apis', {
         kind  => 'APIGroupDiscoveryList',
         items => [
             {
-                metadata => { name => 'batch' },
+                metadata => { name => 'networking.k8s.io' },
                 versions => [
                     { version => 'v1beta1', resources => [
-                        disco_resource('jobs', 'batch', 'v1beta1', 'Job') ] },
+                        disco_resource('servicecidrs', 'networking.k8s.io',
+                            'v1beta1', 'ServiceCIDR', 'Cluster') ] },
                     { version => 'v1', resources => [
-                        disco_resource('jobs', 'batch', 'v1', 'Job') ] },
+                        disco_resource('servicecidrs', 'networking.k8s.io',
+                            'v1', 'ServiceCIDR', 'Cluster') ] },
                 ],
             },
         ],
     });
 
     my $map = $api->fetch_resource_map;
-    is $map->{Job}, 'Api::Batch::V1::Job', 'stable v1 preferred over v1beta1';
+    is $map->{ServiceCIDR}, 'Api::Networking::V1beta1::ServiceCIDR',
+        'cluster-preferred v1beta1 chosen over stable v1';
 };
 
 subtest 'fetch_resource_map - error on 4xx' => sub {

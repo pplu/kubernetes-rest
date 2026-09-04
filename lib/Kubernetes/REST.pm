@@ -317,6 +317,26 @@ use exactly as before.
         return $class if defined $class
             && ($class->can('new') || eval { require_module($class); 1 });
     }
+
+    # Fall through to the cluster-backed inner IO::K8s, which owns the
+    # resolution order (design D13, extending the 2026-08-10 exact-GVK
+    # contract):
+    #   rung 1  an explicit '+Full::Class' in the caller's resource_map
+    #   rung 2  provider classes merged from `with`
+    #   rung 3  AutoGen from openapi_spec, once the spec has been fetched
+    #   rung 5  the existing fail-closed GVK error
+    # The discovery-built map (see _resource_map_from_catalog) no longer
+    # short-circuits this order with invented IO::K8s::Api::<Group> names for
+    # groups this distribution does not ship (D12): a foreign Kind with no
+    # provider and no loaded spec now reaches rung 5 instead of resolving to a
+    # bogus class.
+    #
+    # TODO D16 / io-k8s step 5: rung 4 slots in HERE, between AutoGen (rung 3)
+    # and the fail-closed error (rung 5) -- a GVK the cluster confirms through
+    # discovery but nothing else resolves becomes IO::K8s::Unstructured (plural
+    # and scope from the discovery catalog). It needs IO::K8s::Unstructured
+    # from io-k8s step 5 and must not change behaviour until then, so it is a
+    # seam, not code.
     return $self->k8s->expand_class(@args);
 }
 
@@ -378,6 +398,19 @@ calling this again rebuilds the map from the cached catalog rather than
 re-querying the cluster. It does B<not> download C</openapi/v2> - that spec is
 fetched lazily only when L</schema_for> or L</compare_schema> need it.
 
+B<Version selection (D17).> When a group serves a Kind in more than one
+version, the bare short name (C<Pod>, C<ServiceCIDR>) resolves to the version
+the B<cluster marks preferred> for that group - not to a fixed "stable beats
+alpha/beta" preference. A Kind served only outside the preferred version still
+maps, to its first served version.
+
+Only Kinds whose L<IO::K8s> class this distribution actually ships are recorded
+in the map. A CRD group with no bundled class (C<cilium.io>,
+C<cert-manager.io>, ...) is deliberately omitted here, so that its Kinds
+resolve through the inner L<IO::K8s> - a provider merged via L</with>, then
+AutoGen from the fetched C</openapi/v2>, and finally a fail-closed error -
+rather than being mapped to a class name that does not exist.
+
 =cut
 
     # The cluster resource map is built from aggregated discovery, not from the
@@ -393,33 +426,78 @@ fetched lazily only when L</schema_for> or L</compare_schema> need it.
 }
 
 # Turn the cached discovery catalog into the short-name -> IO::K8s class map.
-# The class-name mapping is unchanged from the OpenAPI-sourced version: the
-# namespace comes from _io_k8s_namespace_for_group (exception tables included),
-# List kinds are skipped, and a stable version wins over an alpha/beta one for
-# the same kind.
+# The namespace comes from _io_k8s_namespace_for_group (exception tables
+# included) and List kinds are skipped. Two rules shape which entries land:
+#
+#   D17 preferred version: among the versions a group serves a Kind in, the
+#   version the cluster marks preferred wins the bare short name (not "stable
+#   beats alpha/beta" -- that heuristic is gone). A Kind served only outside
+#   the preferred version still maps, to its first served version, so nothing
+#   the cluster serves is dropped.
+#
+#   D12/D13 stop inventing: an entry is recorded only when the candidate
+#   IO::K8s class actually ships. A foreign group (cilium.io, cert-manager.io)
+#   has no IO::K8s::Api::<Group> class, so its Kinds are omitted here and left
+#   to resolve through the inner IO::K8s pipeline (provider from `with` ->
+#   AutoGen from openapi_spec -> D16 Unstructured -> fail-closed) rather than
+#   short-circuiting to a bogus name. Core-API groups and the two exception
+#   groups (apiextensions/apiregistration) do ship, so their Kinds map exactly
+#   as before.
 sub _resource_map_from_catalog {
     my ($self, $catalog) = @_;
 
     my %map;
     for my $group (keys %{$catalog->{groups} // {}}) {
         my $gdata = $catalog->{groups}{$group};
-        for my $version (@{$gdata->{version_order} // []}) {
+
+        # D17: try the cluster's preferred version first, then the rest in
+        # discovery order; the first version to yield a shipping class for a
+        # Kind keeps the short name. Where the preferred version's class does
+        # not ship but another served version's does, the Kind still maps to
+        # that other version rather than vanishing.
+        my @order = @{$gdata->{version_order} // []};
+        my $pref  = $gdata->{preferred};
+        @order = ($pref, grep { $_ ne $pref } @order)
+            if defined $pref && grep { $_ eq $pref } @order;
+
+        for my $version (@order) {
             my $kinds = $gdata->{versions}{$version}{kinds};
             for my $kind (keys %$kinds) {
                 next if $kind =~ /List$/;
+                next if exists $map{$kind};   # a preferred/earlier version won it
 
                 my $version_path = ucfirst($version);
                 my $new_path = $self->_io_k8s_namespace_for_group($group)
                     . "::${version_path}::${kind}";
 
-                if (!$map{$kind} || $version !~ /alpha|beta/) {
-                    $map{$kind} = $new_path;
-                }
+                # D12/D13: only record a class name this distribution ships.
+                next unless $self->_io_k8s_class_ships($new_path);
+
+                $map{$kind} = $new_path;
             }
         }
     }
 
     return \%map;
+}
+
+# Process-wide cache for the D12/D13 "stop inventing" loadability probe: a
+# relative class path is either shipped (a real IO::K8s class that loads) or it
+# is not, and that never changes within a run. Keyed by the relative path, so
+# it is shared across instances.
+my %_CLASS_SHIPS;
+
+# True when 'IO::K8s::<rel_path>' is a real, loadable class. The discovery map
+# is built from group/version/Kind triples off the wire; without this probe
+# every foreign CRD group would map to an IO::K8s::Api::<Group>::... name that
+# has no class behind it (design D12). require the candidate once -- already
+# loaded classes short-circuit on ->can('new') -- and remember the answer.
+sub _io_k8s_class_ships {
+    my ($self, $rel_path) = @_;
+    return $_CLASS_SHIPS{$rel_path} //= do {
+        my $full = "IO::K8s::$rel_path";
+        ($full->can('new') || eval { require_module($full); 1 }) ? 1 : 0;
+    };
 }
 
 # Per-instance discovery catalog, keyed by group. Shape:

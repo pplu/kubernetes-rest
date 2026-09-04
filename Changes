@@ -2,6 +2,19 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - The cluster resource map no longer invents an IO::K8s::Api::<Group> class
+   name for a CRD group this distribution ships no class for (cilium.io,
+   cert-manager.io, ...). Such a Kind is now omitted from the discovery map
+   and resolves through the inner IO::K8s instead - a provider merged via
+   `with`, then AutoGen from the fetched /openapi/v2 - and fails closed with a
+   clear error when nothing resolves it, rather than mapping to a package that
+   does not exist. Core kinds and the apiextensions/apiregistration exception
+   groups are unaffected.
+
+ - When a group serves a kind in more than one version, the bare short name
+   now resolves to the version the CLUSTER marks preferred, not to a fixed
+   "stable beats alpha/beta" preference.
+
  - New constructor attribute `with`: an arrayref of external IO::K8s
    resource-map providers (CRD bundles), passed straight through to the inner
    IO::K8s so a cluster's CRD Kinds resolve to real classes, e.g.
@@ -12,9 +25,9 @@ Revision history for Kubernetes-REST
  - The cluster resource map is now built from aggregated discovery (GET /api +
    GET /apis with the apidiscovery.k8s.io v2 Accept header, with a per-group
    APIResourceList fallback for pre-1.27 clusters) instead of the multi-MB
-   /openapi/v2 spec. Same kinds resolve to the same IO::K8s classes as before;
-   only the source changed. /openapi/v2 is now fetched lazily and only for
-   schema_for/compare_schema. The discovery catalog is cached per instance.
+   /openapi/v2 spec. Kinds this distribution ships a class for resolve to the
+   same IO::K8s classes as before. /openapi/v2 is now fetched lazily and only
+   for schema_for/compare_schema. The discovery catalog is cached per instance.
 
  - New method invalidate_discovery discards the cached discovery catalog and
    the resource map built from it, so a newly installed CustomResourceDefinition

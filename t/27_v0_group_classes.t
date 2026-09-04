@@ -324,10 +324,19 @@ subtest 'fetch_resource_map keeps colliding CRD groups out of the exception' => 
     is $map->{CustomResourceDefinition},
         'ApiextensionsApiserver::Pkg::Apis::Apiextensions::V1::CustomResourceDefinition',
         'the real apiextensions group still gets the staging namespace';
-    is $map->{Widget}, 'Api::Apiextensions::V1::Widget',
-        'a CRD in apiextensions.example.com stays under Api::';
-    is $map->{Gadget}, 'Api::Apiregistration::V1::Gadget',
-        'a CRD in apiregistration.acme.io stays under Api::';
+
+    # apiextensions.example.com and apiregistration.acme.io merely START WITH
+    # an exception-table prefix; they are ordinary foreign CRD groups. The
+    # exact-match guard keeps them OUT of the staging namespace (that routing
+    # is pinned directly on _io_k8s_namespace_for_group in the subtest above),
+    # and D12/D13 "stop inventing" then omits them from the map entirely --
+    # rather than the pre-fix Api::Apiextensions::V1::Widget /
+    # Api::Apiregistration::V1::Gadget classes, which this distribution does
+    # not ship.
+    ok !exists $map->{Widget},
+        'a CRD in apiextensions.example.com is omitted, not mislabelled into the exception namespace';
+    ok !exists $map->{Gadget},
+        'a CRD in apiregistration.acme.io is omitted, not mislabelled into the exception namespace';
 };
 
 # ============================================================================
