@@ -13,7 +13,9 @@ use Kubernetes::REST::LWPIO;
 use Kubernetes::REST::HTTPRequest;
 use IO::K8s;
 use IO::K8s::List;
+use IO::K8s::CRD;
 use IO::K8s::Unstructured ();
+use Time::HiRes ();
 use Kubernetes::REST::WatchEvent;
 use Kubernetes::REST::LogEvent;
 use namespace::clean;
@@ -1905,6 +1907,176 @@ Returns the list of applied objects (from L</ensure_all>).
     }
 
     return @results;
+}
+
+sub ensure_crd {
+    my $self = shift;
+
+=method ensure_crd
+
+    # one class == one single-version CRD
+    $api->ensure_crd('My::K8s::StaticWebSite');
+
+    # several distinct CRDs at once
+    $api->ensure_crd(@crd_classes);
+
+    # with options (pass the classes as an arrayref):
+    $api->ensure_crd(\@crd_classes, timeout => 60, poll_interval => 2);
+
+    # several classes that are versions of the SAME CRD -> one multi-version CRD
+    $api->ensure_crd(
+        [ 'My::K8s::V1beta1::Widget', 'My::K8s::V1::Widget' ],
+        storage => 'v1',
+    );
+
+Install (create-or-update) one or more CustomResourceDefinitions from typed
+L<IO::K8s> classes, wait for each to reach the C<Established> condition, then
+L</invalidate_discovery> so the new Kinds resolve on this client instance.
+
+Each class's CRD manifest comes from C<< $class->to_crd >> (L<IO::K8s::CRD>).
+The assembled CRD is applied with L</ensure>, so re-running is idempotent.
+After every CRD is applied, each is polled with L</get> by name until its
+C<status.conditions> carries C<< type => 'Established', status => 'True' >>,
+subject to a timeout. Only then is the discovery cache invalidated, so the
+next C<create>/C<list> of a custom resource does not race the apiserver
+registering the Kind (the reason plain C<ensure> of the CRD is not enough:
+the following call almost always creates a CR, which 404s until Established).
+
+Returns the list of established CustomResourceDefinition objects (the objects
+read back from the final poll, carrying their C<Established> status).
+
+Arguments: the CRD classes, either as a plain list (C<ensure_crd(@classes)>)
+or, when options are needed, as an arrayref followed by named options
+(C<ensure_crd(\@classes, %opts)>).
+
+=over 4
+
+=item timeout
+
+Seconds to wait for the C<Established> condition per CRD (default 30). On
+expiry the call croaks, naming the CRD and that C<Established> was not
+reached.
+
+=item poll_interval
+
+Seconds between polls (default 1). The current state is always checked once
+before the timeout is consulted, so C<timeout =E<gt> 0> performs exactly one
+poll.
+
+=item storage
+
+Only consulted when two or more passed classes name the SAME CRD (same group,
+plural, kind and scope but different versions). Those are assembled into ONE
+multi-version CustomResourceDefinition via
+C<< IO::K8s::CRD->new(classes => [...], storage => ...) >> rather than applied
+as competing single-version CRDs. Because a class carries no marker for which
+version is authoritative, the storage version is not guessed: pass it as a
+bare version string (applies to the multi-version group) or as a hashref
+keyed by CRD name (C<< { 'widgets.example.com' => 'v1' } >>). A multi-version
+group with no storage version croaks, naming the CRD and the candidate
+versions.
+
+=back
+
+=cut
+
+    my (@classes, %opts);
+    if (@_ && ref $_[0] eq 'ARRAY') {
+        @classes = @{ shift() };
+        %opts    = @_;
+    } else {
+        @classes = @_;
+    }
+    croak "ensure_crd requires at least one CRD class" unless @classes;
+
+    my $storage = $opts{storage};
+
+    # Group the classes by the CRD they name (metadata.name = "$plural.$group"),
+    # preserving first-seen order so the applied order is predictable.
+    my (@order, %group);
+    for my $class (@classes) {
+        my $single   = $class->to_crd;
+        my $crd_name = $single->metadata->name;
+        push @order, $crd_name unless exists $group{$crd_name};
+        push @{ $group{$crd_name} }, { class => $class, single => $single };
+    }
+
+    my @crds;
+    for my $crd_name (@order) {
+        my $members = $group{$crd_name};
+        if (@$members == 1) {
+            push @crds, $members->[0]{single};
+            next;
+        }
+        # Two or more classes are versions of the SAME CRD: assemble one
+        # multi-version CRD rather than apply competing single-version ones.
+        my @version_classes = map { $_->{class} } @$members;
+        my @versions        = map { $_->{single}->spec->versions->[0]->name } @$members;
+        my $storage_version =
+              !defined $storage      ? undef
+            : ref $storage eq 'HASH' ? $storage->{$crd_name}
+            :                          $storage;
+        croak "ensure_crd: '$crd_name' is defined by multiple classes ("
+            . join(', ', @version_classes) . ") naming versions ("
+            . join(', ', @versions) . "); pass storage => '<version>' (or "
+            . "storage => { '$crd_name' => '<version>' }) to name the storage version"
+            unless defined $storage_version && length $storage_version;
+        push @crds,
+            IO::K8s::CRD->new(classes => \@version_classes, storage => $storage_version);
+    }
+
+    # Apply every CRD first, then wait for each to establish (so establishment
+    # happens in parallel), then invalidate discovery exactly once.
+    $self->ensure($_) for @crds;
+    my @established = map { $self->_wait_crd_established($_, %opts) } @crds;
+    $self->invalidate_discovery;
+    return @established;
+}
+
+# Poll GET on a CustomResourceDefinition by name until its Established condition
+# is True, or croak on timeout. A 404 during polling means "not registered yet"
+# and is treated as not-established, not an error.
+sub _wait_crd_established {
+    my ($self, $crd, %opts) = @_;
+
+    my $class    = ref $crd;
+    my $name     = $crd->metadata->name;
+    my $path     = $self->_build_path($class, name => $name);
+    my $timeout  = defined $opts{timeout}       ? $opts{timeout}       : 30;
+    my $interval = defined $opts{poll_interval} ? $opts{poll_interval} : 1;
+    my $deadline = Time::HiRes::time() + $timeout;
+
+    while (1) {
+        my $current = eval {
+            my $response = $self->_request('GET', $path);
+            return undef if $response->status == 404;
+            $self->_check_response($response, "ensure_crd wait $name");
+            $self->_inflate_object($class, $response);
+        };
+        my $err = $@;
+        die $err if $err && $err !~ /\b404\b/;
+
+        return $current if $current && $self->_crd_established($current);
+        last if Time::HiRes::time() >= $deadline;
+        Time::HiRes::sleep($interval);
+    }
+
+    croak "ensure_crd: CustomResourceDefinition '$name' did not reach the "
+        . "Established condition within ${timeout}s";
+}
+
+# True when a CustomResourceDefinition object carries an Established=True
+# condition in status.conditions.
+sub _crd_established {
+    my ($self, $crd) = @_;
+    my $status     = $crd->status     or return 0;
+    my $conditions = $status->conditions or return 0;
+    for my $cond (@$conditions) {
+        return 1
+            if ($cond->type // '') eq 'Established'
+            && ($cond->status // '') eq 'True';
+    }
+    return 0;
 }
 
 sub watch {

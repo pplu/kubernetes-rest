@@ -2,6 +2,18 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - New method ensure_crd(@classes): install (create-or-update) one or more
+   CustomResourceDefinitions from typed IO::K8s classes (each class's to_crd),
+   wait for each to reach the Established condition (timeout/poll_interval
+   options), then invalidate_discovery so the new Kinds resolve on this client
+   without a fresh instance - the wait is what stops the next create/list of a
+   custom resource from racing the apiserver (a CR 404s until Established).
+   Several classes that are versions of the same CRD are assembled into one
+   multi-version CRD via IO::K8s::CRD->new; because a class carries no marker
+   for the authoritative version, the storage version is not guessed - pass
+   storage => '<version>' (or a name-keyed hashref), else it croaks naming the
+   candidates.
+
  - A Kind the cluster reports through discovery, but which resolves to no
    shipped class, no `with` provider and no AutoGen class, now resolves to
    IO::K8s::Unstructured instead of failing closed - untyped but usable, with
