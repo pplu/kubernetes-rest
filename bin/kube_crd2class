@@ -61,9 +61,13 @@ logging every written path to STDERR.
 
 =item B<--from_cluster>=KIND
 
-B<Not yet implemented.> The scaffolded path for generating from a Kind a live
-cluster already serves; it dies with a clear message. Use C<--file> until it
-lands with the CRD discovery work.
+Generate from a Kubernetes I<Kind> (for example C<CronTab>) that a live
+cluster already serves through a C<CustomResourceDefinition>, instead of
+reading a file: the cluster's CRDs are listed and the one whose
+C<spec.names.kind> matches is fed through the same emitter pipeline as
+C<--file>. Reaching the cluster honours C<--kubeconfig> and C<--context>
+(see L<Kubernetes::REST::CLI::Role::Connection>). Dies with a clear message
+if no CRD - or more than one - serves the Kind.
 
 =back
 

@@ -63,7 +63,7 @@ Revision history for Kubernetes-REST
    source - for every served version it renders the k8s DSL block plus a POD
    skeleton, so a cluster's CRDs become checked-in Perl classes without hand
    writing them (the kopium / cdk8s import path). Reads the CRD from a file
-   with -f, or from a live cluster with --from-cluster <Kind> (it lists the
+   with -f, or from a live cluster with --from_cluster <Kind> (it lists the
    cluster's CustomResourceDefinitions and picks the one whose spec.names.kind
    matches, honouring --kubeconfig/--context); output goes to STDOUT or a tree
    with -d. The schema-to-DSL work is IO::K8s's (IO::K8s::CRD,
