@@ -1212,6 +1212,20 @@ Build the REST API URL path for a resource class. Takes a fully-qualified class 
 
 The optional C<subresource> argument appends a subresource segment (C<status>, C<log>, C<exec>, C<attach>, C<portforward>) to the resource path. A subresource always addresses one named resource, so C<subresource> without C<name> croaks rather than returning a path pointing at the collection endpoint.
 
+C<build_path> also accepts C<kind>, C<api_version>, C<resource> and C<namespaced> arguments, but they matter only for L<IO::K8s::Unstructured>. For any other class they are ignored: C<api_version>, pluralisation and namespaced-ness always come from the class itself. Unstructured has no such class identity - its Kind is data on the instance - so the path metadata has to come from somewhere else:
+
+    my $path = $api->build_path('IO::K8s::Unstructured',
+        kind        => 'MyCRD',
+        api_version => 'example.com/v1',
+        resource    => 'mycrds',
+        namespaced  => 1,
+        name        => 'my-instance',
+        namespace   => 'default',
+    );
+    # => /apis/example.com/v1/namespaces/default/mycrds/my-instance
+
+Passing C<api_version>, C<resource> and C<namespaced> together, as above, resolves the path directly with no discovery lookup - the case for a caller (such as an async wrapper) that already knows the resource's metadata. Otherwise C<kind> is required (C<build_path> croaks without it), and resource/namespaced/apiVersion are looked up in the client's cached discovery catalog instead, preferring the cluster's preferred version unless C<api_version> pins a specific group/version; C<build_path> croaks if discovery has no entry for the Kind.
+
 This is a public API for async wrappers like L<Net::Async::Kubernetes> that need to construct request paths independently.
 
 =cut
