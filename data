@@ -1,0 +1,70 @@
+---
+claimed_at: 2026-09-06T03:32:24Z
+claimed_by: kubernetes-rest
+class: standard
+created: 2026-09-05T19:06:20Z
+id: 27
+priority: medium
+started: 2026-09-06T03:13:49Z
+status: review
+tags:
+- test
+- seam
+- unstructured
+title: 'build_path: Override-Kombi (api_version+resource+namespaced) ist ungetestet'
+updated: 2026-09-06T03:32:24Z
+---
+
+Aufgefallen bei der 1.108-Release-Vorbereitung (k26).
+
+_build_path hat fuer Unstructured zwei Wege:
+
+  1. kind => ...  -> Plural/Scope/apiVersion kommen aus dem Discovery-Katalog
+  2. api_version + resource + namespaced alle drei gesetzt -> direkt benutzt,
+     KEIN Discovery-Zugriff
+
+t/44_unstructured_fallback.t:167-184 deckt nur Weg 1 ab (kind => ...) plus den
+croak ohne Kind. Weg 2 ist von keinem Test beruehrt.
+
+Weg 2 ist aber genau der, den ein async Wrapper nimmt: Net::Async::Kubernetes
+hat die Metadaten schon und will keinen Discovery-Lookup. build_path ist eine
+der sieben published-API-Methoden, N::A::K 0.008 ist das naechste Glied der
+Release-Kette -- ein Regress auf diesem Zweig faellt hier durch kein Test auf,
+sondern erst dort.
+
+Empirisch verifiziert (ohne Cluster, resource_map_from_cluster => 0):
+  /apis/example.com/v1/namespaces/default/mycrds/my-instance
+
+Der Zweig funktioniert also -- er ist nur nicht abgesichert. Test gehoert nach
+t/44_unstructured_fallback.t: Weg 2 mit und ohne namespace, namespaced => 0 als
+cluster-scoped Fall, und der Nachweis, dass dabei kein Discovery-Request faellt
+(count_calls auf GET /api / GET /apis wie in t/41).
+
+Kein Release-Blocker fuer 1.108 -- reine Testluecke, Verhalten ist korrekt.
+
+2026-09-06 03:29 Testluecke geschlossen, Commit e5b4128 auf master (nicht gepusht).
+
+ZAHLEN. prove -lr t/ vorher: 43 Dateien, 638 Tests, PASS -- der Stand vom 2026-09-05 bestaetigt. Nachher: 43 Dateien, 641 Tests, PASS. t/44_unstructured_fallback.t allein: 9 -> 12 Subtests. dzil test als Tarball-Gegenprobe: 45 Dateien, 687 Tests, PASS (k26 hatte 684), zwei erwartete Skips -- der neue Test ist im Release-Gate und im Tarball drin, t/44 war schon getrackt, der GatherDir-Fallstrick greift nicht.
+
+GEAENDERT. Nur t/44_unstructured_fallback.t, +102 Zeilen, drei Subtests direkt hinter dem bestehenden Weg-1-Subtest. lib/ und bin/ unberuehrt, kein Verhaltenscode. Alles ueber die published-API-Methode build_path, nie _build_path.
+
+  1. Weg 2 mit expliziten Overrides, kein Discovery: vier Pfadformen gepinnt --
+     /apis/example.com/v1/namespaces/default/mycrds/my-instance (der Ticketwert),
+     die Collection-Form, namespaced => 1 ohne namespace-Argument (Segment faellt),
+     namespaced => 0 verwirft einen uebergebenen namespace. Plus count_calls auf
+     GET /api und GET /apis == 0.
+  2. Overrides gewinnen gegen einen widersprechenden Katalogeintrag.
+  3. Die Vorbedingung selbst: api_version + resource ohne namespaced ist nicht
+     'alle drei', faellt auf Weg 1 zurueck und croakt ohne kind.
+
+ABSICHT STATT STRING, zwei Hebel: (a) Kind MyCRD/mycrds steht in keinem der beiden Discovery-Kataloge der Datei, und der Mock-IO hat gar keine /api- und /apis-Fixture -- resource_map_from_cluster bleibt bewusst auf dem Default 1, der Zweig muss fetch-frei sein und nicht bloss fetch-frei gestellt. (b) ein Aufruf mit kind => 'Widget' (im Katalog als widgets/Namespaced) zusammen mit Overrides, die dem Katalog widersprechen. Dazu ein Assert fuer die reine async-Aufrufform ganz OHNE kind, damit kind auf Weg 2 optional bleibt und nicht zur Vorbedingung wird -- ohne diesen Assert waere ein zusaetzliches defined-kind in der Bedingung durchgegangen.
+
+ROT-NACHWEIS, selbst gefahren, nicht bloss berichtet. Erster Versuch (Override-Zweig komplett deaktiviert) killt die Datei schon in Subtest 1 mit dem croak 'no discovery entry for Kind MyCRD', exit 255 -- Hebel (b) wird dabei nie erreicht, war also unbelegt. Zweiter, realistischerer Regress: Bedingung so verbogen, dass der Katalog Vorfahrt bekommt, wenn er den Kind kennt. Ergebnis: Subtest 2 rot mit got '/apis/example.com/v1/namespaces/ns/widgets/w1' statt 'not-the-catalog-plural/w1', und Subtest 1 rot ueber count_calls('GET /api') got 4 statt 0. Beide Hebel greifen unabhaengig, die Datei stirbt nicht vorzeitig. lib/Kubernetes/REST.pm danach zurueckgesetzt und per sha256 gegen die Kopie vor dem Eingriff als identisch verifiziert.
+
+CHANGES: BEWUSST KEIN EINTRAG. Zwei Gruende. Erstens die Regel in getty-perl-core 'Changelog (the Changes file)': gemessen wird gegen die letzte RELEASE, nicht den letzten Commit -- eine Testluecke, die nie ausgeliefert war, sieht ein CPAN-Konsument nicht, und das Verhalten von build_path aendert sich mit diesem Commit nicht. Zweitens 'ein Thema, ein Eintrag': der Unstructured/build_path-Topic hat im {{$NEXT}}-Block bereits seinen Bullet (Changes:19-28, inkl. der Zeile zu den Overrides), ein zweiter waere genau die Doppelung, die die Regel verbietet.
+
+NICHT GETAN: kein Upload nach CPAN, kein Freigabe-Kommando des Build-Werkzeugs, kein Versions-Tag, kein Push. Kein Live-Cluster beruehrt. .claude/skills/getty-perl-core/SKILL.md zeigt im Arbeitsbaum als modifiziert, gehoert nicht zu k27 (Hardlink-Nebeneffekt aus einem anderen Repo) und ist bewusst nicht mitcommittet -- gezielt git add t/44_unstructured_fallback.t.
+
+NEBENBEFUND, kein Ticket angelegt: _discovery_path_meta wickelt den _discovery-Aufruf in ein nacktes eval (REST.pm ~414). Ein echter Fetch-Fehler (nicht-2xx, croak in _fetch_discovery) wird geschluckt und kommt oben als generisches 'no discovery entry for Kind ...' heraus -- 'Cluster nicht erreichbar' und 'Kind gibt es wirklich nicht' sind fuer den Aufrufer nicht unterscheidbar. Sichtbar geworden im Rot-Nachweis: vier abgesetzte GET /api, die alle stillschweigend verpufften. Plausibel Absicht (fail-closed fuer D16), aber undokumentiert.
+
+2026-09-06 03:32 Der Nebenbefund aus dem Handoff ist jetzt k28 (angelegt von kubernetes-ocp, Main-Agent) -- hier nichts mehr offen. Dort korrekt erweitert: es sind drei Stellen, nicht eine (REST.pm:414 und :546 eval { $self->_discovery }, :885 eval { $self->fetch_resource_map }); die eval { require_module(...) } in :321, :355 und :623 sind ausdruecklich nicht gemeint, dort ist das Scheitern die Antwort. Beides gegen den Code nachgeprueft und bestaetigt.
