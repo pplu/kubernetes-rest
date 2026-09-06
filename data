@@ -1,0 +1,85 @@
+---
+block_reason: wartet auf io-k8s-p5 k128 (IO::K8s 1.108) auf CPAN -- eigenes cpanfile
+  verlangt requires IO::K8s 1.108
+blocked: true
+claimed_at: 2026-09-06T04:52:08Z
+claimed_by: kubernetes-rest
+class: standard
+created: 2026-09-05T00:48:22Z
+id: 26
+priority: high
+started: 2026-09-05T18:56:16Z
+status: review
+tags:
+- release
+- cpan
+- escalated-from:kubernetes-ocp#133
+- needs:io-k8s-p5#128
+title: Release Kubernetes::REST 1.108 nach CPAN (blockiert OCPs Image-Build)
+updated: 2026-09-06T04:52:08Z
+---
+
+CPAN hat 1.107, OCP verlangt 1.108.
+
+OCPs cpanfile verlangt seit k125 (commit 7fb412b, 2026-09-01) eine Version, die es auf CPAN nicht gibt. Der Commit hob die Sibling-Versionen auf die Staende, die auf dem Entwicklungsrechner installiert waren, mit dem ausdruecklichen Vermerk "Installed on the development host; snapshot regeneration (make snapshot/test in Docker) waits on their CPAN release" -- dieses Release ist gemeint.
+
+Folge, belegt durch den ersten echten CI-Lauf von kubernetes-ocp (GitHub Actions run 33928559437, 2026-09-04): cpm install --cpanfile --snapshot bricht mit "FAIL resolve" ab. Das OCP-Docker-Image laesst sich damit aus einem frischen Checkout ueberhaupt nicht bauen -- weder in CI noch lokal; lokal verdeckte das bisher nur der Layer-Cache. Vier Distributionen sind betroffen, diese ist eine davon; Crypt::Age 0.003 und File::SOPS 0.003 aus demselben Bump sind bereits released und in Ordnung.
+
+Nach dem Release: in kubernetes-ocp make snapshot fahren, dann ist der Build wieder gruen. Verfolgt dort als k133.
+
+Unveroeffentlicht hier (Changes {{$NEXT}}): ensure_crd(@classes) -- create-or-update von CustomResourceDefinitions aus typisierten IO::K8s-Klassen. OCP braucht ausserdem aus 1.108, dass resource_map/with auf der Kubernetes::REST-Instanz liegt und der innere IO::K8s ein neu baubarer Cache ist; darauf beruht OCPs durable Provider-Registrierung (dort k132/k131).
+
+Haengt zusammen mit IO::K8s 1.108 -- die beiden bewegen sich gemeinsam und sollten zusammen released werden.
+
+NACHTRAG 2026-09-05 (kubernetes-ocp, Main-Agent): die Kette ist jetzt auf allen vier Boards erfasst.
+
+  io-k8s-p5 k128            IO::K8s 1.108              <- Wurzel, keine Sibling-Deps
+  kubernetes-rest k26       Kubernetes::REST 1.108     <- HIER, needs io-k8s-p5#128
+  p5-net-async-kubernetes k29  N::A::K 0.008           <- needs beide
+  p5-www-hetzner k1         WWW::Hetzner 0.101         <- unabhaengig, siehe unten
+  kubernetes-ocp k133       make snapshot + make test  <- needs alle vier
+
+Zu WWW::Hetzner: dort gibt es NICHTS zu releasen. Der Diff 0.100..HEAD sind
+ausschliesslich $VERSION-Zeilen, Changes {{$NEXT}} ist leer. Empfohlener Weg
+ist, OCPs Pin auf 0.100 zurueckzunehmen statt ein leeres Release zu fahren.
+
+Testsuite hier am 2026-09-05 auf dem Host gegengeprueft: 43 Dateien, 638 Tests,
+Result PASS. io-k8s ebenso gruen (94/8643), N::A::K ebenso (21/169).
+
+REPORT 1/5 -- REIHENFOLGE. IO::K8s 1.108 MUSS vor diesem Upload auf CPAN sein. cpanfile:5 verlangt IO::K8s 1.108; CPAN hat 1.107 (cpanm --info: GETTY/IO-K8s-1.107.tar.gz). Der Pin ist RICHTIG und bleibt -- der Code nutzt IO::K8s::CRD->new(classes/storage), IO::K8s::Unstructured und IO::K8s->new(with => ...), alles 1.108-Features. Erst io-k8s-p5 k128, dann dieses. Ohne das ist 1.108 fuer niemanden ausserhalb der Working Trees installierbar.
+
+REPORT 2/5 -- GRUEN MIT ZAHLEN. prove -lr -j8 t/: 43 Dateien, 638 Tests, PASS -- vor UND nach meinen Aenderungen identisch, der Ticket-Stand vom 2026-09-05 ist bestaetigt. dzil test: 45 Dateien, 684 Tests, PASS (zwei erwartete Skips: watch_live ohne Kubeconfig-Env, Release-Test changes_has_content). dzil build: Exit 0, 8 Zeilen Ausgabe, 0 Warnungen; der NEXT-Platzhalter materialisiert sauber zu 1.108 plus Datum. VERSION: 46x 1.108 ueber 42 lib-Module und 4 bin-Skripte, kein Ausreisser, keine Datei ohne VERSION; t/25 gruen mit 127 Tests. Arbeitsbaum sauber, nichts untrackt -- der GatherDir-Fallstrick greift hier nicht. cpanfile/dist.ini vollstaendig: Digest::SHA, Time::HiRes, POSIX, Encode, Scalar::Util, MIME::Base64 und Config sind Core und korrekt nicht deklariert; HTTP::Tiny als recommends ist richtig (Opt-in-Backend, seit 5.13.9 Core). META.json vollstaendig, alle 4 bin-Skripte als EXE_FILES, authority cpan:JLMARTIN. Abgleich git ls-files gegen Tarball: keine Differenz.
+
+REPORT 3/5 -- CHANGES. Vollstaendig; nichts ergaenzt, nichts inhaltlich korrigiert. Alle 25 Commits aus 1.107..HEAD gegen den NEXT-Block abgeglichen, jeder verhaltensrelevante Commit hat einen Eintrag. Die vier ohne Eintrag (802e4bc, aabc4cb, 456a665, 45f6d89) sind reine POD-Commits, Diffs geprueft, kein Verhaltenscode. Bereits vorher sauber: 0898229 hat den durch den Discovery-Rewrite ueberholten fetch_resource_map-Eintrag aus k17 ENTFERNT statt ihn stehenzulassen -- kein veralteter Text im Block. Aussagen gegen den Code verifiziert, alle korrekt: ensure_crd (Gruppierung nach metadata.name, IO::K8s::CRD->new fuer Multi-Version, croak nennt die Kandidatenversionen, Reihenfolge ensure-alle dann warten dann genau ein invalidate_discovery); Unstructured-Fallback (rung 4, discovery-gated, ohne Cluster fail-closed); Discovery-Map (GET /api und /apis mit dem apidiscovery-v2-Accept-Header, per-group APIResourceList-Fallback); kube_crd2class (matcht spec.names.kind, honoriert --kubeconfig/--context). Auch die knappste Aussage haelt: openapi/v2 wird tatsaechlich nur fuer schema_for/compare_schema geholt -- AutoGen nutzt den Spec nur falls schon vorhanden und erzwingt den Download nicht.
+
+REPORT 4/5 -- WAS ICH GEAENDERT HABE. Zwei Commits, beide rein POD/Changes, kein Verhaltenscode: 30fd873 (build_path: die vier additiven Argumente dokumentiert) und 2a4518d (kube_crd2class: Manpage nannte --from_cluster unimplementiert). Erstens: bin/kube_crd2class dokumentierte --from_cluster als "Not yet implemented ... Use --file until it lands with the CRD discovery work" -- implementiert ist es seit bd6970a. Das bin-Skript traegt handgeschriebenes POD statt PodWeaver-Output aus der CLI-Klasse, deshalb wurde die Klasse nachgezogen und die Manpage nicht; 1.108 haette Nutzern gesagt, ein enthaltenes Feature existiere nicht. Beide croak-Faelle im neuen Text gegen _crds_from_cluster geprueft, die uebrigen drei Optionen mitverglichen und korrekt befunden. Zweitens: build_path ist eine der sieben published-API-Methoden fuer Net::Async::Kubernetes und sagt das in der eigenen POD; 1.108 gibt ihr kind/api_version/resource/namespaced, die der Changes-Eintrag ausdruecklich als async-Seam ankuendigt, die POD aber nicht erwaehnte -- die einzige Stelle, an der N::A::K 0.008 nachschlagen wuerde. Das Codebeispiel ist empirisch verifiziert, nicht aus der Beschreibung geschrieben. Drittens: Changes Zeile 66, --from-cluster zu --from_cluster; beide funktionieren (Getopt::Long behandelt Bindestrich und Unterstrich gleich), aber --help und POD zeigen die Unterstrich-Form wie bei --output_dir. Rein kosmetisch, gerne zurueckdrehen.
+
+REPORT 5/7 -- ACHTUNG VOR DEM UPLOAD: Die zwei Commits liegen NICHT auf master. Sie liegen auf dem lokalen Zweig worktree-k26-release-prep-1108, im Worktree unter .claude/worktrees/. Uebernehmen per vorspulendem Zusammenfuehren dieses Zweigs. Er liegt im gemeinsamen Repo-Verzeichnis und ueberlebt das Loeschen des Worktrees.
+
+REPORT 6/7 -- Ich habe die Aenderungen bewusst NICHT zu GitHub uebertragen: das Ziel ist pplu/kubernetes-rest, ein fremdes co-maintained Repo, und ein Schreibzugriff dorthin ist keine einseitige Entscheidung. Wenn du die POD-Fixes nicht willst, ist master unveraendert release-faehig -- alle gruenen Zahlen gelten fuer beide Staende, die Testsuite lief vor und nach den Aenderungen identisch mit 43 Dateien und 638 Tests. NICHT GETAN, weil ausserhalb des Auftrags: keinerlei Veroeffentlichung nach CPAN auf irgendeinem Weg, kein Freigabe-Kommando des Build-Werkzeugs, kein Versions-Tag, kein Live-Cluster beruehrt. t/39_cli_minikube.t ist vollstaendig gestubbt -- die minikube-Zeilen im Testlauf sind Log-Ausgaben des Codes, keine echten Prozessaufrufe.
+
+REPORT 7/7 -- PUNKT 7, was OCP k132 braucht: JA, in 1.108 ist es so. resource_map ist Attribut auf der Kubernetes::REST-Instanz (REST.pm:250), lazy, mit Predicate und Clearer. with ebenso (REST.pm:109) und wird beim Bau des inneren IO::K8s durchgereicht (REST.pm:144). Der innere IO::K8s IST ein neu baubarer Cache: has k8s lazy mit _clear_k8s (REST.pm:133), und der Clear wird an zwei Stellen wirklich gezogen -- invalidate_discovery bei :794 und der openapi-Spec-Builder bei :815 -- wobei der Rebuild resource_map, with und den Spec erneut durchreicht. Harter Beleg, dass der Rebuild die Provider NICHT verliert: t/42_with_providers.t:132. Damit traegt OCPs durable Provider-Registrierung. Vorbehalt: resource_map ist ro mit privatem Clearer, es gibt keinen oeffentlichen Writer -- Aenderung nur ueber den Konstruktor, ueber invalidate_discovery oder ueber k8s->add(). Getestet ist der provider-erhaltende Rebuild ueber den Spec-Pfad; der invalidate_discovery-Pfad nutzt denselben Clearer und denselben Builder, ist also verhaltensgleich, aber nicht separat getestet. FOLLOW-UP k27 (neu, medium, unclaimed): build_path Weg 2 -- api_version plus resource plus namespaced zusammen, der Zweig ohne Discovery-Lookup -- ist von keinem Test beruehrt, t/44 deckt nur Weg 1 ab. Genau Weg 2 nimmt ein async Wrapper. Kein Blocker, Verhalten empirisch geprueft, aber ein Regress dort faellt erst in N::A::K auf.
+
+2026-09-05 19:14 Vorbereitung abgeschlossen, uebergeben an den Maintainer. Der vollstaendige Report steht direkt darueber in REPORT 1/7 bis 7/7. Kurzfassung: alles gruen (43 Dateien / 638 Tests PASS, dzil build Exit 0 mit 0 Warnungen, VERSION 46x 1.108 ohne Ausreisser, cpanfile und META vollstaendig). Changes ist vollstaendig und inhaltlich korrekt -- kein Eintrag gefehlt, keiner falsch. Zwei reine POD-Fixes von mir liegen auf dem Zweig worktree-k26-release-prep-1108, NICHT auf master. ERINNERUNG: IO::K8s 1.108 muss vorher auf CPAN sein (io-k8s-p5 k128) -- cpanfile:5 pinnt darauf, CPAN hat 1.107. Die Freigabe selbst liegt bei dir; ich habe nichts veroeffentlicht.
+
+MERGE ERLEDIGT 2026-09-05 (kubernetes-ocp, Main-Agent). REPORT 5/7 ist ueberholt: die beiden POD-Commits 30fd873 und 2a4518d liegen per --ff-only auf master. Branch worktree-k26-release-prep-1108 und der (gesperrte) Worktree sind entfernt.
+
+Master ist jetzt 2a4518d, 2 Commits vor origin/master. Testsuite auf dem gemergten Stand nachgefahren: 43 Dateien, 638 Tests, Result PASS.
+
+OFFEN, weil deine Entscheidung: master ist nicht gepusht. origin ist pplu/kubernetes-rest, co-maintained.
+
+UNVERAENDERT GUELTIG: IO::K8s 1.108 muss vor diesem Upload auf CPAN sein (io-k8s-p5 k128, dort ebenfalls gemergt und gruen).
+
+GEPUSHT 2026-09-05. origin/master steht auf 2a4518d (3031f3d..2a4518d, sauberer Fast-Forward). Der Punkt 'master ist nicht gepusht' ist erledigt.
+
+STAND: alles ausser dem Upload selbst ist fertig. Reihenfolge unveraendert -- IO::K8s 1.108 muss vorher auf CPAN sein (io-k8s-p5 k128, dort ebenfalls gemergt, gruen und gepusht).
+
+2026-09-06 03:30 MASTER HAT SICH BEWEGT (k27). Neuer Commit e5b4128 'Cover build_path's discovery-free override branch for Unstructured' liegt auf master. master ist damit 1 Commit vor origin/master (2a4518d) -- der Stand, fuer den die gruenen Zahlen weiter oben gelten, ist nicht mehr identisch mit dem gepushten.
+
+Inhalt: reine Testergaenzung, +102 Zeilen in t/44_unstructured_fallback.t, drei Subtests fuer den bisher untesteten Weg 2 von build_path (api_version + resource + namespaced zusammen, ohne Discovery-Lookup) -- das FOLLOW-UP k27 aus REPORT 7/7 ist damit erledigt. lib/ und bin/ unberuehrt, kein Verhaltenscode, Changes bewusst ohne Eintrag (nicht konsumentensichtbar, und der Unstructured/build_path-Topic hat seinen Bullet schon).
+
+Zahlen auf dem neuen Stand: prove -lr t/ 43 Dateien / 641 Tests PASS (vorher 638). dzil test 45 Dateien / 687 Tests PASS (vorher 684), zwei erwartete Skips, dzil build unveraendert sauber. Die Release-Faehigkeit von 1.108 ist unberuehrt -- der Commit fuegt nur Tests hinzu, die im Tarball und im Release-Gate mitlaufen.
+
+Fuer den Upload heisst das: entweder e5b4128 mitpushen oder bewusst 2a4518d releasen. Ich habe nicht gepusht, origin ist pplu/kubernetes-rest. Reihenfolge unveraendert: IO::K8s 1.108 muss vorher auf CPAN sein.
+
+INTEGRATIONSNACHWEIS 2026-09-06: dzil install gefahren (kein Upload). Build und Testsuite liefen dabei gegen die installierten Vorgaenger der Kette, nicht nur gegen das eigene lib/ -- 'Building and testing ... OK'. Danach OCPs Suite gegen alle drei installierten Staende: 81 Dateien, 1292 Tests, PASS. Bis dahin hatte OCP gegen VERALTETE installierte Kopien getestet (IO::K8s und K::REST je 3 Commits hinterher, N::A::K vom 2026-08-23). Details in kubernetes-ocp k133. Die bindende make test in Docker bleibt bis zum Upload unfahrbar -- sie loest aus CPAN auf.
