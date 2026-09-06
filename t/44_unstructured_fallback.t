@@ -185,6 +185,108 @@ subtest 'build_path takes plural and scope from discovery for Unstructured' => s
 };
 
 # ---------------------------------------------------------------------------
+# k27: the OTHER path metadata source for Unstructured -- api_version,
+# resource and namespaced given directly, bypassing discovery entirely. This
+# is the branch Net::Async::Kubernetes takes: it already has the resource's
+# metadata from its own bookkeeping and calls the published build_path() seam
+# without paying for (or needing) a discovery round-trip. Untouched by any
+# test until now.
+# ---------------------------------------------------------------------------
+subtest 'build_path honours explicit api_version/resource/namespaced overrides, no discovery (k27)' => sub {
+    # 'MyCRD'/'mycrds' is in NEITHER discovery catalog above (only widgets,
+    # clusterwidgets, gateways exist there), and this IO has no /api or /apis
+    # fixture at all -- lever (a): if a regression reinstates the discovery
+    # lookup on this branch, it falls through to the "no discovery entry for
+    # Kind 'MyCRD'" croak in _build_path, which takes the whole file down
+    # with it, instead of quietly building a plausible-looking path.
+    my $io = Counting::Mock::IO->new;
+    my $api = Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        io          => $io,
+        # resource_map_from_cluster is left at its default (1) on purpose: the
+        # override branch must stay fetch-free even though a cluster fetch
+        # would otherwise be allowed, not merely because it's disabled.
+    );
+
+    is $api->build_path('IO::K8s::Unstructured',
+            kind => 'MyCRD', api_version => 'example.com/v1',
+            resource => 'mycrds', namespaced => 1,
+            name => 'my-instance', namespace => 'default'),
+        '/apis/example.com/v1/namespaces/default/mycrds/my-instance',
+        'namespaced path with a name, straight from the overrides';
+
+    # The async-wrapper call shape: no `kind` at all. Weg 2 does not need it --
+    # a caller that already has api_version/resource/namespaced from its own
+    # bookkeeping (Net::Async::Kubernetes) has no reason to also thread the
+    # Kind through. `kind` must stay optional here, not become a precondition.
+    is $api->build_path('IO::K8s::Unstructured',
+            api_version => 'example.com/v1',
+            resource => 'mycrds', namespaced => 1,
+            name => 'my-instance', namespace => 'default'),
+        '/apis/example.com/v1/namespaces/default/mycrds/my-instance',
+        'the same path with no kind hint at all -- the pure async-wrapper call';
+
+    is $api->build_path('IO::K8s::Unstructured',
+            kind => 'MyCRD', api_version => 'example.com/v1',
+            resource => 'mycrds', namespaced => 1,
+            namespace => 'default'),
+        '/apis/example.com/v1/namespaces/default/mycrds',
+        'the collection form (no name) for a namespaced override';
+
+    is $api->build_path('IO::K8s::Unstructured',
+            kind => 'MyCRD', api_version => 'example.com/v1',
+            resource => 'mycrds', namespaced => 1,
+            name => 'my-instance'),
+        '/apis/example.com/v1/mycrds/my-instance',
+        'namespaced => 1 but no namespace argument: the namespaces segment is absent';
+
+    is $api->build_path('IO::K8s::Unstructured',
+            kind => 'MyCRD', api_version => 'example.com/v1',
+            resource => 'mycrds', namespaced => 0,
+            name => 'my-instance', namespace => 'default'),
+        '/apis/example.com/v1/mycrds/my-instance',
+        'namespaced => 0 is cluster-scoped: a passed namespace is discarded';
+
+    is count_calls($io, 'GET /api'), 0, 'no core discovery fetch on this branch';
+    is count_calls($io, 'GET /apis'), 0, 'no grouped discovery fetch on this branch';
+};
+
+subtest 'explicit overrides win over a contradicting discovery entry (k27)' => sub {
+    my ($api, $io) = disco_api();
+
+    # Widget IS discovery-confirmed here (plural 'widgets', Namespaced -- see
+    # %GROUPED_DISCOVERY above). Passing kind => 'Widget' alongside overrides
+    # that CONTRADICT the catalog (a different plural, cluster-scoped) proves
+    # the overrides are taken as-is, never reconciled against the catalog --
+    # lever (b): if a regression reinstates the lookup on this branch, the
+    # catalog wins and the path below reverts to the discovery-derived one
+    # (.../namespaces/ns/widgets/w1), turning this assertion red.
+    is $api->build_path('IO::K8s::Unstructured',
+            kind => 'Widget', api_version => 'example.com/v1',
+            resource => 'not-the-catalog-plural', namespaced => 0,
+            name => 'w1', namespace => 'ns'),
+        '/apis/example.com/v1/not-the-catalog-plural/w1',
+        'the override plural and scope win over the catalog, not the other way round';
+
+    is count_calls($io, 'GET /apis'), 0, 'still no discovery fetch when all three overrides are given';
+};
+
+subtest 'an incomplete override combo falls back to the discovery path, and needs a Kind' => sub {
+    my ($api) = disco_api();
+
+    # api_version + resource without namespaced is not "all three" -- pins the
+    # override branch's precondition. With no kind to fall back to discovery
+    # with, this must croak rather than silently guessing the scope.
+    throws_ok {
+        $api->build_path('IO::K8s::Unstructured',
+            api_version => 'example.com/v1', resource => 'mycrds',
+            name => 'my-instance');
+    } qr/needs a Kind/,
+      'api_version + resource alone is not "all three": falls to the discovery path and needs a Kind';
+};
+
+# ---------------------------------------------------------------------------
 # A full CRUD round-trip through the pipeline: get() -> Unstructured object.
 # ---------------------------------------------------------------------------
 subtest 'get() inflates an Unstructured object with apiVersion/kind from data' => sub {
