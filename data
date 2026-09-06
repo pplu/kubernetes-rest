@@ -1,0 +1,68 @@
+---
+class: standard
+created: 2026-09-06T03:31:34Z
+id: 28
+priority: medium
+status: backlog
+tags:
+- diagnostics
+- discovery
+- errors
+title: 'Discovery-Fehler werden dreimal stillschweigend geschluckt: ''Cluster weg''
+  ist von ''Kind gibt es nicht'' nicht unterscheidbar'
+updated: 2026-09-06T03:31:34Z
+---
+
+Gefunden beim Rot-Nachweis fuer k27 (Testluecke build_path Weg 2), erweitert
+beim Nachpruefen.
+
+DER BEFUND
+_discovery_path_meta wickelt den Discovery-Aufruf in ein nacktes eval:
+
+  REST.pm:414   my $catalog = eval { $self->_discovery };
+                return unless $catalog && $catalog->{groups};
+
+Kein $@, kein Log, kein Unterschied. Stirbt _discovery -- Cluster nicht
+erreichbar, Token abgelaufen, TLS kaputt, Timeout -- ist das Ergebnis exakt
+dasselbe wie bei einem intakten Katalog ohne Eintrag fuer diesen Kind: undef.
+
+Im simulierten Regress wurden vier GET /api abgesetzt und alle verpufften
+stillschweigend. Was der Aufrufer am Ende sieht, ist REST.pm:954:
+
+  croak "no discovery entry for Kind \x27$kind_hint\x27 - cannot ..."
+
+Also: wessen Cluster gerade nicht erreichbar ist, dem sagt die Bibliothek, den
+Kind gebe es nicht. Das schickt ihn an die falsche Stelle suchen -- er prueft
+CRDs und apiVersions, waehrend das Netz oder das Token das Problem ist.
+
+ES SIND DREI STELLEN, NICHT EINE
+  REST.pm:414   eval { $self->_discovery }        (_discovery_path_meta)
+  REST.pm:546   eval { $self->_discovery }        (dasselbe Muster nochmal)
+  REST.pm:885   eval { $self->fetch_resource_map }
+
+NICHT GEMEINT sind die eval { require_module($class) } bei 321, 355 und 623 --
+dort IST das Scheitern die Antwort ("laesst sich die Klasse laden?"), das ist
+korrekt. Ungeprueft gelassen habe ich 1101, 1137, 1154 (struct_to_object und
+JSON-decode im Watch-Stream) und 1803; die koennen dieselbe Form haben, gehoeren
+aber in eine eigene Betrachtung.
+
+WAS ZU ENTSCHEIDEN IST -- nicht praejudiziert
+Fail-closed ist hier plausibel Absicht: D16 macht den Unstructured-Fallback
+ausdruecklich davon abhaengig, dass Discovery den Kind bestaetigt, und ein
+unerreichbarer Cluster darf nicht dazu fuehren, dass irgendwas als bestaetigt
+durchgeht. Das Verhalten ist also vermutlich richtig. Falsch ist, dass es
+NIRGENDS steht und dass der Fehler dabei spurlos verschwindet.
+
+Denkbare Aufloesung, in aufsteigender Eingriffstiefe:
+1. Den Fehler festhalten statt wegwerfen -- $@ in ein Attribut oder einen
+   Warn-Kanal, damit die spaetere croak-Meldung ihn nennen kann
+   ("no discovery entry for Kind X - note: discovery failed: <Grund>").
+2. Das Verhalten in der POD von _discovery_path_meta und am D16-Kommentar
+   dokumentieren, damit es als Entscheidung lesbar ist und nicht als Schlamperei.
+3. Nur wenn 1 und 2 nicht reichen: die beiden Faelle im Rueckgabewert trennen.
+
+BEZUG: getty-perl-core sagt "croak, never die" und "Name the origin in the
+message". Der Geist davon ist, dass ein Fehler diagnostizierbar bleibt -- eine
+irrefuehrende Meldung ist schlechter als gar keine.
+
+Kein Blocker fuer 1.108. Verhalten ist stabil, nur die Diagnose ist es nicht.
