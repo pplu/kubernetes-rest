@@ -302,4 +302,41 @@ subtest 'discovery failure keeps fetch_resource_map wording' => sub {
     like $@, qr/404/, 'and the underlying status rides along';
 };
 
+# ---------------------------------------------------------------------------
+# _load_resource_map_from_cluster (the lazy fallback behind the resource_map
+# attribute) used to wrap fetch_resource_map's own croak text inside a carp
+# that repeated the same "Could not load resource map from cluster" phrase,
+# so an unreachable cluster logged it twice: "Could not load resource map
+# from cluster, using default: Could not load resource map from cluster:
+# discovery GET /api failed: 404 ...". The outer wrapper now names its own
+# failure mode instead of echoing the inner one (k29).
+# ---------------------------------------------------------------------------
+subtest 'the built-in-map fallback names the load failure once, not twice (k29)' => sub {
+    # mock_api() hardcodes resource_map_from_cluster => 0, which never reaches
+    # the lazy fallback at all -- built directly here, at the class default of
+    # 1, with no /api or /apis fixture registered (same 404 as the subtest
+    # above), so that reading resource_map exercises the real cluster-backed
+    # path and its carp.
+    my $api = Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        io          => Test::Kubernetes::Mock::IO->new,
+    );
+
+    my @warnings;
+    my $map = do {
+        local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+        $api->resource_map;
+    };
+
+    is scalar @warnings, 1, 'exactly one warning for the whole fallback';
+    like $warnings[0],
+        qr/^Falling back to the built-in resource map: Could not load resource map from cluster: discovery GET \/api failed: 404/,
+        'the outer wrapper names its own failure, with the inner one riding along once';
+    my $repeats = () = $warnings[0] =~ /Could not load resource map from cluster/g;
+    is $repeats, 1, 'and the phrase is not doubled';
+
+    ok $map->{Pod}, 'the built-in default map still comes back';
+};
+
 done_testing;

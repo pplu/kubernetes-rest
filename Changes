@@ -56,6 +56,8 @@ Revision history for Kubernetes-REST
    /openapi/v2 spec. Kinds this distribution ships a class for resolve to the
    same IO::K8s classes as before. /openapi/v2 is now fetched lazily and only
    for schema_for/compare_schema. The discovery catalog is cached per instance.
+   When the fetch fails, the lazy fallback to the built-in IO::K8s map warns
+   "Falling back to the built-in resource map: <the fetch_resource_map error>".
 
  - New method invalidate_discovery discards the cached discovery catalog and
    the resource map built from it, so a newly installed CustomResourceDefinition

@@ -911,7 +911,7 @@ sub _load_resource_map_from_cluster {
     my ($self) = @_;
     my $map = eval { $self->fetch_resource_map };
     if ($@) {
-        carp "Could not load resource map from cluster, using default: $@";
+        carp "Falling back to the built-in resource map: $@";
         return IO::K8s->default_resource_map;
     }
     return $map;
