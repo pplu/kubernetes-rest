@@ -26,6 +26,9 @@ Revision history for Kubernetes-REST
    the discovery catalog; it accordingly accepts additive `kind` (and optional
    `api_version`/`resource`/`namespaced`) arguments so async wrappers can build
    Unstructured paths - existing calls are unaffected.
+   When the catalog itself cannot be fetched (cluster unreachable, expired
+   token), build_path's error names that failure instead of claiming a
+   missing discovery entry; the fallback stays fail-closed either way.
 
  - The cluster resource map no longer invents an IO::K8s::Api::<Group> class
    name for a CRD group this distribution ships no class for (cilium.io,

@@ -287,6 +287,106 @@ subtest 'an incomplete override combo falls back to the discovery path, and need
 };
 
 # ---------------------------------------------------------------------------
+# k28: a discovery fetch that fails outright (cluster unreachable, expired
+# token -- in the mock, a 404 on GET /api) must not look identical to a
+# healthy catalog that simply lacks the Kind. _discovery_path_meta wraps the
+# fetch in a bare `eval { $self->_discovery }` and returns undef either way,
+# so _build_path's "no discovery entry for Kind '$kind' ..." croak fires
+# whether discovery answered and said no, or never answered at all --
+# whoever's cluster is unreachable is told the Kind doesn't exist.
+# ---------------------------------------------------------------------------
+subtest 'a failing discovery fetch is named in the croak, not disguised as a missing entry (k28)' => sub {
+    # No /api or /apis fixture at all, so the mock answers 404 to the very
+    # first discovery request and _fetch_discovery's own status check croaks
+    # before any catalog is built.
+    my $io = Counting::Mock::IO->new;
+    my $api = Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        io          => $io,
+        # resource_map_from_cluster is left at its default (1), as in the k27
+        # subtests above: this IS the discovery-confirmation path, and the
+        # fetch must actually be attempted (and fail), not skipped.
+    );
+
+    eval {
+        $api->build_path('IO::K8s::Unstructured',
+            kind => 'MyCRD', name => 'my-instance', namespace => 'default');
+    };
+    my $err = $@;
+    ok $err, 'build_path dies when discovery itself fails';
+    like $err, qr/discovery failed/, 'the croak says discovery failed';
+    like $err, qr/Kind 'MyCRD'/, 'names the Kind that was being resolved';
+    like $err, qr/IO::K8s::Unstructured/, 'names the class the path was for';
+    like $err, qr/discovery GET \/api failed: 404/,
+        'carries the underlying reason from the discovery fetch';
+    unlike $err, qr/no discovery entry/,
+        'does not claim the catalog was consulted and came up empty';
+
+    cmp_ok count_calls($io, 'GET /api'), '>=', 1,
+        'the discovery fetch was actually attempted, not silently skipped';
+};
+
+subtest 'a healthy catalog without the Kind still reports a missing entry and does not blame discovery (k28)' => sub {
+    my ($api) = disco_api();
+
+    # 'Nope' is in neither discovery catalog: this is today's ordinary
+    # fail-closed case, and the k28 fix must not leak "discovery failed" into
+    # it -- discovery answered fine, it just doesn't serve this Kind.
+    eval {
+        $api->build_path('IO::K8s::Unstructured',
+            kind => 'Nope', name => 'n1', namespace => 'default');
+    };
+    my $err = $@;
+    ok $err, 'build_path dies for a Kind the catalog does not serve';
+    like $err, qr/no discovery entry for Kind 'Nope'/,
+        'the missing-entry message is unchanged for a healthy catalog';
+    unlike $err, qr/discovery failed/,
+        'a healthy catalog is never blamed as a discovery failure';
+};
+
+subtest 'a recorded discovery failure does not go stale once discovery recovers (k28)' => sub {
+    # Same empty mock as the first k28 subtest: the first attempt must fail
+    # with "discovery failed".
+    my $io = Counting::Mock::IO->new;
+    my $api = Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        io          => $io,
+    );
+
+    eval {
+        $api->build_path('IO::K8s::Unstructured',
+            kind => 'Widget', name => 'w1', namespace => 'ns');
+    };
+    like $@, qr/discovery failed/, 'the first attempt dies with the discovery failure';
+
+    # Discovery recovers: fixtures added to the SAME io/api, no
+    # invalidate_discovery call -- the lazy _discovery attribute must not be
+    # left holding a cached failure.
+    $io->add_response('GET', '/api',  \%CORE_DISCOVERY);
+    $io->add_response('GET', '/apis', \%GROUPED_DISCOVERY);
+
+    is $api->build_path('IO::K8s::Unstructured',
+            kind => 'Widget', name => 'w1', namespace => 'ns'),
+        '/apis/example.com/v1/namespaces/ns/widgets/w1',
+        'once discovery answers, build_path uses the catalog path -- no stale failure cached';
+
+    # And a genuinely absent Kind is now reported as a healthy-catalog miss,
+    # not as a leftover discovery failure.
+    eval {
+        $api->build_path('IO::K8s::Unstructured',
+            kind => 'Nope', name => 'n1', namespace => 'default');
+    };
+    my $err = $@;
+    ok $err, 'a Kind the recovered catalog does not serve still dies';
+    like $err, qr/no discovery entry/,
+        'reported as a missing entry now that the catalog is healthy';
+    unlike $err, qr/discovery failed/,
+        'no longer blamed on a failed fetch once discovery has recovered';
+};
+
+# ---------------------------------------------------------------------------
 # A full CRUD round-trip through the pipeline: get() -> Unstructured object.
 # ---------------------------------------------------------------------------
 subtest 'get() inflates an Unstructured object with apiVersion/kind from data' => sub {

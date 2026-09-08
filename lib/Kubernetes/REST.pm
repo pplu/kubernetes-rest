@@ -367,7 +367,12 @@ use exactly as before.
     # catalog was already fetched building the cluster map, so this consults a
     # cache and never adds a round-trip. A Kind discovery does not serve stays
     # fail-closed (rung 5): the fabricated name (or undef) is returned so the
-    # load error still names the Kind.
+    # load error still names the Kind. A discovery *failure* (cluster
+    # unreachable, expired token) is deliberately treated the same as "not
+    # served" here -- rung 5, fail-closed -- with the reason kept in
+    # _discovery_error; on the CRUD path the carp from
+    # _load_resource_map_from_cluster has already named it while building the
+    # cluster map.
     return 'IO::K8s::Unstructured'
         if $self->_discovery_path_meta($kind, $api_version);
 
@@ -405,6 +410,12 @@ sub _kind_from_expand_args {
 # fetch on the fetch-free path. When it does run, the catalog is already cached
 # (building the cluster resource map fetched it), so the lookup is free.
 #
+# A fetch that fails outright (cluster unreachable, expired token) returns the
+# same undef as a healthy catalog that lacks the Kind -- deliberately
+# fail-closed (D16: an unreachable cluster must not let anything pass as
+# confirmed) -- but the reason is kept in _discovery_error so _build_path can
+# name it instead of claiming a missing entry.
+#
 # $want_api_version, when given (an Unstructured object's own apiVersion),
 # pins the group/version; otherwise the group's discovery-preferred version
 # wins, matching _resource_map_from_catalog and D17.
@@ -412,6 +423,11 @@ sub _discovery_path_meta {
     my ($self, $kind, $want_api_version) = @_;
     return unless $self->resource_map_from_cluster;
     my $catalog = eval { $self->_discovery };
+    if (my $error = $@) {
+        $self->_discovery_error($error);
+        return;
+    }
+    $self->_clear_discovery_error;
     return unless $catalog && $catalog->{groups};
 
     my $meta_for = sub {
@@ -640,6 +656,16 @@ has _discovery => (
     builder => sub { $_[0]->_fetch_discovery },
 );
 
+# The reason ($@ text) the last discovery fetch attempted from
+# _discovery_path_meta failed, kept so the croak in _build_path can name it: a
+# failed fetch and a healthy catalog without the Kind both come back from
+# _discovery_path_meta as undef (fail-closed, D16), and only this tells them
+# apart. Cleared by the next successful fetch and by invalidate_discovery.
+has _discovery_error => (
+    is => 'rw',
+    clearer => '_clear_discovery_error',
+);
+
 # Aggregated discovery v2 (Kubernetes >= 1.27): GET /api and GET /apis with an
 # Accept header selecting APIGroupDiscoveryList answer every group, version,
 # resource plural, Kind and scope in one small response each. A server that does
@@ -788,6 +814,7 @@ is installed or changed, to make the new Kind visible to this client instance.
 =cut
 
     $self->_clear_discovery;
+    $self->_clear_discovery_error;
     $self->_clear_resource_map if $self->_has_resource_map;
     # The inner IO::K8s captured the old map at build time; drop it too so it is
     # rebuilt from the refreshed map on next use.
@@ -950,9 +977,20 @@ sub _build_path {
             defined $kind_hint
                 or croak "IO::K8s::Unstructured needs a Kind to build a path"
                     . " (pass kind => 'Kind')";
-            my $meta = $self->_discovery_path_meta($kind_hint, $av_hint)
-                or croak "no discovery entry for Kind '$kind_hint' - cannot"
-                    . " build a path for IO::K8s::Unstructured";
+            my $meta = $self->_discovery_path_meta($kind_hint, $av_hint);
+            unless ($meta) {
+                # A failed fetch and a catalog without the Kind both come back
+                # undef (fail-closed, see _discovery_path_meta); only the
+                # recorded reason tells them apart, and a catalog that was
+                # never read must not be reported as one lacking an entry.
+                my $reason = $self->_discovery_error;
+                croak defined $reason
+                    ? "discovery failed, so Kind '$kind_hint' is unconfirmed"
+                        . " - cannot build a path for IO::K8s::Unstructured:"
+                        . " $reason"
+                    : "no discovery entry for Kind '$kind_hint' - cannot"
+                        . " build a path for IO::K8s::Unstructured";
+            }
             ($api_version, $resource, $is_namespaced) =
                 @{$meta}{qw(api_version resource namespaced)};
         }
@@ -1224,7 +1262,7 @@ C<build_path> also accepts C<kind>, C<api_version>, C<resource> and C<namespaced
     );
     # => /apis/example.com/v1/namespaces/default/mycrds/my-instance
 
-Passing C<api_version>, C<resource> and C<namespaced> together, as above, resolves the path directly with no discovery lookup - the case for a caller (such as an async wrapper) that already knows the resource's metadata. Otherwise C<kind> is required (C<build_path> croaks without it), and resource/namespaced/apiVersion are looked up in the client's cached discovery catalog instead, preferring the cluster's preferred version unless C<api_version> pins a specific group/version; C<build_path> croaks if discovery has no entry for the Kind.
+Passing C<api_version>, C<resource> and C<namespaced> together, as above, resolves the path directly with no discovery lookup - the case for a caller (such as an async wrapper) that already knows the resource's metadata. Otherwise C<kind> is required (C<build_path> croaks without it), and resource/namespaced/apiVersion are looked up in the client's cached discovery catalog instead, preferring the cluster's preferred version unless C<api_version> pins a specific group/version; C<build_path> croaks if discovery has no entry for the Kind, and equally if the catalog could not be fetched at all (cluster unreachable, expired token) - in that case the message names that failure rather than claiming a missing entry, and the fallback stays fail-closed either way.
 
 This is a public API for async wrappers like L<Net::Async::Kubernetes> that need to construct request paths independently.
 
