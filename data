@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-09-08T15:59:02Z
+claimed_by: kubernetes-rest
+class: standard
+completed: 2026-09-08T15:59:02Z
+created: 2026-09-08T15:23:15Z
+id: 29
+priority: low
+started: 2026-09-08T15:52:52Z
+status: done
+tags:
+- diagnostics
+- wording
+title: Resource-map-Fehler traegt das Praefix 'Could not load resource map from cluster'
+  doppelt
+updated: 2026-09-08T15:59:02Z
+---
+
+Gefunden bei k28 (Worker-Pruefung des CRUD-Flusses mit leerem Mock, resource_map_from_cluster => 1).
+
+fetch_resource_map (REST.pm ~562) croakt bereits mit
+  'Could not load resource map from cluster: <Grund>'
+und _load_resource_map_from_cluster (REST.pm ~912) haengt beim carp dasselbe
+Praefix nochmal davor:
+  'Could not load resource map from cluster, using default: Could not load resource map from cluster: discovery GET /api failed: 404 at ... line 562.'
+
+Reiner Wording-Drift, kein Verhaltensfehler. Aufloesung: eine der beiden
+Stellen laesst das Praefix weg, vermutlich die innere, damit der carp
+'... using default: discovery GET /api failed: 404' lautet. Pruefen, ob ein
+Test auf den doppelten Wortlaut pinnt (t/41 matcht nur qr/404/).
+
+2026-09-08 Umgesetzt, Commit 8abc405 auf master (nicht gepusht). Die innere croak-Meldung von fetch_resource_map bleibt (dokumentiert, gepinnt von t/15, t/38, t/41). Der carp in _load_resource_map_from_cluster lautet jetzt 'Falling back to the built-in resource map: <innerer Fehler>'. Test: neuer Subtest in t/41 ueber die oeffentliche resource_map-Attributlesung, genau eine Warnung, anchored auf den neuen Wortlaut, Phrase kommt einmal vor; rot gegen den alten Wortlaut nachgewiesen (got 2 statt 1). prove -lr t/ 43 Dateien, 645 Tests, PASS. Changes: das Doppel-Praefix war nie released (innere Meldung kam nach 1.107), aber der carp-Wortlaut aus 1.107 aendert sich, daher ein Satz im bestehenden Aggregated-Discovery-Bullet, kein eigener.
