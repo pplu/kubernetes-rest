@@ -2,113 +2,42 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
- - New method ensure_crd(@classes): install (create-or-update) one or more
-   CustomResourceDefinitions from typed IO::K8s classes (each class's to_crd),
-   wait for each to reach the Established condition (timeout/poll_interval
-   options), then invalidate_discovery so the new Kinds resolve on this client
-   without a fresh instance - the wait is what stops the next create/list of a
-   custom resource from racing the apiserver (a CR 404s until Established).
-   Several classes that are versions of the same CRD are assembled into one
-   multi-version CRD via IO::K8s::CRD->new; because a class carries no marker
-   for the authoritative version, the storage version is not guessed - pass
-   storage => '<version>' (or a name-keyed hashref), else it croaks naming the
-   candidates.
-
- - A Kind the cluster reports through discovery, but which resolves to no
-   shipped class, no `with` provider and no AutoGen class, now resolves to
-   IO::K8s::Unstructured instead of failing closed - untyped but usable, with
-   apiVersion/kind/metadata read from the data and any spec/status preserved
-   round-trip. This is on by default and gated on discovery confirmation: a
-   Kind the cluster does not serve, and a client with no cluster
-   (resource_map_from_cluster => 0), still fail closed. A bundled class, a
-   `with` provider or an AutoGen class still wins ahead of Unstructured.
-   build_path takes such a resource's plural and namespaced/cluster scope from
-   the discovery catalog; it accordingly accepts additive `kind` (and optional
-   `api_version`/`resource`/`namespaced`) arguments so async wrappers can build
-   Unstructured paths - existing calls are unaffected.
-   When the catalog itself cannot be fetched (cluster unreachable, expired
-   token), build_path's error names that failure instead of claiming a
-   missing discovery entry; the fallback stays fail-closed either way.
-
- - The cluster resource map no longer invents an IO::K8s::Api::<Group> class
-   name for a CRD group this distribution ships no class for (cilium.io,
-   cert-manager.io, ...). Such a Kind is now omitted from the discovery map
-   and resolves through the inner IO::K8s instead - a provider merged via
-   `with`, then AutoGen from the fetched /openapi/v2 - and fails closed with a
-   clear error when nothing resolves it, rather than mapping to a package that
-   does not exist. Core kinds and the apiextensions/apiregistration exception
-   groups are unaffected.
-
- - When a group serves a kind in more than one version, the bare short name
-   now resolves to the version the CLUSTER marks preferred, not to a fixed
-   "stable beats alpha/beta" preference.
-
- - New constructor attribute `with`: an arrayref of external IO::K8s
-   resource-map providers (CRD bundles), passed straight through to the inner
-   IO::K8s so a cluster's CRD Kinds resolve to real classes, e.g.
-   with => ['IO::K8s::GatewayAPI']. The lazily fetched /openapi/v2 spec is now
-   also handed to the inner IO::K8s as openapi_spec once it has been fetched,
-   without forcing that download at construction time.
-
- - The cluster resource map is now built from aggregated discovery (GET /api +
-   GET /apis with the apidiscovery.k8s.io v2 Accept header, with a per-group
-   APIResourceList fallback for pre-1.27 clusters) instead of the multi-MB
-   /openapi/v2 spec. Kinds this distribution ships a class for resolve to the
-   same IO::K8s classes as before. /openapi/v2 is now fetched lazily and only
-   for schema_for/compare_schema. The discovery catalog is cached per instance.
-   When the fetch fails, the lazy fallback to the built-in IO::K8s map warns
-   "Falling back to the built-in resource map: <the fetch_resource_map error>".
-
- - New method invalidate_discovery discards the cached discovery catalog and
-   the resource map built from it, so a newly installed CustomResourceDefinition
-   becomes resolvable without constructing a fresh client.
-
- - New CLI tool kube_crd2class (Kubernetes::REST::CLI::Crd2Class): turns a
-   CustomResourceDefinition manifest into typed, documented IO::K8s class
-   source - for every served version it renders the k8s DSL block plus a POD
-   skeleton, so a cluster's CRDs become checked-in Perl classes without hand
-   writing them (the kopium / cdk8s import path). Reads the CRD from a file
-   with -f, or from a live cluster with --from_cluster <Kind> (it lists the
-   cluster's CustomResourceDefinitions and picks the one whose spec.names.kind
-   matches, honouring --kubeconfig/--context); output goes to STDOUT or a tree
-   with -d. The schema-to-DSL work is IO::K8s's (IO::K8s::CRD,
-   IO::K8s::CRD::Emitter).
-
- - kube_watch now resolves the Kind correctly when options precede it:
-   "kube_watch -n default Pod" watched Kind "-n" because MooX::Options keeps the
-   parsed options in @ARGV by default, so bin/kube_watch's shift @ARGV took the
-   option instead of the Kind. Fixed with protect_argv => 0 in CLI::Watch; both
-   orders (Kind first or options first) now work.
-
- - New CLI tool kube_test_minikube (Kubernetes::REST::CLI::Minikube): downloads
-   minikube on first use (SHA-256 verified), starts a profile with its own
-   kubeconfig file - ~/.kube/config is never touched - exports KUBECONFIG,
-   TEST_KUBERNETES_REST_KUBECONFIG and TEST_IO_K8S_KUBECONFIG (plus any --env
-   NAME) and runs the given command, e.g. "kube_test_minikube prove -lr t/".
-   The cluster stays up between runs; --stop / --delete tear it down. One
-   runner for the live tests of Kubernetes::REST, Net::Async::Kubernetes and
-   IO::K8s. --container-runtime and --rootless pass through to minikube start,
-   so a Podman backend can be driven with
-   "--driver podman --container-runtime containerd --rootless".
-
- - Require IO::K8s 1.108 (Kubernetes v1.37 sync: new Kinds, ten fields now
-   required at construction, stricter Quantity validation).
-
- - inflate_list() now warns once per list, naming every item it drops (index,
-   metadata.name, inflation error) and that the list is incomplete, instead
-   of discarding uninflatable items silently. Items are still dropped, not
-   fatal; strict callers can promote the warning via $SIG{__WARN__}.
-
- - expand_class() is now a client method that resolves names the built-in
-   IO::K8s map already knows without forcing a cluster resource-map fetch;
-   only an unknown name falls through to the cluster-backed map. A
-   caller-supplied resource_map is still consulted first.
-
- - Kubeconfig context()/cluster()/user() now distinguish "no
-   contexts/clusters/users defined", "no name to look up" (no current-context,
-   or a context naming no cluster/user) and "name not found" (keeping "Context
-   not found: NAME"), each naming the kubeconfig(s), instead of an
-   uninitialized-value warning plus an empty "Context not found: ". Still fatal.
+ - New ensure_crd(@classes): create-or-update CustomResourceDefinitions from
+   typed IO::K8s classes, wait until Established, then invalidate_discovery.
+   Several versions of one CRD need storage => '<version>'.
+ - A Kind the cluster serves but no class resolves now inflates to
+   IO::K8s::Unstructured instead of failing closed; shipped, `with` and
+   AutoGen classes still win. build_path gains additive kind, api_version,
+   resource and namespaced arguments for such paths.
+ - The cluster resource map no longer invents IO::K8s::Api::<Group> class
+   names for CRD groups without a shipped class; those resolve through the
+   inner IO::K8s (`with` providers, then AutoGen) or fail closed.
+ - A short name served in several versions resolves to the version the
+   cluster marks preferred, not to a fixed stable-over-beta ranking.
+ - New constructor attribute `with`: external IO::K8s resource-map providers
+   (CRD bundles) passed through to the inner IO::K8s, e.g.
+   with => ['IO::K8s::GatewayAPI'].
+ - The cluster resource map comes from aggregated discovery (/api, /apis)
+   instead of /openapi/v2, now fetched lazily for schema_for/compare_schema
+   only; a failed discovery fetch warns and uses the built-in map.
+ - New invalidate_discovery: drop the cached discovery catalog and resource
+   map so a freshly installed CRD resolves without a new client.
+ - New CLI tool kube_crd2class: renders a CustomResourceDefinition (from a
+   file with -f, or from the cluster with --from_cluster <Kind>) as typed
+   IO::K8s class source, to STDOUT or a tree with -d.
+ - Fix kube_watch taking the first option as the Kind when options precede
+   it ("kube_watch -n default Pod" watched Kind "-n").
+ - New CLI tool kube_test_minikube: fetches minikube (SHA-256 verified),
+   runs a profile with its own kubeconfig, exports the live-test variables
+   and runs the given command, e.g. "kube_test_minikube prove -lr t/".
+ - Require IO::K8s 1.108 (Kubernetes v1.37 sync).
+ - inflate_list() warns once per list naming every item it drops instead of
+   discarding uninflatable items silently.
+ - expand_class() is a client method that resolves names the built-in map
+   knows without fetching the cluster resource map.
+ - Kubeconfig context()/cluster()/user() croak with a message naming what is
+   missing (no entries, no current-context, name not found) instead of an
+   uninitialized-value warning and an empty "Context not found: ".
 
 1.107     2026-08-15 16:15:27Z
 
