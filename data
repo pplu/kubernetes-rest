@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-09T05:54:38Z
+claimed_by: kubernetes-rest
+class: standard
+completed: 2026-09-09T05:54:38Z
+created: 2026-09-08T18:02:41Z
+id: 30
+priority: low
+started: 2026-09-09T05:54:38Z
+status: done
+tags:
+- docs
+- io-k8s
+title: 'POD: compare_schema verweist auf IO::K8s::Resource->compare_to_schema, Methode
+  lebt in IO::K8s::Role::Resource'
+updated: 2026-09-09T05:54:38Z
+---
+
+lib/Kubernetes/REST.pm compare_schema (=method-POD und Kommentar davor) nennt C<< IO::K8s::Resource->compare_to_schema >>. Gegen IO::K8s 1.108 geprüft: IO::K8s::Resource->can("compare_to_schema") ist falsch; die Methode kommt über IO::K8s::Role::Resource auf jede Resource-Klasse. Funktional korrekt (Aufruf geht auf $class), nur die POD-Referenz ist ungenau. Lane: kubernetes-rest-doc-writer.
+
+2026-09-09 05:54 POD/Kommentar-Fix in lib/Kubernetes/REST.pm: compare_schema verweist jetzt korrekt auf IO::K8s::Role::Resource (liefert compare_to_schema via apply_roles_to_package an jede Resource-Klasse) statt IO::K8s::Resource. Gegen IO::K8s 1.108 verifiziert (compare_to_schema ausschliesslich in Role/Resource.pm; IO::K8s::Resource konsumiert die Rolle nicht). Rein dokumentarisch, kein Verhalten/keine API. prove -lr t/ gruen: 43 Dateien, 645 Tests PASS. Commit 9bc5e63.
