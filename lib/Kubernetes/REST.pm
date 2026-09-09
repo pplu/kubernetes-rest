@@ -883,7 +883,7 @@ Returns a hashref with the OpenAPI v2 schema definition.
 }
 
 # Compare local class against cluster schema
-# Returns comparison result from IO::K8s::Resource->compare_to_schema
+# Returns comparison result from IO::K8s::Role::Resource->compare_to_schema
 sub compare_schema {
     my ($self, $kind) = @_;
 
@@ -893,7 +893,7 @@ sub compare_schema {
 
 Compare the local L<IO::K8s> class definition against the cluster's OpenAPI schema. Useful for detecting version skew between your L<IO::K8s> installation and the cluster.
 
-Returns the comparison result from C<< IO::K8s::Resource->compare_to_schema >>.
+Returns the comparison result from C<< $class->compare_to_schema >>, the method L<IO::K8s::Role::Resource> provides on every resource class.
 
 =cut
 
