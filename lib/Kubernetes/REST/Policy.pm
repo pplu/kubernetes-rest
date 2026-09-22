@@ -1,5 +1,5 @@
 package Kubernetes::REST::Policy;
-our $VERSION = '1.108';
+our $VERSION = '1.109';
 # ABSTRACT: Compatibility helper for deprecated v0 Policy calls
 use Moo;
 extends 'Kubernetes::REST::V0Group';

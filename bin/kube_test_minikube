@@ -7,7 +7,7 @@ use warnings;
 
 use Kubernetes::REST::CLI::Minikube;
 
-our $VERSION = '1.108';
+our $VERSION = '1.109';
 
 my ($options, $command) = Kubernetes::REST::CLI::Minikube->split_argv(@ARGV);
 @ARGV = @$options;

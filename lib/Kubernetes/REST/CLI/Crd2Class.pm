@@ -1,5 +1,5 @@
 package Kubernetes::REST::CLI::Crd2Class;
-our $VERSION = '1.108';
+our $VERSION = '1.109';
 # ABSTRACT: Generate IO::K8s classes from a CustomResourceDefinition
 use Moo;
 with 'Kubernetes::REST::CLI::Role::Connection';
