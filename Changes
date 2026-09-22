@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.108     2026-09-22 02:22:33Z
 
  - New ensure_crd(@classes): create-or-update CustomResourceDefinitions from
    typed IO::K8s classes, wait until Established, then invalidate_discovery.
