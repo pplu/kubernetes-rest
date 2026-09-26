@@ -5,9 +5,9 @@ model: sonnet
 allowed-tools: Read, Edit, Grep, Glob
 briefing:
   skills:
-    - getty-perl-release-author-getty
     - kubernetes-rest-core
     - perl-kubernetes-rest
+    - getty-perl-pod
 ---
 
 You write POD for **Kubernetes::REST**, an `[@Author::GETTY]` Dist::Zilla distribution. The

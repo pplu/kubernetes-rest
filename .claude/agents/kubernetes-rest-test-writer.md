@@ -9,7 +9,7 @@ briefing:
     - kubernetes-rest-core
     - perl-kubernetes-rest
     - perl-io-k8s-kubernetes-classes
-    - kanban-issues-karr-cli
+    - kanban-issues-karr-ticket
 ---
 
 You write tests for **Kubernetes::REST**.

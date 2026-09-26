@@ -33,7 +33,7 @@ Depends on whether the Agent/Task tool is available to you.
 
 - **You can spawn subagents** (orchestrating main agent): Do NOT touch behavior-relevant
   code yourself — delegate. Your lane: coordinate, inspect, plan, review diffs, run tests,
-  manage git, edit `Changes`/`README`. When in doubt, delegate. Why: only the
+  edit `Changes`/`README`. When in doubt, delegate. Why: only the
   `kubernetes-rest-*` agents get their skills force-loaded via `briefing.skills`; you get no
   briefing and would touch the pipeline and the IO seam with too little context.
 
@@ -42,7 +42,7 @@ Depends on whether the Agent/Task tool is available to you.
   | Implement / refactor / debug anything under `lib/` or `bin/` | `kubernetes-rest-worker` (default) |
   | Write or extend tests in `t/` | `kubernetes-rest-test-writer` |
   | POD, on the core, the backends or the CLI | `kubernetes-rest-doc-writer` |
-  | Pre-release audit | `kubernetes-rest-release-checker` |
+  | Commits, `Changes`, card → done, pre-release audit | `kubernetes-rest-release-manager` |
 
 - **You cannot spawn subagents** (you ARE a `kubernetes-rest-*` agent): the lock does not
   apply — implement, refactor, debug and test per these rules.
@@ -50,6 +50,9 @@ Depends on whether the Agent/Task tool is available to you.
 Behavior-relevant = everything under `lib/` and `bin/`, the request/response pipeline, the
 IO backends, path building, the resource map, kubeconfig parsing, the CLI, and the tests.
 Prose in `README.md` and `Changes` bullets are not.
+
+**Only `kubernetes-rest-release-manager` commits.** A worker leaves a commit-ready tree and hands its card
+to `review`; you then dispatch `kubernetes-rest-release-manager` to cut the commit and close the card.
 
 ## Coordination — karr board (always in scope)
 
@@ -59,7 +62,7 @@ repo.
 
 - `karr list --compact` / `karr board` — open work · `karr show ID` — detail
 - `karr create "Title" --priority high --tags a,b --body '…'` · `karr edit ID -a "note"`
-  · `--claim NAME` · `--block "why"` · `karr move ID in-progress` — full surface: skill `kanban-issues-karr-cli`
+  · `--claim NAME` · `--block "why"` · `karr move ID in-progress` — full surface: skill `kanban-issues-karr-coordination`
 
 Record drift and follow-up work as tickets rather than growing the current change. A defect
 that turns out to live in the object model belongs on **`../io-k8s-p5`**'s board, not this

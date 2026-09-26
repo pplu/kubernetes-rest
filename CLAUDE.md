@@ -36,7 +36,7 @@ principle, the lanes and this repo's hazards are in `.claude/rules/kubernetes-re
 | Implement / refactor / debug anything under `lib/` or `bin/` | `kubernetes-rest-worker` (default) |
 | Write or extend tests in `t/` | `kubernetes-rest-test-writer` |
 | POD, on the core, the backends or the CLI | `kubernetes-rest-doc-writer` |
-| Pre-release audit | `kubernetes-rest-release-checker` |
+| Commits, `Changes`, card → done, pre-release audit | `kubernetes-rest-release-manager` |
 
 The agents carry their conventions via `briefing.skills` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live in `.claude/skills/` —
