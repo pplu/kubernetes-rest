@@ -2,7 +2,7 @@
 name: kubernetes-rest-doc-writer
 description: "Write and maintain Kubernetes::REST POD in the @Author::GETTY PodWeaver house format (inline =attr/=method/=opt, =seealso, # ABSTRACT). Covers the client core, the IO backends, the kubeconfig parser, the CLI layer and the Example tutorial. Specify the files to work on."
 model: sonnet
-allowed-tools: Read, Edit, Grep, Glob
+disallowedTools: Write, NotebookEdit, Bash
 briefing:
   skills:
     - kubernetes-rest-core
