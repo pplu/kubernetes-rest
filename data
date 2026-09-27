@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-27T00:11:17Z
+claimed_by: ensure-followups
+class: standard
+completed: 2026-09-27T00:11:17Z
+created: 2026-09-26T22:17:34Z
+id: 33
+priority: high
+started: 2026-09-26T23:48:03Z
+status: done
+tags:
+- ensure
+- bug
+title: ensure_only löscht bei qualifiziertem kinds-Eintrag die gerade angewendeten
+  Objekte
+updated: 2026-09-27T00:11:17Z
+---
+
+Gefunden beim Nachbau in Net::Async::Kubernetes (dort k35). ensure_only baut den Erwartungs-Schlüssel aus der Kind der Objektklasse, den Schlüssel der gelisteten Items aber aus dem String in kinds. Mit kinds wie autoscaling/v1/HorizontalPodAutoscaler passt beides nie zusammen, und jedes gelistete Item mit dem Label wird gelöscht, auch die eben angewendeten. Fix wie im Async-Client: Kind auf beiden Seiten aus der Klasse von Objekt bzw. Item ableiten. Regressionstest mit qualifiziertem kinds-Eintrag.
+
+Umgesetzt auf fix/ensure-followups, uncommittet. prove -lr t/ 45 Dateien 661 Tests PASS, dzil build sauber.
+
+2026-09-27 00:11 Committed as 6539e15 on fix/ensure-followups: shared key_of closure keyed on Kind, namespace, name; regression coverage in t/47_ensure_only.t. Verified in isolated worktree: prove -lr t/ 45 files 649 tests PASS.
