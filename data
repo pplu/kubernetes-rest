@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-27T21:01:48Z
+claimed_by: backlog-6
+class: standard
+completed: 2026-09-27T21:01:43Z
+created: 2026-09-27T20:06:05Z
+id: 55
+priority: low
+started: 2026-09-27T20:21:08Z
+status: done
+tags:
+- errors
+title: Abgelaufenes Watch (410) und OpenAPI-Abruf als APIError
+updated: 2026-09-27T21:01:48Z
+---
+
+Aus k50 (2026-09-27). Das ERROR-Event 410 im Watch-Stream und Could not fetch OpenAPI spec: N bleiben Strings. Prüfen, ob APIError mit code 410 bzw. dem HTTP-Status dort sinnvoll ist, ohne die Watch-Semantik (Resync) zu ändern.
+
+Commit 873fbe6
