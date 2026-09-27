@@ -1965,17 +1965,19 @@ sub _delete_request {
 # class serves croaks instead of falling back to the version the bare Kind
 # happens to map to (HorizontalPodAutoscaler alone means autoscaling/v2, a
 # different endpoint and schema than an autoscaling/v1 manifest). Without an
-# apiVersion the bare Kind resolves as it always did. Either way the class is
-# resolved here, so it goes to struct_to_object with its '+': IO::K8s takes it
-# as that exact class instead of resolving the name again (see _exact_class;
-# the class need not be loaded yet, so this does not ask it). $label only
-# appears in croak messages.
+# apiVersion the bare Kind resolves as it always did, and a Kind nothing
+# resolves croaks naming it, as for every method taking a resource name -
+# not with the module loader's "Can't locate IO/K8s/<Kind>.pm" (karr k48).
+# Either way the class is resolved here, so it goes to struct_to_object with
+# its '+': IO::K8s takes it as that exact class instead of resolving the name
+# again (see _exact_class; the class need not be loaded yet, so this does not
+# ask it). $label only appears in croak messages.
 sub _manifest_to_object {
     my ($self, $label, $manifest) = @_;
     my $kind = $manifest->{kind} or croak "$label: hashref must have 'kind'";
     my $api_version = $manifest->{apiVersion};
 
-    return $self->k8s->struct_to_object('+' . $self->expand_class($kind), $manifest)
+    return $self->k8s->struct_to_object('+' . $self->_expand_class_or_croak($kind), $manifest)
         unless defined $api_version && length $api_version;
 
     my $class = $self->expand_class($kind, $api_version)
@@ -2029,7 +2031,9 @@ that endpoint, although the bare Kind resolves to C<autoscaling/v2>. An
 C<apiVersion> that resolves to no known class croaks, naming the Kind and the
 C<apiVersion>, instead of falling back to the Kind's default version. A
 hashref without C<apiVersion> resolves by its Kind alone, as L</expand_class>
-does.
+does; a Kind that resolves to nothing croaks naming it
+(C<unknown resource 'Kind'>, as described under L</expand_class>) before any
+request is sent.
 
 Handles common race conditions:
 

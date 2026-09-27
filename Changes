@@ -48,7 +48,9 @@ Revision history for Kubernetes-REST
    nothing resolves - a qualified name whose group/version the cluster does
    not serve, or an unknown bare Kind - naming a failed discovery with its
    reason, instead of "argument is not a module name" or a "Can't locate
-   IO/K8s/Kind.pm" @INC dump. No request is sent, as before.
+   IO/K8s/Kind.pm" @INC dump. ensure and ensure_only do the same for a
+   manifest without apiVersion whose Kind nothing resolves. No request is
+   sent, as before.
  - schema_for answers undef without "Use of uninitialized value" warnings
    for a name that resolves to no class, such as a qualified name no class
    serves.
