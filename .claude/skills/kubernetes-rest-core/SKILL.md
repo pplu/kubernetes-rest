@@ -161,9 +161,15 @@ builds a real `Kubernetes::REST` with a mock IO backend consuming
 replaced.
 
 - Fixture lookup: `lc(method) . path`, slashes → underscores, collapsed, leading one
-  stripped — `GET /api/v1/namespaces` → `t/mock/get_api_v1_namespaces.json`. Query strings
-  are stripped for matching. A miss returns a 404 Status body, so a missing fixture looks
-  like a real "not found"; `MOCK_DEBUG=1` prints the key being looked up.
+  stripped — `GET /api/v1/namespaces` → `t/mock/get_api_v1_namespaces.json`. The query
+  string is **part of the key**: a request with parameters only matches a response
+  registered with the same query, exactly as `_prepare_request` renders it (keys sorted) —
+  `add_response('GET', "$path?labelSelector=app=demo", ...)`. That is how tests tell
+  selector queries apart (`t/47_ensure_only.t`); file fixtures in practice serve only
+  query-less requests. The recorded `requests` (method, path, content) carry the path
+  **without** its query, and the streaming lookups (`add_watch_events`, `add_log_lines`)
+  strip it too. A miss returns a 404 Status body, so a missing fixture looks like a real
+  "not found"; `MOCK_DEBUG=1` prints the key being looked up.
 - Programmatic responses (`add_response`, `add_watch_events`, `add_log_lines`) take
   precedence over files — prefer them for new behaviour and reserve `t/mock/*.json` for
   recorded cluster shapes.
