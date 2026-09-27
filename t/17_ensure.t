@@ -571,4 +571,60 @@ sub served {
         'ConfigMap after 409, update conflict: the updated object is returned');
 }
 
+# ---------------------------------------------------------------------------
+# karr k44: ensure branches on the status of a response, never on the text of
+# an error. A 500 or 422 whose message merely contains "404" or "409" is a
+# failure - not a missing object, an AlreadyExists or a Conflict - and ensure
+# croaks with it instead of creating, re-fetching or retrying.
+# ---------------------------------------------------------------------------
+sub failure_saying {
+    my ($code, $reason, $message) = @_;
+    my $failure = failure($code, $reason);
+    $failure->[1]{message} = $message;
+    return $failure;
+}
+
+{
+    my $CMS = '/api/v1/namespaces/default/configmaps';
+    my $cm = {
+        apiVersion => 'v1', kind => 'ConfigMap',
+        metadata   => { name => 'digits', namespace => 'default' },
+        data       => { key => 'value' },
+    };
+
+    # Case 21: the GET fails - it did not find nothing.
+    my $sapi = scripted_api(
+        "GET $CMS/digits" => [ failure_saying(500, 'InternalError', 'etcd timed out after 404 ms') ],
+    );
+    my $object = $sapi->k8s->struct_to_object('ConfigMap', $cm);
+    eval { $sapi->ensure($object) };
+    like($@, qr/ensure get ConfigMap\/digits\): 500 /, 'GET 500 saying 404: ensure croaks with the 500');
+    is_deeply(calls_since($sapi->io, 0), [ "GET $CMS/digits" ],
+        'GET 500 saying 404: nothing is created');
+
+    # Case 22: the POST is rejected - it did not collide with an existing object.
+    $sapi = scripted_api(
+        "GET $CMS/digits" => [ failure(404, 'NotFound') ],
+        "POST $CMS"       => [ failure_saying(422, 'Invalid', 'data.port: Invalid value: 409') ],
+    );
+    $object = $sapi->k8s->struct_to_object('ConfigMap', $cm);
+    eval { $sapi->ensure($object) };
+    like($@, qr/create IO::K8s::Api::Core::V1::ConfigMap\): 422 /,
+        'POST 422 saying 409: ensure croaks with the 422');
+    is_deeply(calls_since($sapi->io, 0), [ "GET $CMS/digits", "POST $CMS" ],
+        'POST 422 saying 409: not re-fetched as AlreadyExists');
+
+    # Case 23: the PUT fails - it did not lose a resourceVersion race.
+    $sapi = scripted_api(
+        "GET $CMS/digits" => [ served($cm, '7') ],
+        "PUT $CMS/digits" => [ failure_saying(500, 'InternalError', 'retry after 409 ms') ],
+    );
+    $object = $sapi->k8s->struct_to_object('ConfigMap', $cm);
+    eval { $sapi->ensure($object) };
+    like($@, qr/update IO::K8s::Api::Core::V1::ConfigMap\): 500 /,
+        'PUT 500 saying 409: ensure croaks with the 500');
+    is_deeply(calls_since($sapi->io, 0), [ "GET $CMS/digits", "PUT $CMS/digits" ],
+        'PUT 500 saying 409: not re-fetched and retried as a Conflict');
+}
+
 done_testing;

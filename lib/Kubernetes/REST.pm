@@ -1548,6 +1548,19 @@ Create a resource from an L<IO::K8s> object. Returns the created object with ser
 
 =cut
 
+    my ($class, $response) = $self->_create_request($object);
+    $self->_check_response($response, "create $class");
+
+    return $self->_inflate_object($class, $response);
+}
+
+# create() up to the response, unchecked, for the same reason as
+# _list_request: ensure() takes a 409 as its cue that the object appeared
+# since its GET, and must read that off the status, not out of the text
+# _check_response croaks with (karr k44).
+sub _create_request {
+    my ($self, $object) = @_;
+
     my $class = ref($object);
     my $namespace = $object->can('metadata') && $object->metadata
         ? $object->metadata->namespace
@@ -1555,10 +1568,7 @@ Create a resource from an L<IO::K8s> object. Returns the created object with ser
 
     my $path = $self->_build_path($class, namespace => $namespace,
         $self->_unstructured_hint($class, $object));
-    my $response = $self->_request('POST', $path, $object->TO_JSON);
-    $self->_check_response($response, "create " . ref($object));
-
-    return $self->_inflate_object($class, $response);
+    return ($class, $self->_request('POST', $path, $object->TO_JSON));
 }
 
 sub update {
@@ -1574,6 +1584,17 @@ For partial updates, use L</patch> instead.
 
 =cut
 
+    my ($class, $response) = $self->_update_request($object);
+    $self->_check_response($response, "update $class");
+
+    return $self->_inflate_object($class, $response);
+}
+
+# update() up to the response, unchecked, like _create_request: ensure()
+# re-fetches and retries on a 409 Conflict and must tell it apart by status.
+sub _update_request {
+    my ($self, $object) = @_;
+
     my $class = ref($object);
     my $metadata = $object->metadata or croak "object must have metadata";
     my $name = $metadata->name or croak "object must have metadata.name";
@@ -1581,10 +1602,7 @@ For partial updates, use L</patch> instead.
 
     my $path = $self->_build_path($class, name => $name, namespace => $namespace,
         $self->_unstructured_hint($class, $object));
-    my $response = $self->_request('PUT', $path, $object->TO_JSON);
-    $self->_check_response($response, "update " . ref($object));
-
-    return $self->_inflate_object($class, $response);
+    return ($class, $self->_request('PUT', $path, $object->TO_JSON));
 }
 
 my %PATCH_TYPES = (
@@ -1942,6 +1960,9 @@ controller wrote status) is retried by re-fetching and re-applying.
 
 =back
 
+Each case is recognised by the response status. Any other error status
+croaks with the API error, whatever its message happens to say.
+
 Special-cases for kinds with server-side mutation constraints:
 
 =over 4
@@ -1983,23 +2004,26 @@ object, and so is a C<Job> under any apiVersion other than C<batch/v1>.
     my $path = $self->_build_path($class, name => $name, namespace => $namespace,
         @unstructured_hint);
 
-    my $existing = eval {
-        my $response = $self->_request('GET', $path);
-        return undef if $response->status == 404;
+    # Every branch below is taken on the status of the response, never on the
+    # text of an error: a 500 or 422 whose message merely contains "404" or
+    # "409" is a failure, not a missing object or a conflict (karr k44).
+    my $existing;
+    my $response = $self->_request('GET', $path);
+    unless ($response->status == 404) {
         $self->_check_response($response, "ensure get $kind/$name");
-        $self->_inflate_object($class, $response);
-    };
-    my $get_err = $@;
-    die $get_err if $get_err && $get_err !~ /\b404\b/;
+        $existing = $self->_inflate_object($class, $response);
+    }
 
     unless ($existing) {
-        my $created = eval { $self->create($object) };
-        return $created if $created;
-        die $@ unless $@ =~ /\b409\b/;
+        (undef, $response) = $self->_create_request($object);
+        unless ($response->status == 409) {
+            $self->_check_response($response, "create $class");
+            return $self->_inflate_object($class, $response);
+        }
         # 409 AlreadyExists: it appeared between the GET and the POST. From
         # here on it is an existing object like any other, special cases
         # included - a Job must not get a PUT onto its immutable Pod template.
-        my $response = $self->_request('GET', $path);
+        $response = $self->_request('GET', $path);
         $self->_check_response($response, "ensure post-409 get $kind/$name");
         $existing = $self->_inflate_object($class, $response);
     }
@@ -2014,16 +2038,18 @@ object, and so is a C<Job> under any apiVersion other than C<batch/v1>.
         return $self->create($object);
     }
     $object->metadata->resourceVersion($existing->metadata->resourceVersion);
-    my $updated = eval { $self->update($object) };
-    return $updated if $updated;
-    if ($@ =~ /\b409\b/) {
-        $existing = $self->_request('GET', $path);
-        $self->_check_response($existing, "ensure refetch $kind/$name");
-        $existing = $self->_inflate_object($class, $existing);
-        $object->metadata->resourceVersion($existing->metadata->resourceVersion);
-        return $self->update($object);
+    (undef, $response) = $self->_update_request($object);
+    unless ($response->status == 409) {
+        $self->_check_response($response, "update $class");
+        return $self->_inflate_object($class, $response);
     }
-    die $@;
+    # 409 Conflict: the resourceVersion moved on server-side. Re-fetch it and
+    # retry once; a second conflict croaks.
+    $response = $self->_request('GET', $path);
+    $self->_check_response($response, "ensure refetch $kind/$name");
+    $existing = $self->_inflate_object($class, $response);
+    $object->metadata->resourceVersion($existing->metadata->resourceVersion);
+    return $self->update($object);
 }
 
 sub ensure_all {

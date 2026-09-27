@@ -31,6 +31,9 @@ Revision history for Kubernetes-REST
    class - in ensure, CRUD, watch and inflate_object/inflate_list/
    process_watch_chunk - instead of dying on IO/K8s/Gizmo.pm, dropping list
    items or becoming the class the Kind Gizmo is mapped to.
+ - ensure tells a missing object (404), AlreadyExists and Conflict (409)
+   apart by the response status; an error whose message merely contains
+   "404" or "409" now croaks instead of creating, re-fetching or retrying.
 
 1.108     2026-09-22 02:22:33Z
 
