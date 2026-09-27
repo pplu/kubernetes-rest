@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T21:44:15Z
+claimed_by: backlog-7
+class: standard
+completed: 2026-09-27T21:44:11Z
+created: 2026-09-27T20:44:04Z
+id: 59
+priority: low
+started: 2026-09-27T21:03:09Z
+status: done
+tags:
+- errors
+- discovery
+- k55-followup
+title: Discovery-Fehler als APIError
+updated: 2026-09-27T21:44:15Z
+---
+
+Aus k55 (2026-09-27). Ein Discovery-Fehler croakt als String (discovery GET /api failed: N) und wird in andere Meldungen eingebettet (_discovery_error). Prüfen, ob er wie k55 ein APIError werden kann, ohne die eingebetteten Meldungen zu verschlechtern; der Text ist in t/55 und im POD festgeschrieben.
+
+Commit 6d4c460
