@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T21:44:27Z
+claimed_by: backlog-7
+class: standard
+completed: 2026-09-27T21:44:22Z
+created: 2026-09-27T20:44:09Z
+id: 60
+priority: low
+started: 2026-09-27T21:03:13Z
+status: done
+tags:
+- schema
+- docs
+- k54-followup
+title: 'compare_schema auf Unstructured: Vergleich statt Schema not found dokumentieren'
+updated: 2026-09-27T21:44:27Z
+---
+
+Aus k54 (2026-09-27). Seit k54 findet schema_for für IO::K8s::Unstructured die Definition per GVK; compare_schema meldet dann alle Felder als lokal fehlend statt Schema not found zu croaken. Entweder dokumentieren oder für Unstructured ein eigenes croak (keine lokalen Felder).
+
+Commit b29e2f6
