@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T19:34:33Z
+claimed_by: backlog-4
+class: standard
+completed: 2026-09-27T19:34:33Z
+created: 2026-09-27T03:50:11Z
+id: 45
+priority: low
+started: 2026-09-27T04:26:32Z
+status: done
+tags:
+- ensure
+title: ensure_crd wartet per Regex auf 404 statt über den Status
+updated: 2026-09-27T19:34:33Z
+---
+
+Die Warteschleife _wait_crd_established in ensure_crd prüft den Fehlertext mit Wortgrenzen-Regex auf 404. Ein 500 mit 404 im Text pollt bis zum Timeout und verdeckt den echten Fehler. Auf den Response-Status umstellen wie in k44.
+
+Umgesetzt auf fix/backlog-4, uncommittet. Worker: prove -lr t/ 48 Dateien 754 Tests PASS, NAK-Suite gegen diesen Baum 37 Dateien 285 Tests PASS, dzil build sauber.
+
+2026-09-27 19:34 Committed d7b0984: End ensure_crd's wait on the poll status, not the error text. prove -lr t/ green in isolated worktree (47 Dateien, 750 Tests) and on branch HEAD; dzil build clean.
