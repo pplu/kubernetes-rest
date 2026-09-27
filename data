@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-27T21:01:24Z
+claimed_by: backlog-6
+class: standard
+completed: 2026-09-27T21:01:19Z
+created: 2026-09-27T20:19:44Z
+id: 57
+priority: low
+started: 2026-09-27T20:21:18Z
+status: done
+tags:
+- resolve
+- providers
+title: with plus eigene resource_map schreibt in den Hash des Aufrufers
+updated: 2026-09-27T21:01:24Z
+---
+
+Gefunden im Async-Client k62 (2026-09-27), mit 1.108 und 1.109 geprüft: wird with zusammen mit einer eigenen resource_map übergeben, schreibt Kubernetes::REST die Provider-Kinds in den übergebenen Hash (204 -> 228 Keys). Kopie anlegen statt den Hash des Aufrufers zu ändern.
+
+Commit 865ac51
