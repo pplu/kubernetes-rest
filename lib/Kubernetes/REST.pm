@@ -1225,9 +1225,23 @@ Compare the local L<IO::K8s> class definition against the cluster's OpenAPI sche
 
 Returns the comparison result from C<< $class->compare_to_schema >>, the method L<IO::K8s::Role::Resource> provides on every resource class.
 
+A name that resolves to L<IO::K8s::Unstructured> (see L</expand_class>)
+croaks, before the spec is fetched: that class declares only C<apiVersion>,
+C<kind> and C<metadata> and keeps every other field untyped, so it has no
+local schema to compare. L</schema_for> still answers the cluster's
+definition for such a name.
+
 =cut
 
     my $class = $self->_expand_class_or_croak($kind);
+    # Unstructured declares only the envelope; held against a definition it
+    # would report every other field as missing locally, which says nothing
+    # about skew (karr k60). Before the /openapi/v2 download, which it would
+    # waste.
+    croak "compare_schema: '$kind' resolves to IO::K8s::Unstructured, which has"
+        . " no local schema to compare (add a typed class for it to resource_map"
+        . " or with)"
+        if $class eq 'IO::K8s::Unstructured';
     require_module($class);
 
     my $schema = $self->schema_for($kind);
