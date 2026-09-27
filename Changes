@@ -108,6 +108,9 @@ Revision history for Kubernetes-REST
    on anything after its object. The v0 List*, Read*, Watch* and Patch*
    methods pass on only what the new methods take and ignore their other
    parameters.
+ - The v0 Read*Status methods (ReadNamespacedPodStatus, ReadNodeStatus,
+   ...) read the /status subresource instead of the object itself, and
+   their deprecation warning names get(..., subresource => 'status').
 
 1.108     2026-09-22 02:22:33Z
 

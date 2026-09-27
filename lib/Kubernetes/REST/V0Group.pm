@@ -43,7 +43,7 @@ sub AUTOLOAD {
     return if $method eq 'DESTROY';
 
     # Parse method name: ListNamespacedPod, ReadNamespacedPod, CreateNamespacedPod, etc.
-    my ($action, $namespaced, $resource) = _parse_method($method);
+    my ($action, $namespaced, $resource, $status) = _parse_method($method);
 
     unless ($action && $resource) {
         croak "Unknown method: $method";
@@ -55,6 +55,10 @@ sub AUTOLOAD {
     # Convert args to hash if needed
     my %params = @args == 1 && ref($args[0]) eq 'HASH' ? %{$args[0]} : @args;
 
+    # Read*Status reads the status subresource, not the object itself (karr
+    # k62); get takes it since k58. Set here, the warning names it too.
+    $params{subresource} = 'status' if $status && $action eq 'read';
+
     # Show deprecation warning
     $self->_warn_deprecated($method, $action, $class, \%params);
 
@@ -65,11 +69,13 @@ sub AUTOLOAD {
 sub _parse_method {
     my ($method) = @_;
 
-    # Patterns: List/Read/Create/Replace/Patch/Delete/Watch + Namespaced? + Resource + ForAllNamespaces?
+    # Patterns: List/Read/Create/Replace/Patch/Delete/Watch + Namespaced? + Resource + ForAllNamespaces|Status?
+    # The fourth value says whether the name ends in Status.
     if ($method =~ /^(List|Read|Create|Replace|Patch|Delete|Watch)(Namespaced)?(\w+?)(ForAllNamespaces|Status)?$/) {
         my ($action, $namespaced, $resource, $suffix) = ($1, $2, $3, $4);
         $namespaced = 0 if $suffix && $suffix eq 'ForAllNamespaces';
-        return (lc($action), $namespaced ? 1 : 0, $resource);
+        return (lc($action), $namespaced ? 1 : 0, $resource,
+            ($suffix && $suffix eq 'Status') ? 1 : 0);
     }
 
     return (undef, undef, undef);
@@ -110,7 +116,8 @@ sub _warn_deprecated {
         $new_call = "\$api->list('$class'$ns)";
     } elsif ($action eq 'read') {
         my $ns = $params->{namespace} ? ", namespace => '$params->{namespace}'" : '';
-        $new_call = "\$api->get('$class', name => '$params->{name}'$ns)";
+        my $sub = $params->{subresource} ? ", subresource => '$params->{subresource}'" : '';
+        $new_call = "\$api->get('$class', name => '$params->{name}'$ns$sub)";
     } elsif ($action eq 'create') {
         $new_call = "\$api->create(\$object)";
     } elsif ($action eq 'replace') {
@@ -224,7 +231,8 @@ and translates them to the new API. The following actions are supported:
 
 =item * List -> list()
 
-=item * Read -> get()
+=item * Read -> get(); a name ending in C<Status> (C<ReadNamespacedPodStatus>)
+reads the status subresource, C<< get(..., subresource => 'status') >>
 
 =item * Create -> create()
 
