@@ -2,6 +2,11 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - ensure_only no longer deletes the objects it has just applied when a
+   kinds entry is qualified ('autoscaling/v1/HorizontalPodAutoscaler') or
+   resolves to IO::K8s::Unstructured; listed items match on their own Kind,
+   namespace and name.
+
 1.108     2026-09-22 02:22:33Z
 
  - New ensure_crd(@classes): create-or-update CustomResourceDefinitions from

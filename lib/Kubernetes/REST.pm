@@ -1918,6 +1918,13 @@ Use this for resources where stale objects must not survive (e.g. RBAC).
 Pass C<undef> inside C<namespaces> to scan cluster-scoped resources. If
 C<namespaces> is omitted, only cluster-scoped resources are scanned.
 
+C<objects> takes typed objects or hashrefs, resolved as in L</ensure>. A
+C<kinds> entry may be a bare Kind or a qualified C<group/version/Kind> (see
+L</expand_class>). A listed resource counts as present when its Kind,
+namespace and name match an object in C<objects>; the version is not
+compared, so an object applied as C<autoscaling/v1> is kept when the listing
+goes through C<autoscaling/v2>.
+
 Returns the list of applied objects (from L</ensure_all>).
 
 =cut
@@ -1936,12 +1943,21 @@ Returns the list of applied objects (from L</ensure_all>).
 
     my @results = $self->ensure_all(@objects);
 
-    my %expected;
-    for my $obj (@objects) {
-        (my $kind = ref $obj) =~ s/.*:://;
-        my $key = join("\0", $kind, $obj->metadata->namespace // '');
-        $expected{$key}{$obj->metadata->name} = 1;
-    }
+    # (Kind, namespace, name), taken from the object on both sides - never from
+    # the kinds entry, which may be qualified ('autoscaling/v1/...') and would
+    # then match nothing, deleting the objects just applied. The Kind is the
+    # object's own kind(): class-derived for a typed object, instance data for
+    # IO::K8s::Unstructured, whose class name says nothing about its Kind.
+    # No version in the key: the same resource listed through another version's
+    # class is still the same resource.
+    my $key_of = sub {
+        my ($obj) = @_;
+        my $kind = $obj->can('kind') ? $obj->kind : undef;
+        ($kind = ref $obj) =~ s/.*::// unless defined $kind;
+        my $metadata = $obj->metadata;
+        return join("\0", $kind, $metadata->namespace // '', $metadata->name);
+    };
+    my %expected = map { $key_of->($_) => 1 } @objects;
 
     for my $kind (@kinds) {
         for my $ns (@namespaces) {
@@ -1950,9 +1966,7 @@ Returns the list of applied objects (from L</ensure_all>).
             my $list = eval { $self->list($kind, %list_args) };
             next unless $list;
             for my $item (@{$list->items}) {
-                my $item_ns = $item->metadata->namespace // '';
-                my $key = join("\0", $kind, $item_ns);
-                next if $expected{$key} && $expected{$key}{$item->metadata->name};
+                next if $expected{ $key_of->($item) };
                 eval { $self->delete($item) };
             }
         }
