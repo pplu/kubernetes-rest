@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-27T20:19:23Z
+claimed_by: backlog-5
+class: standard
+completed: 2026-09-27T20:19:19Z
+created: 2026-09-27T04:55:08Z
+id: 49
+priority: medium
+started: 2026-09-27T19:36:02Z
+status: done
+tags:
+- delete
+- api
+title: 'delete: propagationPolicy (DeleteOptions) unterstützen'
+updated: 2026-09-27T20:19:23Z
+---
+
+Kubernetes::REST->delete kann keine DeleteOptions senden, insbesondere keinen propagationPolicy. Ein Job, der ohne propagationPolicy=Background (oder Foreground) gelöscht wird, lässt seine Pods verwaist zurück (API-Default für batch/v1 Job ist orphan). Gebraucht von Kubernetes::Comb (restart und stop löschen Jobs, SPEC §7). Wunsch: delete($obj_or_kind, ..., propagationPolicy => "Background") als Query-Parameter bzw. DeleteOptions-Body, analog in ensure_only beim Prunen. Gleiche Lücke in Net::Async::Kubernetes (dort eigenes Ticket).
+
+Commit 6d99cdbfa27b4a102e4a1a71d3207b3cbd45dc9e
