@@ -67,6 +67,11 @@ Revision history for Kubernetes-REST
    propagationPolicy, and ensure deletes the failed Job it recreates with
    Background. The v0 Delete* methods pass propagationPolicy on and still
    ignore their other parameters.
+ - New prepare_discovery_requests and absorb_discovery let an async client
+   read discovery (GET /api, GET /apis) through its own event loop and hand
+   the responses over; with aggregated discovery, name resolution and the
+   resource map then send no request of their own. Legacy discovery
+   answers false and is read synchronously on first use, as before.
 
 1.108     2026-09-22 02:22:33Z
 

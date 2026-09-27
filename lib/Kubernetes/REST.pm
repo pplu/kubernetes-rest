@@ -255,6 +255,8 @@ has resource_map => (
     clearer => '_clear_resource_map',
     default => sub {
         my $self = shift;
+        # Built here, not passed in: absorb_discovery may rebuild it.
+        $self->_resource_map_built(1);
         # A private copy, never IO::K8s's shared global map: the inner IO::K8s
         # is handed this hashref and merges any `with` providers into it with
         # add(), which mutates it in place. Returning the global ref would leak
@@ -278,6 +280,11 @@ Override for custom resources:
 The C<+> prefix tells L<IO::K8s> that this is a custom class (not in the IO::K8s:: namespace).
 
 =cut
+
+# Whether the resource map in place was built by the default above rather
+# than passed to the constructor. absorb_discovery rebuilds a built map from
+# the catalog it takes; a map the caller passed is theirs and stays (karr k51).
+has _resource_map_built => (is => 'rw', init_arg => undef);
 
 # Deliberately NOT delegated to the k8s attribute like the other IO::K8s
 # methods: building that instance forces the lazy resource_map, which on the
@@ -617,7 +624,8 @@ Build the resource map from the cluster's aggregated discovery documents
 
 Called automatically if C<resource_map_from_cluster> is enabled.
 
-Discovery is fetched and cached once per instance (see L</invalidate_discovery>);
+Discovery is fetched and cached once per instance (see L</invalidate_discovery>;
+an async client can supply it instead, see L</absorb_discovery>);
 calling this again rebuilds the map from the cached catalog rather than
 re-querying the cluster. It does B<not> download C</openapi/v2> - that spec is
 fetched lazily only when L</schema_for> or L</compare_schema> need it.
@@ -732,11 +740,13 @@ sub _io_k8s_class_ships {
 #           <Kind> => { resource => <plural>, scope => 'Namespaced'|'Cluster' },
 #       } } },
 #   } } }
-# Built lazily on first use and invalidated by invalidate_discovery.
+# Built lazily on first use - or handed over by absorb_discovery - and
+# invalidated by invalidate_discovery.
 has _discovery => (
     is => 'lazy',
     predicate => '_has_discovery',
     clearer => '_clear_discovery',
+    writer => '_set_discovery',   # absorb_discovery
     builder => sub { $_[0]->_fetch_discovery },
 );
 
@@ -759,21 +769,19 @@ has _discovery_error => (
 my $DISCOVERY_ACCEPT =
     'application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList';
 
+# The two discovery documents, in the order they are read.
+my @DISCOVERY_ROOTS = ('/api', '/apis');
+
 sub _fetch_discovery {
     my ($self) = @_;
 
     my $catalog = { groups => {} };
 
-    for my $root ('/api', '/apis') {
-        my $response = $self->_request('GET', $root, undef,
-            headers => { Accept => $DISCOVERY_ACCEPT });
-        croak "discovery GET $root failed: " . $response->status
-            if $response->status >= 400;
+    for my $root (@DISCOVERY_ROOTS) {
+        my ($body, $aggregated) = $self->_discovery_document($root,
+            $self->io->call($self->_discovery_request($root)));
 
-        my $body = $self->_json->decode($response->content);
-        my $kind = ref $body eq 'HASH' ? ($body->{kind} // '') : '';
-
-        if ($kind eq 'APIGroupDiscoveryList') {
+        if ($aggregated) {
             $self->_absorb_discovery_list($catalog, $body);
         } elsif ($root eq '/api') {
             $self->_fetch_discovery_legacy_core($catalog, $body);
@@ -783,6 +791,27 @@ sub _fetch_discovery {
     }
 
     return $catalog;
+}
+
+# The request for one discovery root: what _fetch_discovery sends, and what
+# prepare_discovery_requests hands an async client to send.
+sub _discovery_request {
+    my ($self, $root) = @_;
+    return $self->_prepare_request('GET', $root,
+        headers => { Accept => $DISCOVERY_ACCEPT });
+}
+
+# One discovery root's response, checked and decoded - for the synchronous
+# fetch and absorb_discovery alike. An HTTP error croaks; the second value
+# says whether the document is aggregated discovery (APIGroupDiscoveryList)
+# rather than the legacy one.
+sub _discovery_document {
+    my ($self, $root, $response) = @_;
+    croak "discovery GET $root failed: " . $response->status
+        if $response->status >= 400;
+    my $body = $self->_json->decode($response->content);
+    my $kind = ref $body eq 'HASH' ? ($body->{kind} // '') : '';
+    return ($body, $kind eq 'APIGroupDiscoveryList');
 }
 
 # APIGroupDiscoveryList (aggregated discovery v2). Each item is one group; the
@@ -903,6 +932,109 @@ is installed or changed, to make the new Kind visible to this client instance.
     # The inner IO::K8s captured the old map at build time; drop it too so it is
     # rebuilt from the refreshed map on next use.
     $self->_clear_k8s if $self->_has_k8s;
+    return 1;
+}
+
+sub prepare_discovery_requests {
+    my ($self) = @_;
+
+=method prepare_discovery_requests
+
+    my %requests = $api->prepare_discovery_requests;
+    # ('/api' => $request, '/apis' => $request)
+
+Build the two discovery requests - C<GET /api> and C<GET /apis>, with the
+C<Accept> header that asks for aggregated discovery (C<APIGroupDiscoveryList>,
+C<apidiscovery.k8s.io/v2>) - without sending them. Returns them as path/request
+pairs, C</api> first, each a L<Kubernetes::REST::HTTPRequest> as
+L</prepare_request> builds it: exactly what the client sends when it reads
+discovery through its own L</io>.
+
+This and L</absorb_discovery> are for async wrappers such as
+L<Net::Async::Kubernetes>. With L</resource_map_from_cluster> on, the first
+name resolution otherwise reads discovery through the synchronous L</io>,
+blocking the wrapper's event loop.
+
+=cut
+
+    return map { ($_ => $self->_discovery_request($_)) } @DISCOVERY_ROOTS;
+}
+
+sub absorb_discovery {
+    my ($self, %responses) = @_;
+
+=method absorb_discovery
+
+    my $absorbed = $api->absorb_discovery(
+        '/api'  => $api_response,
+        '/apis' => $apis_response,
+    );
+
+Take the responses to the requests from L</prepare_discovery_requests> - any
+objects with C<status> and C<content> (the undecoded body), such as
+L<Kubernetes::REST::HTTPResponse>.
+
+When both are aggregated discovery documents they become this client's
+discovery catalog, replacing any it had cached, as if the client had read them
+itself, and the method returns true. From then on L</expand_class>,
+L</fetch_resource_map>, L</build_path> and the lazily built L</resource_map>
+answer from that catalog without sending a request. A resource map built from
+an earlier catalog is rebuilt from this one; a map passed to the constructor
+stays as it is.
+
+When either is a legacy discovery document - a cluster older than Kubernetes
+1.27 ignores the C<Accept> header - it returns false and caches nothing:
+reading legacy discovery takes a request per group and version, which only the
+synchronous path makes. The client then reads discovery itself when it first
+needs it, as it always did.
+
+An HTTP error status croaks the way the client's own discovery read does
+(C<discovery GET /apis failed: 503>), and so does a missing response or any
+key other than C</api> and C</apis>.
+
+An async client hands the requests to its own transport and the responses
+back - here C<< $send->($request) >> stands for whatever runs a
+L<Kubernetes::REST::HTTPRequest> through the event loop and returns a
+L<Future> of the response:
+
+    my %requests = $rest->prepare_discovery_requests;
+    my @roots    = sort keys %requests;
+    my $ready = Future->needs_all(map { $send->($requests{$_}) } @roots)
+        ->then(sub {
+            my %responses;
+            @responses{@roots} = @_;
+            # false: legacy discovery, read synchronously on first use
+            $rest->absorb_discovery(%responses);
+            return Future->done;
+        });
+
+=cut
+
+    $self->_croak_unknown_args('absorb_discovery', \%responses, @DISCOVERY_ROOTS);
+    my @lists;
+    for my $root (@DISCOVERY_ROOTS) {
+        my $response = $responses{$root}
+            or croak "absorb_discovery requires the response for $root";
+        my ($body, $aggregated) = $self->_discovery_document($root, $response);
+        push @lists, $aggregated ? $body : undef;
+    }
+    # Legacy discovery needs a request per group/version on top, which only
+    # the synchronous path makes: nothing is cached, and the caller falls
+    # back to that path.
+    return if grep { !defined } @lists;
+
+    my $catalog = { groups => {} };
+    $self->_absorb_discovery_list($catalog, $_) for @lists;
+
+    # What an earlier catalog built goes, so this one counts: a resource map
+    # built from it, and the inner IO::K8s holding that map. A map passed to
+    # the constructor stays - a caller's '+My::Class' entries must survive.
+    if ($self->_has_resource_map && $self->_resource_map_built) {
+        $self->_clear_resource_map;
+        $self->_clear_k8s if $self->_has_k8s;
+    }
+    $self->_clear_discovery_error;
+    $self->_set_discovery($catalog);
     return 1;
 }
 
@@ -3240,6 +3372,10 @@ L</inflate_list>)
 =item * C<process_watch_chunk($class, \$buf, $chunk)> - Parse NDJSON watch stream
 
 =item * C<process_log_chunk(\$buf, $chunk)> - Parse plain-text log stream
+
+=item * C<prepare_discovery_requests> and C<absorb_discovery(%responses)> -
+Read the cluster's discovery through your own event loop, so that resolving
+names needs no request of the client's own (see L</absorb_discovery>)
 
 =back
 
