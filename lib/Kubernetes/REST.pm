@@ -938,7 +938,8 @@ sub schema_for {
 
 Get the OpenAPI schema definition for a resource type from the cluster. Accepts short names (C<Pod>), full class names (C<IO::K8s::Api::Core::V1::Pod>), or OpenAPI definition names (C<io.k8s.api.core.v1.Pod>).
 
-Returns a hashref with the OpenAPI v2 schema definition.
+Returns a hashref with the OpenAPI v2 schema definition, or C<undef> when
+there is none - also for a name that resolves to no class at all.
 
 =cut
 
@@ -950,8 +951,12 @@ Returns a hashref with the OpenAPI v2 schema definition.
         return $defs->{$kind};
     }
 
-    # Convert class name to OpenAPI definition name
+    # Convert class name to OpenAPI definition name. A name nothing resolves
+    # (expand_class answers undef for a qualified one) has no definition to
+    # look up: the same undef a missing definition gets, without turning undef
+    # into a definition name first (karr k47).
     my $class = $self->expand_class($kind);
+    return unless defined $class;
     # IO::K8s::Api::Core::V1::Pod -> io.k8s.api.core.v1.Pod
     my $def_name = $class;
     $def_name =~ s/^IO::K8s:://;

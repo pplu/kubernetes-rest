@@ -49,6 +49,9 @@ Revision history for Kubernetes-REST
    not serve, or an unknown bare Kind - naming a failed discovery with its
    reason, instead of "argument is not a module name" or a "Can't locate
    IO/K8s/Kind.pm" @INC dump. No request is sent, as before.
+ - schema_for answers undef without "Use of uninitialized value" warnings
+   for a name that resolves to no class, such as a qualified name no class
+   serves.
 
 1.108     2026-09-22 02:22:33Z
 
