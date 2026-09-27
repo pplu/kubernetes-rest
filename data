@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T19:34:43Z
+claimed_by: backlog-4
+class: standard
+completed: 2026-09-27T19:34:43Z
+created: 2026-09-27T03:50:17Z
+id: 46
+priority: low
+started: 2026-09-27T04:26:37Z
+status: done
+tags:
+- resolve
+title: 'Unaufgelöster qualifizierter Name: kryptische Meldung in list, get, delete'
+updated: 2026-09-27T19:34:43Z
+---
+
+Löst ein qualifizierter Name nicht auf (etwa nach k43, weil der GV nicht bedient wird), croaken list, get und delete nur mit argument is not a module name, ohne Kind und apiVersion. Die k37-Warnung in ensure_only trägt denselben Text. Klare Meldung mit Kind und apiVersion; Net::Async::Kubernetes umgeht das bereits über _resolve_class.
+
+Umgesetzt auf fix/backlog-4, uncommittet. Worker: prove -lr t/ 48 Dateien 754 Tests PASS, NAK-Suite gegen diesen Baum 37 Dateien 285 Tests PASS, dzil build sauber.
+
+2026-09-27 19:34 Committed cf99198: Name the resource when a name resolves to nothing. prove -lr t/ green in isolated worktree (48 Dateien, 754 Tests) and on branch HEAD; dzil build clean.
