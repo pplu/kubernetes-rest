@@ -924,14 +924,21 @@ Discard the cached discovery catalog and the resource map built from it, so the
 next resolution re-queries the cluster. Use it after a CustomResourceDefinition
 is installed or changed, to make the new Kind visible to this client instance.
 
+A resource map passed to the constructor is not built from the catalog and
+stays as it is, entries such as C<'+My::Class'> included.
+
 =cut
 
     $self->_clear_discovery;
     $self->_clear_discovery_error;
-    $self->_clear_resource_map if $self->_has_resource_map;
-    # The inner IO::K8s captured the old map at build time; drop it too so it is
-    # rebuilt from the refreshed map on next use.
-    $self->_clear_k8s if $self->_has_k8s;
+    # Only a map built from the catalog goes, and with it the inner IO::K8s
+    # that captured it at build time, so both are rebuilt on next use. A map
+    # passed to the constructor is the caller's: rebuilding it would drop
+    # their '+My::Class' entries (karr k52), as absorb_discovery knows too.
+    if ($self->_has_resource_map && $self->_resource_map_built) {
+        $self->_clear_resource_map;
+        $self->_clear_k8s if $self->_has_k8s;
+    }
     return 1;
 }
 
