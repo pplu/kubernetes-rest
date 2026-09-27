@@ -1996,6 +1996,11 @@ my %PATCH_TYPES = (
 # (patch('Pod', 'name', ...)) and the fully keyed (patch('Pod', name => ...))
 # call form. $label only appears in croak messages, $default_type is the patch
 # strategy used when the caller does not pass one.
+#
+# Any argument it does not read croaks before anything is sent (karr k61): a
+# misspelt namespce patched the object of that name at cluster scope, a
+# patch_type => 'merge' went out as a strategic merge patch. An object names
+# itself, so with one only the patch and its type are taken.
 sub _unpack_patch_args {
     my ($self, $label, $default_type, $class_or_object, @rest) = @_;
 
@@ -2004,11 +2009,12 @@ sub _unpack_patch_args {
     if (ref($class_or_object) && blessed($class_or_object)) {
         # Object passed: patch($object, patch => {...})
         my $object = $class_or_object;
+        my %args = @rest;
+        $self->_croak_unknown_args($label, \%args, qw(patch type));
         $class = ref($object);
         my $metadata = $object->metadata or croak "object must have metadata";
         $name = $metadata->name or croak "object must have metadata.name";
         $namespace = $metadata->namespace;
-        my %args = @rest;
         $patch = $args{patch} // croak "$label requires 'patch' parameter";
         $patch_type = $args{type} // $default_type;
     } else {
@@ -2022,6 +2028,7 @@ sub _unpack_patch_args {
         } else {
             croak "Invalid arguments to $label()";
         }
+        $self->_croak_unknown_args($label, \%args, qw(name namespace patch type));
 
         $class = $self->_expand_class_or_croak($class_or_object);
         $name = $args{name} or croak "name required for $label";
@@ -2090,6 +2097,10 @@ JSON Patch (RFC 6902): an array of operations, as in the third example above.
 
 Returns the full updated object from the server.
 
+Any other argument croaks before a request is sent, naming it: a misspelt
+option is not ignored. With an object, which names the resource itself, only
+C<patch> and C<type> are taken - C<name> and C<namespace> croak too.
+
 =cut
 
     my ($class, $name, $namespace, $patch, $content_type)
@@ -2128,7 +2139,8 @@ C<create>, C<update>, C<patch> and server-side apply alike - and still answers
 C</status>, which is what this method addresses.
 
 Takes the same arguments as L</patch> (object or class plus name, both call
-forms, the same C<type> values) and returns the full object from the server.
+forms, the same C<type> values), croaks on any other as L</patch> does, and
+returns the full object from the server.
 The patch document is passed through unchanged, so it carries its own
 C<status> key.
 
@@ -2753,6 +2765,9 @@ versions.
 
 =back
 
+Any other option croaks before anything is applied, naming it: a misspelt
+option is not ignored.
+
 =cut
 
     my (@classes, %opts);
@@ -2762,6 +2777,9 @@ versions.
     } else {
         @classes = @_;
     }
+    # A misspelt option is not ignored, before any class is asked for its CRD
+    # (karr k61): tiemout => 5 waited the default 30 seconds.
+    $self->_croak_unknown_args('ensure_crd', \%opts, qw(timeout poll_interval storage));
     croak "ensure_crd requires at least one CRD class" unless @classes;
 
     my $storage = $opts{storage};
@@ -3119,7 +3137,8 @@ C<[8080, 8443]>).
 Optional: C<namespace> (for namespaced resources), C<subprotocol> (WebSocket
 subprotocol, default C<v4.channel.k8s.io>), and the duplex transport callbacks
 C<on_open>, C<on_frame>, C<on_close>, C<on_error>, passed through to the IO
-backend.
+backend. Any other argument croaks before a request is sent, naming it: a
+misspelt option is not ignored.
 
 This method requires an IO backend that implements C<call_duplex>. The default
 L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> backends do not
@@ -3139,6 +3158,10 @@ session/handle object managed by that backend).
     } else {
         croak "Invalid arguments to port_forward()";
     }
+    # A misspelt option is not ignored (karr k61): whatever was not read went
+    # on to build_path, which dropped it - on_message never saw a frame.
+    $self->_croak_unknown_args('port_forward', \%args, qw(name namespace ports
+        subprotocol on_open on_frame on_close on_error));
 
     croak "name required for port_forward" unless $args{name};
 
@@ -3208,7 +3231,9 @@ Optional: C<namespace>, C<container> (for multi-container pods), the stream
 toggles C<stdin>/C<stdout>/C<stderr>/C<tty> shown above (defaults: stdin and
 tty off, stdout and stderr on), C<subprotocol> (WebSocket subprotocol, default
 C<v4.channel.k8s.io>), and the duplex transport callbacks C<on_open>,
-C<on_frame>, C<on_close>, C<on_error>, passed through to the IO backend.
+C<on_frame>, C<on_close>, C<on_error>, passed through to the IO backend. Any
+other argument croaks before a request is sent, naming it: a misspelt option
+is not ignored.
 
 This method requires an IO backend that implements C<call_duplex>. The default
 L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> backends do not
@@ -3228,6 +3253,11 @@ session/handle object managed by that backend).
     } else {
         croak "Invalid arguments to exec()";
     }
+    # A misspelt option is not ignored (karr k61): containr => 'app' ran the
+    # command in the default container.
+    $self->_croak_unknown_args('exec', \%args, qw(name namespace command
+        container stdin stdout stderr tty subprotocol on_open on_frame on_close
+        on_error));
 
     croak "name required for exec" unless $args{name};
 
@@ -3311,7 +3341,9 @@ Optional: C<namespace>, C<container> (for multi-container pods), the stream
 toggles C<stdin>/C<stdout>/C<stderr>/C<tty> shown above (defaults: stdin and
 tty off, stdout and stderr on), C<subprotocol> (WebSocket subprotocol, default
 C<v4.channel.k8s.io>), and the duplex transport callbacks C<on_open>,
-C<on_frame>, C<on_close>, C<on_error>, passed through to the IO backend.
+C<on_frame>, C<on_close>, C<on_error>, passed through to the IO backend. Any
+other argument croaks before a request is sent, naming it: a misspelt option
+is not ignored.
 
 This method requires an IO backend that implements C<call_duplex>. The default
 L<Kubernetes::REST::LWPIO> and L<Kubernetes::REST::HTTPTinyIO> backends do not
@@ -3331,6 +3363,10 @@ session/handle object managed by that backend).
     } else {
         croak "Invalid arguments to attach()";
     }
+    # A misspelt option is not ignored (karr k61): stdn => 1 attached without
+    # stdin.
+    $self->_croak_unknown_args('attach', \%args, qw(name namespace container
+        stdin stdout stderr tty subprotocol on_open on_frame on_close on_error));
 
     croak "name required for attach" unless $args{name};
 

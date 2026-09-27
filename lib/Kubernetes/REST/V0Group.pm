@@ -164,7 +164,12 @@ sub _dispatch {
             qw(name namespace propagationPolicy);
         return $api->delete($class, %args);
     } elsif ($action eq 'patch') {
-        return $api->patch($class, %$params);
+        # patch croaks on arguments it does not take (karr k61); the v0
+        # parameters it has no use for (pretty, dryRun, fieldManager, ...)
+        # stay ignored, as with delete above.
+        my %args = map { exists $params->{$_} ? ($_ => $params->{$_}) : () }
+            qw(name namespace patch type);
+        return $api->patch($class, %args);
     } elsif ($action eq 'watch') {
         my %args = map { exists $params->{$_} ? ($_ => $params->{$_}) : () }
             qw(on_event timeout resourceVersion labelSelector fieldSelector namespace);
@@ -233,12 +238,13 @@ and translates them to the new API. The following actions are supported:
 
 =back
 
-List, Read, Watch and Delete pass on only the parameters the new method
-takes - C<namespace>, C<labelSelector> and C<fieldSelector>; C<name>,
+List, Read, Watch, Delete and Patch pass on only the parameters the new
+method takes - C<namespace>, C<labelSelector> and C<fieldSelector>; C<name>,
 C<namespace> and C<subresource>; C<on_event>, C<timeout>,
 C<resourceVersion>, C<labelSelector>, C<fieldSelector> and C<namespace>;
-C<name>, C<namespace> and C<propagationPolicy> - and ignore the others,
-which the new methods croak on.
+C<name>, C<namespace> and C<propagationPolicy>; C<name>, C<namespace>,
+C<patch> and C<type> - and ignore the others, which the new methods croak
+on.
 
 =head1 SEE ALSO
 

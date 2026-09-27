@@ -138,9 +138,9 @@ changes here need a test that pins what is *not* deleted, not only what is.
 0.01/0.02 method names (`ListNamespacedPod`) onto the v1 API via `AUTOLOAD`, parsing
 `{Action}{Namespaced?}{Resource}{ForAllNamespaces|Status?}` and dispatching to
 `list`/`get`/`create`/`update`/`delete`/`patch`/`watch`. Every call carps unless
-`$ENV{HIDE_KUBERNETES_REST_V0_API_WARNING}` is set. `list`, `get`, `watch` and `delete`
-croak on arguments they do not take, so `_dispatch` passes each only its own keys and the
-other v0 parameters stay ignored (k49, k58).
+`$ENV{HIDE_KUBERNETES_REST_V0_API_WARNING}` is set. `list`, `get`, `watch`, `delete` and
+`patch` croak on arguments they do not take, so `_dispatch` passes each only its own keys
+and the other v0 parameters stay ignored (k49, k58, k61).
 
 Two traps live here:
 
@@ -179,8 +179,11 @@ Everything else croaks with a plain string: invalid arguments, a name nothing re
 and the watch `410` — an `ERROR` event inside a stream the server
 answered with 200, answered with a re-list. An option key a method does not take croaks
 through `_croak_unknown_args` before any request (`delete`, `ensure_only`, `log`,
-`absorb_discovery`, and `list`, `get`, `watch` since k58); `ensure` croaks on anything
-after its object. `get` keeps `subresource`, which works (`status` answers with the
+`absorb_discovery`, `list`, `get`, `watch` since k58, and `patch`, `patch_status`,
+`ensure_crd`, `port_forward`, `exec`, `attach` since k61); `ensure` croaks on anything
+after its object. The allowed keys are exactly what the method reads; with an object,
+`delete` takes only `propagationPolicy` and `patch`/`patch_status` only `patch` and `type`
+— the object names itself. `get` keeps `subresource`, which works (`status` answers with the
 object); `name`/`subresource` on `list`/`watch` croak — they made the request a GET of
 one object, read as an empty list or a typeless event. `delete` sends `propagationPolicy`
 as the `DeleteOptions` query parameter (k49).

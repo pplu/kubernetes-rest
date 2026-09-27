@@ -94,17 +94,20 @@ Revision history for Kubernetes-REST
    and after a failed cluster fetch no longer into IO::K8s's process-wide
    built-in map. A change to the passed hash after construction is not
    seen; change $api->resource_map instead.
- - ensure_only, log, list, get and watch croak on an argument they do not
-   take, naming it and the ones they do, before anything is applied or
-   sent: a misspelt propagation_policy no longer prunes with Background,
-   namespace no longer limits the prune to cluster scope, tail_lines no
-   longer fetches the whole log, label_selector no longer lists
-   unfiltered. get takes subresource, e.g. 'status'; name on list and
-   watch, which fetched the one object and read it as an empty list or a
-   single typeless event, croaks - select it with fieldSelector =>
-   'metadata.name=NAME'. ensure croaks on anything after its object. The
-   v0 List*, Read* and Watch* methods pass on only what the new methods
-   take and ignore their other parameters.
+ - ensure_only, log, list, get, watch, patch, patch_status, ensure_crd,
+   port_forward, exec and attach croak on an argument they do not take,
+   naming it and the ones they do, before anything is applied or sent: a
+   misspelt propagation_policy no longer prunes with Background, namespace
+   no longer limits the prune to cluster scope, tail_lines no longer
+   fetches the whole log, label_selector no longer lists unfiltered,
+   containr no longer runs exec in the default container. get takes
+   subresource, e.g. 'status'; name on list and watch, which fetched the
+   one object and read it as an empty list or a single typeless event,
+   croaks - select it with fieldSelector => 'metadata.name=NAME'. With an
+   object, patch and patch_status take only patch and type. ensure croaks
+   on anything after its object. The v0 List*, Read*, Watch* and Patch*
+   methods pass on only what the new methods take and ignore their other
+   parameters.
 
 1.108     2026-09-22 02:22:33Z
 
