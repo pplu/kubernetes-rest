@@ -60,6 +60,13 @@ Revision history for Kubernetes-REST
    context and response, plus is_not_found and is_conflict. It stringifies
    to exactly the old message, caller line included, so printing or
    matching $@ is unaffected; code that tests ref($@) sees an object now.
+ - delete takes propagationPolicy => 'Background', 'Foreground' or
+   'Orphan', sent as a query parameter, and croaks on any other argument
+   instead of ignoring it, so a misspelt option no longer silently orphans
+   a Job's Pods. ensure_only prunes with Background unless given another
+   propagationPolicy, and ensure deletes the failed Job it recreates with
+   Background. The v0 Delete* methods pass propagationPolicy on and still
+   ignore their other parameters.
 
 1.108     2026-09-22 02:22:33Z
 

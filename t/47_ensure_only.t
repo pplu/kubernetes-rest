@@ -28,8 +28,10 @@ my $HPA_V1 = '/apis/autoscaling/v1/namespaces/default/horizontalpodautoscalers';
 my $HPA_V2 = '/apis/autoscaling/v2/namespaces/default/horizontalpodautoscalers';
 
 # The mock matches on the path including its query string, and ensure_only
-# always lists with a labelSelector.
+# always lists with a labelSelector - and prunes with propagationPolicy
+# Background unless told otherwise (karr k49).
 my $SEL = q{?labelSelector=app=demo};
+my $BG  = q{?propagationPolicy=Background};
 
 sub requests_for {
     my ($io, $method) = @_;
@@ -74,7 +76,7 @@ sub mock_hpa_cluster {
         kind       => 'HorizontalPodAutoscalerList',
         items      => [ hpa_item('keep-me'), hpa_item('stale') ],
     });
-    $io->add_response('DELETE', "$list_path/stale",
+    $io->add_response('DELETE', "$list_path/stale$BG",
         { kind => 'Status', apiVersion => 'v1', status => 'Success' });
 }
 
@@ -120,7 +122,7 @@ subtest 'bare kinds entry: unchanged - the unexpected item goes, the expected st
         apiVersion => 'v1', kind => 'ConfigMapList',
         items      => [ $cm_item->('keep-me'), $cm_item->('stale') ],
     });
-    $io->add_response('DELETE', "$CM/stale",
+    $io->add_response('DELETE', "$CM/stale$BG",
         { kind => 'Status', apiVersion => 'v1', status => 'Success' });
 
     $api->ensure_only(
@@ -280,8 +282,8 @@ subtest 'Unstructured: the key uses the item Kind, not the class name' => sub {
         items      => [ $item->('Gadget', 'foo') ],
     });
     my $ok = { kind => 'Status', apiVersion => 'v1', status => 'Success' };
-    $io->add_response('DELETE', "$WIDGETS/stale", $ok);
-    $io->add_response('DELETE', "$GADGETS/foo", $ok);
+    $io->add_response('DELETE', "$WIDGETS/stale$BG", $ok);
+    $io->add_response('DELETE', "$GADGETS/foo$BG", $ok);
 
     my @applied = eval {
         $api->ensure_only(
@@ -335,8 +337,8 @@ subtest 'k39: the same Kind in another group is another resource' => sub {
         apiVersion => 'networking.istio.io/v1', kind => 'GatewayList',
         items      => [ gateway_item('web') ],
     });
-    $io->add_response('DELETE', "$API_GW/web",   $ok);
-    $io->add_response('DELETE', "$ISTIO_GW/web", $ok);
+    $io->add_response('DELETE', "$API_GW/web$BG",   $ok);
+    $io->add_response('DELETE', "$ISTIO_GW/web$BG", $ok);
 
     my @applied = eval {
         $api->ensure_only(
@@ -395,7 +397,7 @@ subtest 'k39: an Unstructured item keys on the group in its own apiVersion' => s
             %{ gateway_item('web') },
         } ],
     });
-    $io->add_response('DELETE', "$OTHER_GW/web",
+    $io->add_response('DELETE', "$OTHER_GW/web$BG",
         { kind => 'Status', apiVersion => 'v1', status => 'Success' });
 
     eval {
@@ -504,7 +506,7 @@ subtest 'k37: a Kind the cluster does not serve (list 404) is skipped silently' 
     my $api = failing_api();
     my $io  = $api->io;
     mock_cm_cluster($io, $CM_DEFAULT => [ cm_item('keep-me'), cm_item('stale') ]);
-    $io->add_response('DELETE', "$CM_DEFAULT/stale", $DELETED);
+    $io->add_response('DELETE', "$CM_DEFAULT/stale$BG", $DELETED);
     # No Role list registered: the mock answers 404, like a cluster that
     # does not serve the Kind.
 
@@ -525,7 +527,7 @@ subtest 'k37: a failed list warns with Kind, namespace and reason; the rest stil
     my $api = failing_api("GET $CM_DEFAULT$SEL" => 403);
     my $io  = $api->io;
     mock_cm_cluster($io, $CM_OTHER => [ cm_item('stale', 'other') ]);
-    $io->add_response('DELETE', "$CM_OTHER/stale", $DELETED);
+    $io->add_response('DELETE', "$CM_OTHER/stale$BG", $DELETED);
 
     my ($warnings, $applied) = ensure_only_warnings($api,
         objects    => [ keep_me_cm($api) ],
@@ -576,12 +578,12 @@ subtest 'k37: a kinds entry no class resolves warns, it is not taken for a 404' 
 };
 
 subtest 'k37: a delete 404 is silent, a failed delete warns and the prune goes on' => sub {
-    my $api = failing_api("DELETE $CM_DEFAULT/locked" => 403);
+    my $api = failing_api("DELETE $CM_DEFAULT/locked$BG" => 403);
     my $io  = $api->io;
     mock_cm_cluster($io, $CM_DEFAULT =>
         [ map { cm_item($_) } qw( keep-me gone locked stale ) ]);
     # No DELETE registered for gone: the mock answers 404 - already deleted.
-    $io->add_response('DELETE', "$CM_DEFAULT/stale", $DELETED);
+    $io->add_response('DELETE', "$CM_DEFAULT/stale$BG", $DELETED);
 
     my ($warnings, $applied) = ensure_only_warnings($api,
         objects    => [ keep_me_cm($api) ],
@@ -638,7 +640,7 @@ subtest 'k43: a qualified kinds entry of an unserved group/version prunes nothin
                 metadata   => { name => 'stale', namespace => 'default', labels => { app => 'demo' } },
             } ],
         });
-        $io->add_response('DELETE', "$WIDGETS/stale", $DELETED);
+        $io->add_response('DELETE', "$WIDGETS/stale$BG", $DELETED);
         my $api = Kubernetes::REST->new(
             server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
             credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),

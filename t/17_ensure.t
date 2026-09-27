@@ -306,7 +306,8 @@ sub batch_job {
         %{ batch_job('broken', status => { failed => 1 }) },
         metadata => { name => 'broken', namespace => 'default', resourceVersion => '4' },
     });
-    add('DELETE', "$JOBS/broken", { kind => 'Status', apiVersion => 'v1', status => 'Success' });
+    add('DELETE', "$JOBS/broken?propagationPolicy=Background",
+        { kind => 'Status', apiVersion => 'v1', status => 'Success' });
     add('POST', $JOBS, {
         %{ batch_job('broken') },
         metadata => { name => 'broken', namespace => 'default', resourceVersion => '10' },
@@ -496,12 +497,14 @@ sub served {
         "GET $JOBS/late"    => [ failure(404, 'NotFound'),
                                  served(batch_job('late', status => { failed => 1 }), '11') ],
         "POST $JOBS"        => [ failure(409, 'AlreadyExists'), served(batch_job('late'), '12') ],
-        "DELETE $JOBS/late" => [ [ 200, { kind => 'Status', apiVersion => 'v1', status => 'Success' } ] ],
+        "DELETE $JOBS/late?propagationPolicy=Background"
+                            => [ [ 200, { kind => 'Status', apiVersion => 'v1', status => 'Success' } ] ],
     );
     my $result = eval { $sapi->ensure(batch_job('late')) };
     is($@, '', 'Job after 409, failed: ensure does not die');
     is_deeply(calls_since($sapi->io, 0),
-        [ "GET $JOBS/late", "POST $JOBS", "GET $JOBS/late", "DELETE $JOBS/late", "POST $JOBS" ],
+        [ "GET $JOBS/late", "POST $JOBS", "GET $JOBS/late",
+          "DELETE $JOBS/late?propagationPolicy=Background", "POST $JOBS" ],
         'Job after 409, failed: deleted and recreated, no PUT');
     is($result && $result->metadata->resourceVersion, '12',
         'Job after 409, failed: the recreated object is returned');

@@ -147,7 +147,12 @@ sub _dispatch {
         my $body = $params->{body} // croak "replace requires 'body' parameter";
         return $api->update($body);
     } elsif ($action eq 'delete') {
-        return $api->delete($class, %$params);
+        # delete croaks on arguments it does not take. The v0 parameters it
+        # has no use for (body, gracePeriodSeconds, dryRun, ...) were ignored
+        # all along; they stay ignored rather than break v0 callers.
+        my %args = map { exists $params->{$_} ? ($_ => $params->{$_}) : () }
+            qw(name namespace propagationPolicy);
+        return $api->delete($class, %args);
     } elsif ($action eq 'patch') {
         return $api->patch($class, %$params);
     } elsif ($action eq 'watch') {

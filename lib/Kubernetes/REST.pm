@@ -1922,7 +1922,42 @@ sub delete {
     # or shorthand:
     $api->delete('Pod', 'my-pod', namespace => 'default');
 
+    # a Job, and the Pods it created with it:
+    $api->delete($job, propagationPolicy => 'Background');
+    $api->delete('Job', 'nightly', namespace => 'default',
+        propagationPolicy => 'Foreground');
+
 Delete a resource. Returns true on success.
+
+The optional C<propagationPolicy> decides what happens to the objects the
+deleted one owns, and is sent as the C<propagationPolicy> query parameter
+(a C<DeleteOptions> field):
+
+=over 4
+
+=item C<Background>
+
+The object is deleted at once; the garbage collector deletes its dependents
+afterwards.
+
+=item C<Foreground>
+
+The object stays, with a C<deletionTimestamp>, until its dependents are
+deleted.
+
+=item C<Orphan>
+
+The dependents are kept and lose their owner reference.
+
+=back
+
+Without it the server applies the resource's default - for a C<batch/v1>
+C<Job> that is C<Orphan>, which leaves its Pods behind. Any other value
+croaks, listing the three.
+
+Any argument other than C<name>, C<namespace> and C<propagationPolicy> -
+with an object, other than C<propagationPolicy> - croaks before anything is
+sent, naming it: a misspelt option is not ignored.
 
 =cut
 
@@ -1935,25 +1970,34 @@ Delete a resource. Returns true on success.
 # delete() up to the response, unchecked: returns the resolved class and the
 # raw response, for the same reason as _list_request - ensure_only() treats a
 # 404 (already gone) differently from a failure.
+#
+# propagationPolicy goes out as the query parameter the API server reads
+# DeleteOptions from. Any other argument croaks before anything is sent: a
+# misspelt propagationPolicy that was silently dropped would leave a Job's
+# Pods orphaned (karr k49).
 sub _delete_request {
     my ($self, $class_or_object, @rest) = @_;
 
-    my ($class, $name, $namespace);
+    my ($class, $name, $namespace, %args);
 
     if (ref($class_or_object)) {
-        # Object passed
+        # Object passed: delete($object), delete($object, propagationPolicy => ...)
         my $object = $class_or_object;
+        croak "Invalid arguments to delete()" if @rest % 2;
+        %args = @rest;
+        $self->_croak_unknown_args('delete', \%args, 'propagationPolicy');
+        $self->_propagation_policy_or_croak('delete', $args{propagationPolicy});
         $class = ref($object);
         my $metadata = $object->metadata or croak "object must have metadata";
         $name = $metadata->name or croak "object must have metadata.name";
         $namespace = $metadata->namespace;
     } else {
         # Support: delete('Kind', 'name'), delete('Kind', 'name', namespace => 'ns'),
-        #          delete('Kind', name => 'name'), delete('Kind', name => 'name', namespace => 'ns')
-        my %args;
+        #          delete('Kind', name => 'name'), delete('Kind', name => 'name', namespace => 'ns'),
+        #          each with propagationPolicy => ... as well
         if (@rest == 1) {
             $args{name} = $rest[0];
-        } elsif (@rest >= 2 && $rest[0] !~ /^(name|namespace)$/) {
+        } elsif (@rest >= 2 && $rest[0] !~ /^(name|namespace|propagationPolicy)$/) {
             # First arg is name, rest are key=value pairs
             $args{name} = shift @rest;
             %args = (%args, @rest);
@@ -1962,6 +2006,9 @@ sub _delete_request {
         } else {
             croak "Invalid arguments to delete()";
         }
+        $self->_croak_unknown_args('delete', \%args,
+            qw(name namespace propagationPolicy));
+        $self->_propagation_policy_or_croak('delete', $args{propagationPolicy});
 
         $class = $self->_expand_class_or_croak($class_or_object);
         $name = $args{name} or croak "name required for delete";
@@ -1970,7 +2017,34 @@ sub _delete_request {
 
     my $path = $self->_build_path($class, name => $name, namespace => $namespace,
         $self->_unstructured_hint($class, $class_or_object));
-    return ($class, $self->_request('DELETE', $path));
+    my $policy = $args{propagationPolicy};
+    return ($class, defined $policy
+        ? $self->_request('DELETE', $path, undef,
+            parameters => { propagationPolicy => $policy })
+        : $self->_request('DELETE', $path));
+}
+
+# The propagationPolicy values DeleteOptions takes.
+my @PROPAGATION_POLICIES = qw(Background Foreground Orphan);
+
+# Croak unless $policy is undef (none given) or one of @PROPAGATION_POLICIES.
+# $label only appears in the message.
+sub _propagation_policy_or_croak {
+    my ($self, $label, $policy) = @_;
+    return $policy if !defined $policy || grep { $_ eq $policy } @PROPAGATION_POLICIES;
+    croak "Unknown propagationPolicy '$policy' for $label() (use: "
+        . join(', ', @PROPAGATION_POLICIES) . ")";
+}
+
+# Croak on the first key of %$args that is not in @allowed, naming it and
+# what is allowed, instead of ignoring it. $label only appears in the message.
+sub _croak_unknown_args {
+    my ($self, $label, $args, @allowed) = @_;
+    my %allowed = map { $_ => 1 } @allowed;
+    my ($unknown) = sort grep { !$allowed{$_} } keys %$args;
+    return unless defined $unknown;
+    croak "Unknown argument '$unknown' to $label() (allowed: "
+        . join(', ', @allowed) . ")";
 }
 
 # Shared hashref handling for ensure() and ensure_only(): turns a manifest into
@@ -2075,8 +2149,8 @@ Special-cases for kinds with server-side mutation constraints:
 creation, so an existing PVC is returned unchanged.
 
 =item * C<Job> (C<batch/v1>) - spec is immutable; an existing Job that is
-active or has succeeded is returned unchanged. A failed Job is deleted and
-recreated.
+active or has succeeded is returned unchanged. A failed Job is deleted with
+C<propagationPolicy> C<Background>, so its Pods go with it, and recreated.
 
 =back
 
@@ -2138,7 +2212,10 @@ object, and so is a C<Job> under any apiVersion other than C<batch/v1>.
         # no status accessor, its status rides in the unknown-fields bag.
         my $status = $existing->TO_JSON->{status} || {};
         return $existing if $status->{succeeded} || $status->{active};
-        eval { $self->delete($existing) };
+        # Background, or the failed Job's Pods would be orphaned - the API
+        # default for a Job (karr k49) - and the old Job is gone at once, so
+        # the create does not run into it.
+        eval { $self->delete($existing, propagationPolicy => 'Background') };
         return $self->create($object);
     }
     $object->metadata->resourceVersion($existing->metadata->resourceVersion);
@@ -2213,6 +2290,11 @@ gone and is silent too. Promote the warnings to a fatal error with
 C<< local $SIG{__WARN__} = sub { die @_ } >> if a partial prune is
 unacceptable to you.
 
+Pruned objects are deleted with C<propagationPolicy> C<Background> (see
+L</delete>), as C<kubectl delete> does, so a pruned Job takes its Pods with
+it. Pass C<< propagationPolicy => 'Foreground' >> or C<'Orphan'> to change
+that; any other value croaks before anything is applied.
+
 Returns the list of applied objects (from L</ensure_all>), whether or not the
 pruning was complete.
 
@@ -2222,6 +2304,10 @@ pruning was complete.
     my @objects    = @{$args{objects} || []};
     my @kinds      = @{$args{kinds} || []};
     my @namespaces = @{$args{namespaces} || [undef]};
+    # Background by default, as kubectl delete does: a pruned Job would
+    # otherwise orphan its Pods (karr k49). Checked before anything is applied.
+    my $propagation = $self->_propagation_policy_or_croak('ensure_only',
+        $args{propagationPolicy} // 'Background');
 
     for my $obj (@objects) {
         $obj = $self->_manifest_to_object('ensure_only', $obj) if ref($obj) eq 'HASH';
@@ -2282,7 +2368,8 @@ pruning was complete.
             for my $item (@{$list->items}) {
                 next if $expected{ $key_of->($item) };
                 next if eval {
-                    my ($class, $response) = $self->_delete_request($item);
+                    my ($class, $response) = $self->_delete_request($item,
+                        propagationPolicy => $propagation);
                     $response->status == 404
                         || $self->_check_response($response, "delete $class");
                 };
