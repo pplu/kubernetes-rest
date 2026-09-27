@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-27T21:01:35Z
+claimed_by: backlog-6
+class: standard
+completed: 2026-09-27T21:01:31Z
+created: 2026-09-27T20:05:55Z
+id: 53
+priority: medium
+started: 2026-09-27T20:20:55Z
+status: done
+tags:
+- ensure
+title: ensure_only ignoriert unbekannte Options-Keys
+updated: 2026-09-27T21:01:35Z
+---
+
+Gefunden bei k49 (2026-09-27). ensure_only prüft seine Optionen nicht; ein Tippfehler propagation_policy => 'Orphan' prunt still mit Background und löscht Abhängige. Unbekannte Keys croaken lassen wie bei delete seit k49, vor jedem Request.
+
+Commit fba7273
