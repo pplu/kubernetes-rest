@@ -99,7 +99,8 @@ answers with legacy discovery and gets a request per group/version; one answerin
 error status is skipped with a `carp`, a 404 silently, k63), cached per instance
 in `_discovery` and dropped by `invalidate_discovery`. If reading it fails, the map falls
 back to `IO::K8s->default_resource_map` with a `carp` — a failed fetch degrades, it does
-not die. `_resource_map_from_catalog` skips `*List` kinds, gives a Kind to the version the
+not die; that carp names the caller's line through `_carp_past_builders` (k64).
+`_resource_map_from_catalog` skips `*List` kinds, gives a Kind to the version the
 cluster marks preferred (D17), records only classes IO::K8s actually ships (D12/D13 — a
 foreign CRD group resolves through `with` providers, AutoGen and the Unstructured fallback
 instead), and special-cases the two groups whose IO::K8s namespace does not follow

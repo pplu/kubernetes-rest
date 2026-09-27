@@ -115,6 +115,10 @@ Revision history for Kubernetes-REST
    group/version answers with an HTTP error, naming its apiVersion and the
    error, instead of silently leaving its Kinds out of the resource map; a
    404 stays silent and the other groups are still read.
+ - The warning that the resource map falls back to the built-in one names
+   the line of the call that needed the map - resolving a name, inflating
+   a response, a method delegated to IO::K8s - instead of a line inside
+   Kubernetes/REST.pm.
 
 1.108     2026-09-22 02:22:33Z
 

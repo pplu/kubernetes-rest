@@ -276,6 +276,10 @@ has resource_map => (
 
 Hashref mapping short resource names to L<IO::K8s> class paths. By default loads dynamically from the cluster (if C<resource_map_from_cluster> is true) or uses L<IO::K8s> built-in map.
 
+When the cluster's discovery cannot be read, the built-in map is used
+instead, with a warning that names the reason - at the line of the call that
+first needed the map, whether that read C<resource_map> or resolved a name.
+
 Override for custom resources:
 
     resource_map => {
@@ -1292,12 +1296,16 @@ definition for such a name.
     return $class->compare_to_schema($schema);
 }
 
-# Internal wrapper with fallback for lazy loading
+# Internal wrapper with fallback for lazy loading. It runs in the
+# resource_map builder, most often reached through the k8s one: the warning
+# goes through _carp_past_builders to name the caller's line, not the line of
+# the k8s builder that asked for the map (karr k64).
 sub _load_resource_map_from_cluster {
     my ($self) = @_;
     my $map = eval { $self->fetch_resource_map };
     if ($@) {
-        carp 'Falling back to the built-in resource map: ' . $self->_error_reason($@);
+        $self->_carp_past_builders('Falling back to the built-in resource map: '
+            . $self->_error_reason($@));
         return IO::K8s->default_resource_map;
     }
     return $map;
