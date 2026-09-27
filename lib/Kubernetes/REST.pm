@@ -303,6 +303,13 @@ class is answered from that map directly. Only a name the built-in map
 cannot answer falls through to the cluster-backed map, fetching it on first
 use exactly as before.
 
+The result is a plain class name, without a C<+>. Handed back to a method
+that resolves names again - L<IO::K8s/struct_to_object>,
+L<IO::K8s/json_to_object> - a single-segment class of your own (C<'+Gizmo'>
+in the resource map, returned as C<'Gizmo'>) reads as the Kind C<Gizmo>
+there. Prefix it with C<+> when you do that yourself; this client's own
+inflation already does.
+
 =cut
 
     if ($self->resource_map_from_cluster && !$self->_has_resource_map
@@ -1130,19 +1137,38 @@ sub _check_response {
     return $response;
 }
 
+# The name to hand IO::K8s's json_to_object()/struct_to_object() for $class.
+# Both resolve a name again, and a single-segment class of your own - '+Gizmo'
+# in the resource_map, which expand_class returns as 'Gizmo' - reads to them
+# as a Kind: IO::K8s::Gizmo, or whatever class the map gives the Kind Gizmo
+# (karr k42). A name that already is a loaded IO::K8s class, which is what
+# expand_class resolved and _build_path loaded, therefore goes over as
+# '+Class', which IO::K8s takes exactly. Any other name - a short or qualified
+# one a seam caller passed - is left for IO::K8s to resolve. The role check
+# keeps an unrelated package that merely shares a Kind's name from being
+# taken for the class.
+sub _exact_class {
+    my ($self, $class) = @_;
+    return "+$class"
+        if defined $class && !ref $class && length $class && $class !~ /\A\+/
+            && $class->can('does') && $class->does('IO::K8s::Role::Resource');
+    return $class;
+}
+
 sub _inflate_object {
     my ($self, $class, $response) = @_;
-    return $self->k8s->json_to_object($class, $response->content);
+    return $self->k8s->json_to_object($self->_exact_class($class), $response->content);
 }
 
 sub _inflate_list {
     my ($self, $class, $response) = @_;
     my $struct = $self->_json->decode($response->content);
     my $items = $struct->{items} // [];
+    my $exact_class = $self->_exact_class($class);
     my (@objects, @dropped);
     for my $i (0 .. $#$items) {
         my $item = $items->[$i];
-        my $obj = eval { $self->k8s->struct_to_object($class, $item) };
+        my $obj = eval { $self->k8s->struct_to_object($exact_class, $item) };
         if (defined $obj) {
             push @objects, $obj;
             next;
@@ -1173,6 +1199,7 @@ sub _process_watch_chunk {
     my ($self, $class, $buffer_ref, $chunk) = @_;
     $$buffer_ref .= $chunk;
 
+    my $exact_class = $self->_exact_class($class);
     my @events;
     while ($$buffer_ref =~ s/^([^\n]*)\n//) {
         my $line = $1;
@@ -1195,7 +1222,7 @@ sub _process_watch_chunk {
         if ($type eq 'ERROR') {
             $object = $raw_object;
         } else {
-            $object = eval { $self->k8s->struct_to_object($class, $raw_object) }
+            $object = eval { $self->k8s->struct_to_object($exact_class, $raw_object) }
                 // $raw_object;
         }
 
@@ -1323,6 +1350,13 @@ sub inflate_object {
     my $pod = $api->inflate_object($class, $response);
 
 Decode the JSON response body and inflate it into a typed L<IO::K8s> object.
+
+C<$class> is normally what L</expand_class> resolved and L</build_path>
+loaded. A loaded L<IO::K8s> class is inflated as exactly that class - also a
+single-segment class of your own, registered as C<'+Gizmo'>, which
+L<IO::K8s> would otherwise read as the Kind C<Gizmo>. Any other name, short
+or qualified, is resolved first. L</inflate_list> and
+L</process_watch_chunk> treat C<$class> the same way.
 
 =cut
 
@@ -1802,20 +1836,23 @@ sub _delete_request {
 # class serves croaks instead of falling back to the version the bare Kind
 # happens to map to (HorizontalPodAutoscaler alone means autoscaling/v2, a
 # different endpoint and schema than an autoscaling/v1 manifest). Without an
-# apiVersion the bare Kind resolves as it always did. $label only appears in
-# croak messages.
+# apiVersion the bare Kind resolves as it always did. Either way the class is
+# resolved here, so it goes to struct_to_object with its '+': IO::K8s takes it
+# as that exact class instead of resolving the name again (see _exact_class;
+# the class need not be loaded yet, so this does not ask it). $label only
+# appears in croak messages.
 sub _manifest_to_object {
     my ($self, $label, $manifest) = @_;
     my $kind = $manifest->{kind} or croak "$label: hashref must have 'kind'";
     my $api_version = $manifest->{apiVersion};
 
-    return $self->k8s->struct_to_object($self->expand_class($kind), $manifest)
+    return $self->k8s->struct_to_object('+' . $self->expand_class($kind), $manifest)
         unless defined $api_version && length $api_version;
 
     my $class = $self->expand_class($kind, $api_version)
         // croak "$label: no IO::K8s class for apiVersion '$api_version', kind '$kind'"
             . " (add it to resource_map if it is a CRD)";
-    return $self->k8s->struct_to_object($class, $manifest);
+    return $self->k8s->struct_to_object("+$class", $manifest);
 }
 
 # The apiVersion and Kind an object is an instance of, for ensure() and
