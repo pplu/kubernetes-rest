@@ -4,8 +4,9 @@ Revision history for Kubernetes-REST
 
  - ensure_only no longer deletes the objects it has just applied when a
    kinds entry is qualified ('autoscaling/v1/HorizontalPodAutoscaler') or
-   resolves to IO::K8s::Unstructured; listed items match on their own Kind,
-   namespace and name.
+   resolves to IO::K8s::Unstructured; listed items match on their own API
+   group, Kind, namespace and name, so a labelled resource of the same Kind
+   in another group (Istio vs Gateway API Gateway) is now deleted too.
  - ensure and ensure_only resolve a hashref manifest through its apiVersion:
    an autoscaling/v1 HorizontalPodAutoscaler is no longer sent as
    autoscaling/v2. An apiVersion no known class serves now croaks, naming

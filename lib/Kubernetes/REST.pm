@@ -1976,10 +1976,15 @@ C<namespaces> is omitted, only cluster-scoped resources are scanned.
 
 C<objects> takes typed objects or hashrefs, resolved as in L</ensure>. A
 C<kinds> entry may be a bare Kind or a qualified C<group/version/Kind> (see
-L</expand_class>). A listed resource counts as present when its Kind,
-namespace and name match an object in C<objects>; the version is not
-compared, so an object applied as C<autoscaling/v1> is kept when the listing
-goes through C<autoscaling/v2>.
+L</expand_class>). A listed resource counts as present when its API group,
+Kind, namespace and name match an object in C<objects> - group and Kind come
+from a typed object's C<api_version> and C<kind>, or from an
+L<IO::K8s::Unstructured> object's C<apiVersion> and C<kind> fields. The
+same Kind name in another group is another resource: with Istio's
+C<networking.istio.io> Gateway in C<objects>, a labelled Gateway API
+C<gateway.networking.k8s.io> Gateway of the same name is deleted. The version
+is not compared, so an object applied as C<autoscaling/v1> is kept when the
+listing goes through C<autoscaling/v2>.
 
 Returns the list of applied objects (from L</ensure_all>).
 
@@ -1996,19 +2001,20 @@ Returns the list of applied objects (from L</ensure_all>).
 
     my @results = $self->ensure_all(@objects);
 
-    # (Kind, namespace, name), taken from the object on both sides - never from
-    # the kinds entry, which may be qualified ('autoscaling/v1/...') and would
-    # then match nothing, deleting the objects just applied. The Kind is the
-    # object's own kind(): class-derived for a typed object, instance data for
-    # IO::K8s::Unstructured, whose class name says nothing about its Kind.
-    # No version in the key: the same resource listed through another version's
-    # class is still the same resource.
+    # (group, Kind, namespace, name), taken from the object on both sides -
+    # never from the kinds entry, which may be qualified ('autoscaling/v1/...')
+    # and would then match nothing, deleting the objects just applied. Group
+    # and Kind come from _api_version_and_kind: class-derived for a typed
+    # object, instance data for IO::K8s::Unstructured. The group keeps the same
+    # Kind name in two groups apart (Istio's and the Gateway API's Gateway);
+    # the core group is ''. No version in the key: the same resource listed
+    # through another version's class is still the same resource.
     my $key_of = sub {
         my ($obj) = @_;
-        my $kind = $obj->can('kind') ? $obj->kind : undef;
-        ($kind = ref $obj) =~ s/.*::// unless defined $kind;
+        my ($api_version, $kind) = $self->_api_version_and_kind($obj);
+        my ($group) = $api_version =~ m{\A(.*)/[^/]*\z};
         my $metadata = $obj->metadata;
-        return join("\0", $kind, $metadata->namespace // '', $metadata->name);
+        return join("\0", $group // '', $kind, $metadata->namespace // '', $metadata->name);
     };
     my %expected = map { $key_of->($_) => 1 } @objects;
 

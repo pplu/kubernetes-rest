@@ -9,6 +9,8 @@
 # 'group/version/Kind' entry never matched, so the applied objects went too.
 # karr k34: a hashref manifest resolves through its apiVersion, not through the
 # bare Kind's default version.
+# karr k39: the key carries the API group - the same Kind name in two groups
+# is two resources - but still no version.
 
 use strict;
 use warnings;
@@ -295,6 +297,119 @@ subtest 'Unstructured: the key uses the item Kind, not the class name' => sub {
     is_deeply([ sort @{ requests_for($io, 'DELETE') } ],
         [ "$GADGETS/foo", "$WIDGETS/stale" ],
         'the applied Widget foo stays; the stale Widget and the same-named Gadget go');
+};
+
+# ---------------------------------------------------------------------------
+# karr k39: Istio's Gateway (networking.istio.io) and the Gateway API's
+# Gateway (gateway.networking.k8s.io) share a Kind name. With the same
+# namespace and name they are still two resources: a labelled one that is not
+# in the object set must go, whichever group the applied one is in.
+# ---------------------------------------------------------------------------
+my $ISTIO_GW = '/apis/networking.istio.io/v1/namespaces/default/gateways';
+my $API_GW   = '/apis/gateway.networking.k8s.io/v1/namespaces/default/gateways';
+
+sub gateway_item {
+    my ($name) = @_;
+    return {
+        metadata => { name => $name, namespace => 'default', labels => { app => 'demo' } },
+        spec     => { selector => 'ingress' },
+    };
+}
+
+subtest 'k39: the same Kind in another group is another resource' => sub {
+    my $api = mock_api();
+    my $io  = $api->io;
+    my $ok  = { kind => 'Status', apiVersion => 'v1', status => 'Success' };
+
+    $io->add_response('POST', $API_GW, {
+        apiVersion => 'gateway.networking.k8s.io/v1', kind => 'Gateway',
+        %{ gateway_item('web') },
+    });
+    # Items carry no kind/apiVersion, as in a real list response - the group
+    # comes from the class each collection was listed through.
+    $io->add_response('GET', $API_GW . $SEL, {
+        apiVersion => 'gateway.networking.k8s.io/v1', kind => 'GatewayList',
+        items      => [ gateway_item('web') ],
+    });
+    $io->add_response('GET', $ISTIO_GW . $SEL, {
+        apiVersion => 'networking.istio.io/v1', kind => 'GatewayList',
+        items      => [ gateway_item('web') ],
+    });
+    $io->add_response('DELETE', "$API_GW/web",   $ok);
+    $io->add_response('DELETE', "$ISTIO_GW/web", $ok);
+
+    my @applied = eval {
+        $api->ensure_only(
+            label      => 'app=demo',
+            objects    => [ $api->k8s->new_object('+My::GatewayApi::Gateway', gateway_item('web')) ],
+            kinds      => [qw( +My::GatewayApi::Gateway +My::Istio::Gateway )],
+            namespaces => ['default'],
+        );
+    };
+    is($@, '', 'ensure_only does not die');
+    is(scalar @applied, 1, 'one applied object returned');
+
+    is_deeply(requests_for($io, 'GET'),
+        [ "$API_GW/web", $API_GW, $ISTIO_GW ],
+        'both groups were listed');
+    is_deeply(requests_for($io, 'DELETE'), [ "$ISTIO_GW/web" ],
+        'the Istio Gateway web goes; the applied Gateway API Gateway web stays');
+};
+
+subtest 'k39: an Unstructured item keys on the group in its own apiVersion' => sub {
+    # The applied object is a typed Istio Gateway; the bare 'Gateway' entry
+    # resolves through discovery to Unstructured in another group, whose item
+    # carries its group in its apiVersion. Same Kind, namespace and name -
+    # different resource.
+    my $io = Test::Kubernetes::Mock::IO->new;
+    $io->add_response('GET', '/api', \%CORE_DISCOVERY);
+    $io->add_response('GET', '/apis', {
+        kind  => 'APIGroupDiscoveryList',
+        items => [ {
+            metadata => { name => 'gateway.example.com' },
+            versions => [ {
+                version   => 'v1',
+                resources => [ {
+                    resource     => 'gateways',
+                    responseKind => { group => 'gateway.example.com', version => 'v1', kind => 'Gateway' },
+                    scope        => 'Namespaced',
+                } ],
+            } ],
+        } ],
+    });
+    my $api = Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        io          => $io,
+    );
+
+    my $OTHER_GW = '/apis/gateway.example.com/v1/namespaces/default/gateways';
+    $io->add_response('POST', $ISTIO_GW, {
+        apiVersion => 'networking.istio.io/v1', kind => 'Gateway',
+        %{ gateway_item('web') },
+    });
+    $io->add_response('GET', $OTHER_GW . $SEL, {
+        apiVersion => 'gateway.example.com/v1', kind => 'GatewayList',
+        items      => [ {
+            apiVersion => 'gateway.example.com/v1', kind => 'Gateway',
+            %{ gateway_item('web') },
+        } ],
+    });
+    $io->add_response('DELETE', "$OTHER_GW/web",
+        { kind => 'Status', apiVersion => 'v1', status => 'Success' });
+
+    eval {
+        $api->ensure_only(
+            label      => 'app=demo',
+            objects    => [ $api->k8s->new_object('+My::Istio::Gateway', gateway_item('web')) ],
+            kinds      => ['Gateway'],
+            namespaces => ['default'],
+        );
+    };
+    is($@, '', 'ensure_only does not die');
+    is_deeply(requests_for($io, 'POST'), [ $ISTIO_GW ], 'the Istio Gateway was applied');
+    is_deeply(requests_for($io, 'DELETE'), [ "$OTHER_GW/web" ],
+        'the Unstructured gateway.example.com Gateway web goes');
 };
 
 done_testing;
