@@ -60,6 +60,9 @@ Revision history for Kubernetes-REST
    context and response, plus is_not_found and is_conflict. It stringifies
    to exactly the old message, caller line included, so printing or
    matching $@ is unaffected; code that tests ref($@) sees an object now.
+   The /openapi/v2 fetch behind schema_for and compare_schema dies with one
+   too: "Could not fetch OpenAPI spec: 503" becomes "Kubernetes API error
+   (fetch OpenAPI spec): 503 <body>", at the caller's line.
  - delete takes propagationPolicy => 'Background', 'Foreground' or
    'Orphan', sent as a query parameter, and croaks on any other argument
    instead of ignoring it, so a misspelt option no longer silently orphans

@@ -146,7 +146,7 @@ has k8s => (
             # openapi_spec is an eager hashref on IO::K8s: handing it over here
             # only once it has actually been fetched keeps constructing/using
             # the inner instance from forcing the /openapi/v2 download (D12).
-            # Until then it is absent; _openapi_spec's builder rebuilds this
+            # Until then it is absent; _fetch_openapi_spec rebuilds this
             # instance once the spec exists.
             ($self->_has_openapi_spec ? (openapi_spec => $self->_openapi_spec) : ()),
         );
@@ -1058,27 +1058,34 @@ L<Future> of the response:
     return 1;
 }
 
-# Fetch full OpenAPI spec from cluster (cached). Kept lazy on purpose: the
-# only /openapi/v2 download in the client, paid for by schema_for/compare_schema
-# and (once resolution needs it) AutoGen, never by construction.
+# The full OpenAPI spec from the cluster, once _fetch_openapi_spec has fetched
+# it (cached). The only /openapi/v2 download in the client, paid for by
+# schema_for/compare_schema and (once resolution needs it) AutoGen, never by
+# construction.
 has _openapi_spec => (
-    is => 'lazy',
+    is => 'ro',
     predicate => '_has_openapi_spec',
-    builder => sub {
-        my $self = shift;
-        my $response = $self->_request('GET', '/openapi/v2');
-        croak "Could not fetch OpenAPI spec: " . $response->status if $response->status >= 400;
-        my $spec = $self->_json->decode($response->content);
-        # D12: the inner IO::K8s was built without a spec (so building it never
-        # forced this fetch). Now that the spec exists, drop the cached instance
-        # so its next build passes it through as openapi_spec for AutoGen -- the
-        # same rebuild-on-next-use pattern invalidate_discovery uses. The clear
-        # only marks it for rebuild; nothing here re-reads k8s, so the rebuild
-        # happens after Moo has stored this spec, not during the builder.
-        $self->_clear_k8s if $self->_has_k8s;
-        return $spec;
-    },
+    writer => '_set_openapi_spec',
 );
+
+# Fetch /openapi/v2 and keep it. Not a lazy builder: an error status dies as
+# an APIError like any other checked response, naming the caller's line (karr
+# k55) - and a Moo-generated accessor between the caller and the check breaks
+# Carp's trust chain, so from a builder it named a line in here. A failed
+# fetch keeps nothing, and the next use fetches again.
+sub _fetch_openapi_spec {
+    my ($self) = @_;
+    my $response = $self->_request('GET', '/openapi/v2');
+    $self->_check_response($response, 'fetch OpenAPI spec');
+    my $spec = $self->_json->decode($response->content);
+    $self->_set_openapi_spec($spec);
+    # D12: the inner IO::K8s was built without a spec (so building it never
+    # forced this fetch). Now that the spec exists, drop the cached instance
+    # so its next build passes it through as openapi_spec for AutoGen -- the
+    # same rebuild-on-next-use pattern invalidate_discovery uses.
+    $self->_clear_k8s if $self->_has_k8s;
+    return $spec;
+}
 
 # Get schema definition for a specific type
 # $kind can be: 'Pod', 'IO::K8s::Api::Core::V1::Pod', or OpenAPI name like 'io.k8s.api.core.v1.Pod'
@@ -1094,9 +1101,14 @@ Get the OpenAPI schema definition for a resource type from the cluster. Accepts 
 Returns a hashref with the OpenAPI v2 schema definition, or C<undef> when
 there is none - also for a name that resolves to no class at all.
 
+The spec is fetched from C</openapi/v2> on first use and kept. An HTTP error
+status there dies with a L<Kubernetes::REST::APIError> whose C<context> is
+C<fetch OpenAPI spec>, as does L</compare_schema>; nothing is kept, and the
+next call fetches again.
+
 =cut
 
-    my $spec = $self->_openapi_spec;
+    my $spec = $self->_has_openapi_spec ? $self->_openapi_spec : $self->_fetch_openapi_spec;
     my $defs = $spec->{definitions} // {};
 
     # If it's already an OpenAPI definition name
@@ -2785,6 +2797,12 @@ there:
         }
     }
 
+That croak is a plain string, not a L<Kubernetes::REST::APIError>: the watch
+request itself was answered with C<200>, and the C<410> arrived inside the
+stream as an C<ERROR> event, which C<on_event> has already been given. It
+calls for a re-list, not error handling. An HTTP error status on the watch
+request itself dies with an L<Kubernetes::REST::APIError> as usual.
+
 =cut
 
     my $on_event = delete $args{on_event}
@@ -3337,8 +3355,11 @@ Besides C<code>, C<is_not_found> and C<is_conflict> it has the C<reason>,
 C<message> and C<details> of the Kubernetes C<Status> body, the decoded
 C<body>, the C<context> and the C<response>.
 
-Everything else croaks with a plain string: invalid arguments, a resource
-name nothing resolves, a failed discovery or OpenAPI fetch, an expired watch.
+That includes the C</openapi/v2> fetch behind C<schema_for> and
+C<compare_schema>. Everything else croaks with a plain string: invalid
+arguments, a resource name nothing resolves, a failed discovery, and an
+expired watch - its C<410> arrives as an C<ERROR> event in a stream the
+server answered with C<200>, not as an HTTP status (see L</watch>).
 
 =head1 UPGRADING FROM 0.02
 
