@@ -7,6 +7,8 @@
 # karr k33: the Kind of a listed item used to come from the `kinds` string, the
 # Kind of an expected object from its class. A qualified
 # 'group/version/Kind' entry never matched, so the applied objects went too.
+# karr k34: a hashref manifest resolves through its apiVersion, not through the
+# bare Kind's default version.
 
 use strict;
 use warnings;
@@ -148,6 +150,48 @@ subtest 'the key is the Kind, not the version: a v1 object survives a bare (v2) 
 
     is_deeply(requests_for($io, 'DELETE'), [ "$HPA_V2/stale" ],
         'keep-me listed through v2 is still recognised');
+};
+
+subtest 'k34: a hashref in objects resolves through its apiVersion' => sub {
+    my $api = mock_api();
+    my $io  = $api->io;
+    mock_hpa_cluster($io, $HPA_V1, 'autoscaling/v1');
+
+    my @applied = eval {
+        $api->ensure_only(
+            label      => 'app=demo',
+            objects    => [ hpa_v1_manifest('keep-me') ],
+            kinds      => ['autoscaling/v1/HorizontalPodAutoscaler'],
+            namespaces => ['default'],
+        );
+    };
+    is($@, '', 'ensure_only does not die');
+    isa_ok($applied[0], 'IO::K8s::Api::Autoscaling::V1::HorizontalPodAutoscaler',
+        'applied object');
+    is_deeply(requests_for($io, 'POST'), [ $HPA_V1 ],
+        'created on the autoscaling/v1 endpoint, not the v2 default');
+    is_deeply(requests_for($io, 'DELETE'), [ "$HPA_V1/stale" ],
+        'the applied manifest is recognised in the listing');
+};
+
+subtest 'k34: an apiVersion no class serves croaks before anything is applied' => sub {
+    my $api = mock_api();
+    my $io  = $api->io;
+
+    my $manifest = hpa_v1_manifest('keep-me');
+    $manifest->{apiVersion} = 'autoscaling/v9';
+
+    eval {
+        $api->ensure_only(
+            label   => 'app=demo',
+            objects => [ $api->k8s->new_object('ConfigMap',
+                metadata => { name => 'first', namespace => 'default' }), $manifest ],
+            kinds   => ['HorizontalPodAutoscaler'],
+        );
+    };
+    like($@, qr{autoscaling/v9}, 'the error names the apiVersion');
+    like($@, qr{HorizontalPodAutoscaler}, 'the error names the Kind');
+    is_deeply($io->requests, [], 'no request was sent - not even for the valid object');
 };
 
 # ---------------------------------------------------------------------------

@@ -1770,6 +1770,28 @@ Delete a resource. Returns true on success.
     return 1;
 }
 
+# Shared hashref handling for ensure() and ensure_only(): turns a manifest into
+# a typed object. A manifest's apiVersion is authoritative - with one, the
+# class is resolved as that exact group/version/Kind, and an apiVersion no
+# class serves croaks instead of falling back to the version the bare Kind
+# happens to map to (HorizontalPodAutoscaler alone means autoscaling/v2, a
+# different endpoint and schema than an autoscaling/v1 manifest). Without an
+# apiVersion the bare Kind resolves as it always did. $label only appears in
+# croak messages.
+sub _manifest_to_object {
+    my ($self, $label, $manifest) = @_;
+    my $kind = $manifest->{kind} or croak "$label: hashref must have 'kind'";
+    my $api_version = $manifest->{apiVersion};
+
+    return $self->k8s->struct_to_object($self->expand_class($kind), $manifest)
+        unless defined $api_version && length $api_version;
+
+    my $class = $self->expand_class($kind, $api_version)
+        // croak "$label: no IO::K8s class for apiVersion '$api_version', kind '$kind'"
+            . " (add it to resource_map if it is a CRD)";
+    return $self->k8s->struct_to_object($class, $manifest);
+}
+
 sub ensure {
     my ($self, $object) = @_;
 
@@ -1792,6 +1814,14 @@ Accepts either a typed L<IO::K8s> object or a plain hashref. A hashref must
 carry a C<kind> field and is inflated to a typed object via
 L<IO::K8s/struct_to_object>. Hashref keys follow the Kubernetes API convention
 (camelCase, e.g. C<stringData>, not C<string_data>).
+
+A hashref's C<apiVersion>, when present, selects the class: an
+C<autoscaling/v1> HorizontalPodAutoscaler stays C<autoscaling/v1> and goes to
+that endpoint, although the bare Kind resolves to C<autoscaling/v2>. An
+C<apiVersion> that resolves to no known class croaks, naming the Kind and the
+C<apiVersion>, instead of falling back to the Kind's default version. A
+hashref without C<apiVersion> resolves by its Kind alone, as L</expand_class>
+does.
 
 Handles common race conditions:
 
@@ -1821,11 +1851,7 @@ succeeded is returned unchanged. A failed Job is deleted and recreated.
 
 =cut
 
-    if (ref($object) eq 'HASH') {
-        my $kind = $object->{kind} or croak "ensure: hashref must have 'kind'";
-        my $class = $self->expand_class($kind);
-        $object = $self->k8s->struct_to_object($class, $object);
-    }
+    $object = $self->_manifest_to_object('ensure', $object) if ref($object) eq 'HASH';
 
     my $class = ref($object);
     croak "ensure requires an IO::K8s object or hashref" unless blessed($object);
@@ -1935,10 +1961,7 @@ Returns the list of applied objects (from L</ensure_all>).
     my @namespaces = @{$args{namespaces} || [undef]};
 
     for my $obj (@objects) {
-        next unless ref($obj) eq 'HASH';
-        my $kind = $obj->{kind} or croak "ensure_only: hashref must have 'kind'";
-        my $class = $self->expand_class($kind);
-        $obj = $self->k8s->struct_to_object($class, $obj);
+        $obj = $self->_manifest_to_object('ensure_only', $obj) if ref($obj) eq 'HASH';
     }
 
     my @results = $self->ensure_all(@objects);
