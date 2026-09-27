@@ -35,8 +35,9 @@ Never `git commit`: leave the tree commit-ready and report what changed and why,
   distribution owns HTTP, URLs, streaming and inflation *calls*, nothing about the schema.
 - **`Net::Async::Kubernetes` consumes the public pipeline seam** (`build_path`,
   `prepare_request`, `check_response`, `inflate_object`, `inflate_list`,
-  `process_watch_chunk`, `process_log_chunk`). Those seven are published API: additive
-  changes only, and a `Changes` bullet either way. The `_`-prefixed versions behind them
+  `process_watch_chunk`, `process_log_chunk`), plus the discovery seam
+  (`prepare_discovery_requests`, `absorb_discovery`). Those nine are published API:
+  additive changes only, and a `Changes` bullet either way. The `_`-prefixed versions behind them
   are free to move.
 - **This is a shared repo** (`github.com/pplu/kubernetes-rest`, authority
   `cpan:JLMARTIN`). Getty is a co-maintainer, not the sole owner. Removing or renaming

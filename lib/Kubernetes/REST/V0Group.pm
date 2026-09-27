@@ -176,10 +176,6 @@ sub can {
 
 =encoding UTF-8
 
-=head1 NAME
-
-Kubernetes::REST::V0Group - Base class for backwards-compatible v0 API group wrappers
-
 =head1 SYNOPSIS
 
     # This API is deprecated - use the new API instead

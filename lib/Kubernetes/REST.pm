@@ -3311,10 +3311,6 @@ __END__
 
 =encoding UTF-8
 
-=head1 NAME
-
-Kubernetes::REST - A Perl REST Client for the Kubernetes API
-
 =head1 SYNOPSIS
 
     use Kubernetes::REST;

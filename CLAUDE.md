@@ -18,7 +18,7 @@ reported here are owned by one of the others:
 | Repo | Owns |
 |---|---|
 | `../io-k8s-p5` — `IO::K8s` | The object model: classes, field names, types, serialization. A wrong or missing field is a bug **there**. |
-| `../p5-net-async-kubernetes` — `Net::Async::Kubernetes` | The async transport. It consumes this client's public pipeline seam (`build_path`, `prepare_request`, `check_response`, `inflate_object`, `inflate_list`, `process_watch_chunk`, `process_log_chunk`) and never calls `list`/`get`/`watch` — treat those seven as published API. |
+| `../p5-net-async-kubernetes` — `Net::Async::Kubernetes` | The async transport. It consumes this client's public pipeline seam (`build_path`, `prepare_request`, `check_response`, `inflate_object`, `inflate_list`, `process_watch_chunk`, `process_log_chunk`) and never calls `list`/`get`/`watch`. `prepare_discovery_requests` and `absorb_discovery` extend that seam to discovery, so an async client can read it through its own transport — treat those nine as published API. |
 | `../kubernetes-rest-deprecated` — `Kubernetes-REST-Deprecated` | Tombstones for removed API. Anything removed here gets its redirect stub over there, plus a `Changes` bullet naming the new failure mode. |
 
 `bin/kube_client` and `bin/kube_watch` are the shipped CLI entry points, built on

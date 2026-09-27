@@ -219,11 +219,12 @@ Async wrappers like [Net::Async::Kubernetes](https://metacpan.org/pod/Net::Async
 - `expand_class($short)` - Resolve short name (e.g., `'Pod'`) to full IO::K8s class
 - `build_path($class, %args)` - Build REST API URL path from class metadata; an optional `subresource => 'status'|'log'|'exec'|'attach'|'portforward'` argument appends the subresource segment
 - `prepare_request($method, $path, %opts)` - Build HTTP request with auth headers
-- `check_response($response, $context)` - Validate HTTP status (croaks on error)
+- `check_response($response, $context)` - Validate HTTP status (throws a `Kubernetes::REST::APIError` on error)
 - `inflate_object($class, $response)` - Decode JSON response to typed object
 - `inflate_list($class, $response)` - Decode JSON response to typed list
 - `process_watch_chunk($class, \$buf, $chunk)` - Parse NDJSON watch stream
 - `process_log_chunk(\$buf, $chunk)` - Parse plain-text log stream
+- `prepare_discovery_requests` / `absorb_discovery(%responses)` - Read discovery (`GET /api`, `GET /apis`) through your own event loop and hand the responses back
 
 ```perl
 # Example: async log streaming

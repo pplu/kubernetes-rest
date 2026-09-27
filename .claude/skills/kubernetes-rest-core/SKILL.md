@@ -25,7 +25,7 @@ that a different transport can slot in at step 2 without touching 1 or 3:
 1. `_prepare_request` — endpoint + path, query parameters, headers, `Authorization:
    Bearer` (only when a token is present — client-cert auth has none), JSON body.
 2. `$self->io->call($req)` / `call_streaming($req, $cb)` / `call_duplex($req, %cbs)`.
-3. `_check_response` (croak on >= 400) then `_inflate_object` / `_inflate_list` /
+3. `_check_response` (throws a `Kubernetes::REST::APIError` on >= 400) then `_inflate_object` / `_inflate_list` /
    `_process_watch_chunk` / `_process_log_chunk`.
 
 `_request` is the convenience wrapper (prepare + call) used by the sync CRUD methods.
@@ -37,7 +37,17 @@ that a different transport can slot in at step 2 without touching 1 or 3:
 underscore methods. They exist for **async wrappers — `Net::Async::Kubernetes` drives its
 own event loop through them** and never calls `list`/`get`/`watch`.
 
-Changing the signature or return shape of any of the seven breaks a downstream
+`prepare_discovery_requests` and `absorb_discovery` (k51) are the discovery half of the
+seam. With `resource_map_from_cluster` on, the first name resolution otherwise reads
+discovery through the synchronous `io`, blocking an async client's event loop.
+`prepare_discovery_requests` returns the `GET /api` and `GET /apis` requests (with the
+aggregated-discovery `Accept` header) unsent; `absorb_discovery` takes the responses
+back. Two aggregated documents (`APIGroupDiscoveryList`) become the cached catalog and it
+returns true; a legacy document returns false and caches nothing — legacy discovery needs
+a request per group/version, which only the synchronous path makes. An HTTP error status
+croaks like the synchronous read (`discovery GET /apis failed: 503`).
+
+Changing the signature or return shape of any of these nine breaks a downstream
 distribution that has no way of knowing. Treat them as published API: additive changes
 only, and a `Changes` bullet either way. The underscore versions are free to move as long
 as the wrappers keep their shape.
@@ -82,16 +92,27 @@ Subresource paths are the resource path plus a suffix: `/log`, `/exec`, `/attach
 
 ## The resource map
 
-`resource_map_from_cluster` defaults to **1**: the map is fetched lazily from the
-cluster's `/openapi/v2` and, if that fails, falls back to `IO::K8s->default_resource_map`
-with a `carp` — a failed fetch degrades, it does not die. `fetch_resource_map` skips
-`*List` kinds, prefers non-alpha/beta versions when a kind appears more than once, and
-special-cases the two groups whose IO::K8s namespace does not follow `Api::`:
-`apiextensions.k8s.io` → `ApiextensionsApiserver::…`, `apiregistration.k8s.io` →
-`KubeAggregator::…`.
+`resource_map_from_cluster` defaults to **1**: the map is built lazily from the cluster's
+aggregated discovery (`GET /api` + `GET /apis`, design D11; a cluster older than 1.27
+answers with legacy discovery and gets a request per group/version), cached per instance
+in `_discovery` and dropped by `invalidate_discovery`. If reading it fails, the map falls
+back to `IO::K8s->default_resource_map` with a `carp` — a failed fetch degrades, it does
+not die. `_resource_map_from_catalog` skips `*List` kinds, gives a Kind to the version the
+cluster marks preferred (D17), records only classes IO::K8s actually ships (D12/D13 — a
+foreign CRD group resolves through `with` providers, AutoGen and the Unstructured fallback
+instead), and special-cases the two groups whose IO::K8s namespace does not follow
+`Api::`: `apiextensions.k8s.io` → `ApiextensionsApiserver::…`, `apiregistration.k8s.io` →
+`KubeAggregator::…`. `/openapi/v2` is downloaded only by `schema_for`/`compare_schema`,
+and handed to the inner IO::K8s for AutoGen once it exists.
 
-Tests set `resource_map_from_cluster => 0`, which is why the mock harness never needs an
-`/openapi/v2` fixture.
+The map is always the client's own hash: `resource_map`'s coerce copies a passed map and
+the built-in fallback alike, because the inner IO::K8s merges the `with` providers into
+that hashref in place (k57). `_resource_map_built` tells a built map from a passed one:
+`invalidate_discovery` and `absorb_discovery` rebuild only a built map, so a caller's
+`'+My::Class'` entries survive (k51, k52).
+
+Most tests set `resource_map_from_cluster => 0` and need no discovery responses; the
+discovery tests register them with `add_response`.
 
 ## `ensure()` — the idempotency seam
 
@@ -100,12 +121,15 @@ deliberate: 404 on the initial get falls through to create; 409 on create re-fet
 updates; 409 on update re-fetches `resourceVersion` and retries once. Two kinds are
 special-cased because the server rejects a plain update: `PersistentVolumeClaim` (spec
 immutable — existing PVC returned unchanged) and `Job` (immutable spec — active or
-succeeded returned unchanged, failed deleted and recreated).
+succeeded returned unchanged, failed deleted with `propagationPolicy => 'Background'`,
+so its Pods go with it, and recreated).
 
 `ensure_only` additionally *deletes* anything matching the label selector in the given
 kinds/namespaces that is not in the set. `undef` inside `namespaces` means cluster-scoped.
-It is a pruning operation against a live cluster — changes here need a test that pins
-what is *not* deleted, not only what is.
+It prunes with `propagationPolicy => 'Background'` unless given another one (a pruned Job
+takes its Pods, as with `kubectl delete`), and an option key it does not take croaks
+before anything is applied (k53). It is a pruning operation against a live cluster —
+changes here need a test that pins what is *not* deleted, not only what is.
 
 ## The v0 compatibility layer
 
@@ -127,9 +151,26 @@ Two traps live here:
   tombstoned in the separate **Kubernetes-REST-Deprecated** distribution. This layer is
   the last thing keeping the v0 names alive and can go once no downstream code uses them.
 
-`Kubernetes::REST::Error` / `::RemoteError` belong to the same layer: v1 croaks, it does
-not throw structured exceptions. `RemoteError` inherits from `Error`, so `Error.pm` cannot
-load it — code that *throws* one must `use Kubernetes::REST::RemoteError` itself.
+`Kubernetes::REST::Error` / `::RemoteError` belong to the same layer, not to v1 (see
+below). `RemoteError` inherits from `Error`, so `Error.pm` cannot load it — code that
+*throws* one must `use Kubernetes::REST::RemoteError` itself.
+
+## Errors
+
+An HTTP error status dies with a `Kubernetes::REST::APIError` (k50), thrown by
+`_check_response` — so from every checked response, the `/openapi/v2` fetch included
+(k55). It carries `code` (`is_not_found`, `is_conflict`), the Status body's
+`reason`/`message`/`details`, the decoded `body`, `context` and `response`, and
+stringifies to the message the plain croak had, at the caller's line: `throw` trusts the
+throwing package through `@CARP_NOT`. A Moo lazy builder between the caller and the check
+breaks that chain (its calling frame is `Method::Generate::Accessor::_Generated`), which
+is why `_fetch_openapi_spec` is a method, not a builder.
+
+Everything else croaks with a plain string: invalid arguments, a name nothing resolves, a
+failed discovery read, and the watch `410` — an `ERROR` event inside a stream the server
+answered with 200, answered with a re-list. An option key a method does not take croaks
+through `_croak_unknown_args` (`delete`, `ensure_only`, `log`, `absorb_discovery`);
+`delete` sends `propagationPolicy` as the `DeleteOptions` query parameter (k49).
 
 ## One package per file, one `$VERSION` everywhere
 

@@ -7,10 +7,6 @@ __END__
 
 =encoding UTF-8
 
-=head1 NAME
-
-Kubernetes::REST::Example - Working examples for Kubernetes::REST with Minikube, K3s, and other clusters
-
 =head1 DESCRIPTION
 
 This document walks you through setting up L<Kubernetes::REST> with a local

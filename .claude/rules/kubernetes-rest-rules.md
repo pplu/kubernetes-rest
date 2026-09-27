@@ -105,10 +105,11 @@ specific item. Every write publishes under the maintainer's account.
   five packages sat at 1.003 until 1.106. `t/25_one_package_per_file.t` keeps it removed.
   The `$VERSION`-everywhere part is also correct and must not be "cleaned up" to the main
   module: the bundle narrows `version_finder` to `:MainModule` only for `no_cpan` dists.
-- **Seven methods are published API for `Net::Async::Kubernetes`**: `build_path`,
-  `prepare_request`, `check_response`, `inflate_object`, `inflate_list`,
-  `process_watch_chunk`, `process_log_chunk`. Additive changes only, plus a `Changes`
-  bullet. The `_`-prefixed originals behind them may move freely.
+- **Nine methods are published API for async clients such as `Net::Async::Kubernetes`**:
+  the pipeline seam `build_path`, `prepare_request`, `check_response`, `inflate_object`,
+  `inflate_list`, `process_watch_chunk`, `process_log_chunk`, and the discovery seam
+  `prepare_discovery_requests`, `absorb_discovery`. Additive changes only, plus a
+  `Changes` bullet. The `_`-prefixed originals behind them may move freely.
 - **The object model belongs to `IO::K8s`** (`../io-k8s-p5`). Wrong field names or types are
   bugs there; do not paper over them here.
 - **Removing public API is a breaking change with a protocol**: the tombstone goes into the

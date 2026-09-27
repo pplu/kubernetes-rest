@@ -70,7 +70,8 @@ A module without `$VERSION`, or with a stale one, is a blocker — it ships unin
    Any removed or renamed public method or class must be called out with its migration
    path, and any change to the public pipeline seam (`build_path`, `prepare_request`,
    `check_response`, `inflate_object`, `inflate_list`, `process_watch_chunk`,
-   `process_log_chunk`) must be named — `Net::Async::Kubernetes` depends on it.
+   `process_log_chunk`) or the discovery seam (`prepare_discovery_requests`,
+   `absorb_discovery`) must be named — `Net::Async::Kubernetes` depends on it.
 7. **`dzil build`** — clean, no warnings, no missing files. Inspect the built `META.json`
    `provides` and confirm every package under `lib/` is listed at the dist version, and
    that both `bin/` scripts are in the manifest.
