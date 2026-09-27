@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-27T22:30:51Z
+claimed_by: backlog-8
+class: standard
+completed: 2026-09-27T22:30:46Z
+created: 2026-09-27T21:29:55Z
+id: 61
+priority: low
+started: 2026-09-27T21:45:07Z
+status: done
+tags:
+- api
+- args
+- k58-followup
+title: 'patch, patch_status, ensure_crd, port_forward, exec, attach: unbekannte Keys
+  unbemerkt'
+updated: 2026-09-27T22:30:51Z
+---
+
+Gefunden bei k58 (2026-09-27). _unpack_patch_args (patch/patch_status), ensure_crd (%opts) sowie port_forward, exec und attach verschlucken unbekannte Schlüssel still. Über _croak_unknown_args vor jedem Request ablehnen; die erlaubten Keys aus dem ableiten, was der Code verwendet.
+
+Commit 7fcf892
