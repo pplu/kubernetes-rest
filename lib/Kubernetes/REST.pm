@@ -1787,8 +1787,17 @@ Accepts short class names (C<Pod>) or full class paths. For namespaced resources
 
 Supports C<labelSelector> and C<fieldSelector> query parameters for server-side filtering.
 
+Any other argument croaks before a request is sent, naming it: a misspelt
+option is not ignored. That includes C<name>: the list endpoint selects one
+object with C<< fieldSelector => 'metadata.name=NAME' >>, and L</get>
+fetches it.
+
 =cut
 
+    # A misspelt option is not ignored (karr k58): label_selector listed
+    # unfiltered, namespce across the cluster. name and subresource are out
+    # too: they made the request a GET of one object, read as an empty list.
+    $self->_croak_unknown_args('list', \%args, qw(namespace labelSelector fieldSelector));
     my ($class, $response) = $self->_list_request($short_class, %args);
     $self->_check_response($response, "list $short_class");
 
@@ -1831,14 +1840,26 @@ sub get {
 
 Get a single resource by name. Returns a typed L<IO::K8s> object.
 
+    my $pod = $api->get('Pod', 'my-pod', namespace => 'default',
+        subresource => 'status');
+    # GET /api/v1/namespaces/default/pods/my-pod/status
+
+Takes C<name>, C<namespace> for namespaced resources, and C<subresource>,
+which reads the named subresource of the object instead of the object. The
+response is inflated as the resource's own class, which fits a subresource
+that answers with the object itself, as C<status> does. Any other argument
+croaks before a request is sent, naming it: a misspelt option is not
+ignored.
+
 =cut
 
     # Support: get('Kind', 'name'), get('Kind', 'name', namespace => 'ns'),
-    #          get('Kind', name => 'name'), get('Kind', name => 'name', namespace => 'ns')
+    #          get('Kind', name => 'name'), get('Kind', name => 'name', namespace => 'ns'),
+    #          each with subresource => ... as well
     my %args;
     if (@rest == 1) {
         $args{name} = $rest[0];
-    } elsif (@rest >= 2 && $rest[0] !~ /^(name|namespace)$/) {
+    } elsif (@rest >= 2 && $rest[0] !~ /^(name|namespace|subresource)$/) {
         # First arg is name, rest are key=value pairs
         $args{name} = shift @rest;
         %args = (%args, @rest);
@@ -1847,6 +1868,9 @@ Get a single resource by name. Returns a typed L<IO::K8s> object.
     } else {
         croak "Invalid arguments to get()";
     }
+    # A misspelt option is not ignored (karr k58). subresource is build_path's
+    # and works: status answers with the object.
+    $self->_croak_unknown_args('get', \%args, qw(name namespace subresource));
 
     my $class = $self->_expand_class_or_croak($short_class);
     croak "name required for get" unless $args{name};
@@ -2313,7 +2337,7 @@ sub _api_version_and_kind {
 }
 
 sub ensure {
-    my ($self, $object) = @_;
+    my ($self, $object, @extra) = @_;
 
 =method ensure
 
@@ -2382,8 +2406,17 @@ C<apiVersion> and C<kind> fields - never by the class name. A custom resource
 that reuses one of these Kind names in its own group is ensured like any other
 object, and so is a C<Job> under any apiVersion other than C<batch/v1>.
 
+It takes exactly one object or hashref. Anything after it croaks before a
+request is sent - an option is not ignored, and a second object is not
+applied silently or dropped; L</ensure_all> takes several.
+
 =cut
 
+    # Nothing after the object is read (karr k58): namespace => ... would not
+    # move it, a second object would not be applied.
+    croak 'Invalid arguments to ensure(): it takes one object or hashref'
+        . ' (ensure_all takes several)'
+        if @extra;
     $object = $self->_manifest_to_object('ensure', $object) if ref($object) eq 'HASH';
 
     my $class = ref($object);
@@ -2835,6 +2868,10 @@ For namespaced resources, the namespace to watch.
 
 =back
 
+Any other argument croaks before a request is sent, naming it: a misspelt
+option is not ignored. That includes C<name>: to watch one object, pass
+C<< fieldSelector => 'metadata.name=NAME' >>.
+
 Returns the last C<resourceVersion> seen. Croaks on 410 Gone once the given
 C<resourceVersion> has expired - re-list to get a fresh one and resume from
 there:
@@ -2863,6 +2900,11 @@ request itself dies with an L<Kubernetes::REST::APIError> as usual.
 
 =cut
 
+    # A misspelt option is not ignored (karr k58): timeoutSeconds ran for the
+    # default 300. name is out too: it made the request a GET of one object,
+    # which the server answers with the object, not a watch.
+    $self->_croak_unknown_args('watch', \%args, qw(on_event timeout
+        resourceVersion labelSelector fieldSelector namespace));
     my $on_event = delete $args{on_event}
         or croak "watch requires 'on_event' callback";
     my $timeout          = delete $args{timeout} // 300;

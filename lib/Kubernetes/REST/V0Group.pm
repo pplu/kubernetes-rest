@@ -136,9 +136,19 @@ sub _dispatch {
     my $api = $self->api;
 
     if ($action eq 'list') {
-        return $api->list($class, %$params);
+        # list, get and watch croak on arguments they do not take, as delete
+        # does (below). The v0 parameters they have no use for (limit,
+        # pretty, watch, timeoutSeconds, ...) were ignored all along; they
+        # stay ignored rather than break v0 callers. A List* name goes with
+        # them: it made the request a GET of one object, read as an empty
+        # list (karr k58).
+        my %args = map { exists $params->{$_} ? ($_ => $params->{$_}) : () }
+            qw(namespace labelSelector fieldSelector);
+        return $api->list($class, %args);
     } elsif ($action eq 'read') {
-        return $api->get($class, %$params);
+        my %args = map { exists $params->{$_} ? ($_ => $params->{$_}) : () }
+            qw(name namespace subresource);
+        return $api->get($class, %args);
     } elsif ($action eq 'create') {
         # For create, we need the body object
         my $body = $params->{body} // croak "create requires 'body' parameter";
@@ -156,7 +166,9 @@ sub _dispatch {
     } elsif ($action eq 'patch') {
         return $api->patch($class, %$params);
     } elsif ($action eq 'watch') {
-        return $api->watch($class, %$params);
+        my %args = map { exists $params->{$_} ? ($_ => $params->{$_}) : () }
+            qw(on_event timeout resourceVersion labelSelector fieldSelector namespace);
+        return $api->watch($class, %args);
     } else {
         croak "Unknown action: $action";
     }
@@ -220,6 +232,13 @@ and translates them to the new API. The following actions are supported:
 =item * Watch -> watch()
 
 =back
+
+List, Read, Watch and Delete pass on only the parameters the new method
+takes - C<namespace>, C<labelSelector> and C<fieldSelector>; C<name>,
+C<namespace> and C<subresource>; C<on_event>, C<timeout>,
+C<resourceVersion>, C<labelSelector>, C<fieldSelector> and C<namespace>;
+C<name>, C<namespace> and C<propagationPolicy> - and ignore the others,
+which the new methods croak on.
 
 =head1 SEE ALSO
 
