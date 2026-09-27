@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T03:30:14Z
+claimed_by: backlog-2
+class: standard
+completed: 2026-09-27T03:30:14Z
+created: 2026-09-27T00:50:35Z
+id: 41
+priority: low
+started: 2026-09-27T02:51:12Z
+status: done
+tags:
+- ensure
+title: 'ensure: nach 409 beim Create fehlt der Job-Sonderfall'
+updated: 2026-09-27T03:30:14Z
+---
+
+Entsteht ein Job zwischen GET und POST, holt ensure ihn nach dem 409 und überschreibt ihn per PUT; bei geänderter Pod-Vorlage endet das mit 422. Für PVC gibt es an dieser Stelle einen Sonderfall, für Job nicht. Vorbestehend.
+
+Umgesetzt auf fix/backlog-2, uncommittet. prove -lr t/ 46 Dateien 717 Tests PASS (Orchestrator-Gegenprobe), dzil build sauber.
+
+2026-09-27 03:30 Committed as f68f43c (Apply ensure's Job special case after a 409 on create). Verified standalone in a temp worktree: prove -lr t/ 45 files, 710 tests, PASS.
