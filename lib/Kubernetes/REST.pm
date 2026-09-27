@@ -1098,6 +1098,17 @@ sub schema_for {
 
 Get the OpenAPI schema definition for a resource type from the cluster. Accepts short names (C<Pod>), full class names (C<IO::K8s::Api::Core::V1::Pod>), or OpenAPI definition names (C<io.k8s.api.core.v1.Pod>).
 
+A name resolves as in L</expand_class>, and the definition is looked up by
+the name its class maps onto (C<IO::K8s::Api::Core::V1::Pod> becomes
+C<io.k8s.api.core.v1.Pod>), which holds for the C<IO::K8s::Api::> classes.
+Where no definition has that name - apiextensions and apiregistration, whose
+definitions upstream names after their staging repositories, a CRD class of
+your own or from a L</with> provider, L<IO::K8s::Unstructured> - it is the
+definition whose C<x-kubernetes-group-version-kind> names the class's API
+group, version and Kind: its C<api_version> and C<kind>, or for
+L<IO::K8s::Unstructured> the Kind and the group/version the cluster's
+discovery confirmed for it.
+
 Returns a hashref with the OpenAPI v2 schema definition, or C<undef> when
 there is none - also for a name that resolves to no class at all.
 
@@ -1131,8 +1142,55 @@ next call fetches again.
     my @parts = split /\./, $def_name;
     $parts[$_] = lc($parts[$_]) for 0 .. $#parts - 1;
     $def_name = join '.', @parts;
+    return $defs->{$def_name} if exists $defs->{$def_name};
 
-    return $defs->{$def_name};
+    # That holds for the IO::K8s::Api:: classes only. Upstream names
+    # apiextensions and apiregistration after their staging repositories
+    # (io.k8s.apiextensions-apiserver..., io.k8s.kube-aggregator...), a CRD's
+    # definition after its group (com.example.v1.Widget), and Unstructured or
+    # a '+My::Class' map onto nothing. Every Kind's definition carries
+    # x-kubernetes-group-version-kind, so the class's GVK finds it; no match
+    # stays undef (karr k54).
+    my ($api_version, $gvk_kind) = $self->_schema_gvk($class, $kind);
+    return unless defined $api_version;
+    my ($group, $version) = $api_version =~ m{/}
+        ? split(m{/}, $api_version, 2)
+        : ('', $api_version);
+    for my $name (sort keys %$defs) {
+        my $gvks = ref $defs->{$name} eq 'HASH'
+            ? $defs->{$name}{'x-kubernetes-group-version-kind'} : undef;
+        next unless ref $gvks eq 'ARRAY';
+        for my $gvk (grep { ref $_ eq 'HASH' } @$gvks) {
+            return $defs->{$name}
+                if ($gvk->{group} // '') eq $group
+                && ($gvk->{version} // '') eq $version
+                && ($gvk->{kind} // '') eq $gvk_kind;
+        }
+    }
+    return;
+}
+
+# The apiVersion and Kind schema_for looks a definition up by, for $class as
+# expand_class resolved $name: the class's own api_version() and kind(), or -
+# for IO::K8s::Unstructured, whose class has neither - the Kind of the name
+# and the apiVersion discovery confirmed for it, exactly as expand_class and
+# _build_path read it (_discovery_path_meta). Empty when there is none.
+sub _schema_gvk {
+    my ($self, $class, $name) = @_;
+    if ($class eq 'IO::K8s::Unstructured') {
+        my ($kind, $api_version) = $self->_kind_from_expand_args($name);
+        return unless defined $kind;
+        my $meta = $self->_discovery_path_meta($kind, $api_version) or return;
+        return ($meta->{api_version}, $kind);
+    }
+    return unless eval { require_module($class); 1 } && $class->can('api_version');
+    # Asked as class methods, and only an answer without error counts - a
+    # class of your own may have them as instance attributes.
+    my $api_version = eval { $class->api_version };
+    return unless defined $api_version && length $api_version;
+    my $kind = $class->can('kind') ? eval { $class->kind } : undef;
+    ($kind = $class) =~ s/.*::// unless defined $kind && length $kind;
+    return ($api_version, $kind);
 }
 
 # Compare local class against cluster schema

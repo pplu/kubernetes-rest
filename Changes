@@ -51,9 +51,12 @@ Revision history for Kubernetes-REST
    IO/K8s/Kind.pm" @INC dump. ensure and ensure_only do the same for a
    manifest without apiVersion whose Kind nothing resolves. No request is
    sent, as before.
- - schema_for answers undef without "Use of uninitialized value" warnings
-   for a name that resolves to no class, such as a qualified name no class
-   serves.
+ - schema_for finds the definition of a class whose name does not map onto
+   one - apiextensions, apiregistration, a '+My::Class' or `with` provider
+   CRD class, IO::K8s::Unstructured - by its x-kubernetes-group-version-kind
+   instead of answering undef, so compare_schema works for them too. A name
+   that resolves to no class answers undef without "Use of uninitialized
+   value" warnings.
  - An HTTP error status now dies with a Kubernetes::REST::APIError instead
    of a plain string - from every call and from check_response - carrying
    code, reason, message and details of the Status body, the decoded body,
