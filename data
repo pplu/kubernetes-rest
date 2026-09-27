@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-27T20:19:02Z
+claimed_by: backlog-5
+class: standard
+completed: 2026-09-27T20:18:57Z
+created: 2026-09-27T04:53:00Z
+id: 48
+priority: low
+started: 2026-09-27T19:35:57Z
+status: done
+tags:
+- ensure
+- resolve
+title: 'ensure mit Hashref ohne apiVersion und unbekannter Kind: Cant locate'
+updated: 2026-09-27T20:19:02Z
+---
+
+ensure und ensure_only mit einem Hashref ohne apiVersion und unbekannter Kind sterben noch mit Cant locate IO/K8s/Kind.pm. Dieselbe Meldung wie seit k46 nutzen (_expand_class_or_croak), vor jedem Request.
+
+Commit 08afe6dd71ccce026b7e8bb1ae4f1092c081af80
