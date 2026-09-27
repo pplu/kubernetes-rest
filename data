@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T20:19:51Z
+claimed_by: backlog-5
+class: standard
+completed: 2026-09-27T20:19:46Z
+created: 2026-09-27T19:35:45Z
+id: 51
+priority: low
+started: 2026-09-27T19:36:12Z
+status: done
+tags:
+- discovery
+- seam
+- api
+title: 'Öffentliche Seam für Discovery: Requests bauen, Antworten einspeisen'
+updated: 2026-09-27T20:19:51Z
+---
+
+Für Net::Async::Kubernetes k59: mit resource_map_from_cluster holt Kubernetes::REST die Discovery über sein eigenes synchrones io, das blockiert die IO::Async-Loop des Async-Clients. Seam: prepare_discovery_requests liefert die Requests für /api und /apis (aggregated discovery v2, Accept-Header wie _fetch_discovery); absorb_discovery('/api' => $response, '/apis' => $response) übernimmt die Antworten in den Discovery-Cache und liefert wahr, wenn beide aggregated waren (danach bauen expand_class und resource_map ohne eigenes io), sonst falsch ohne Cache (Legacy-Cluster < 1.27: Aufrufer fällt auf den synchronen Weg zurück). HTTP-Fehler croaken wie in _fetch_discovery.
+
+Commit ef5bb558fa234fe6fcab0c034fc6eccda4d01b7f
