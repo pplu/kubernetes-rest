@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-27T20:19:38Z
+claimed_by: backlog-5
+class: standard
+completed: 2026-09-27T20:19:33Z
+created: 2026-09-27T04:55:13Z
+id: 50
+priority: medium
+started: 2026-09-27T19:36:07Z
+status: done
+tags:
+- errors
+- api
+title: Fehler als Objekt mit HTTP-Status statt nur String
+updated: 2026-09-27T20:19:38Z
+---
+
+Fehler von get/list/delete/update kommen als reiner String ("Kubernetes API error (...): <status> <body>"). Aufrufer können 404 (schon weg) nicht sauber von echten Fehlern unterscheiden, ohne den Text zu parsen. Kubernetes::Comb braucht das beim Prunen (Objekt schon gelöscht = kein Fehler) und bei update_status (409 Conflict -> neu lesen und wiederholen). Vorschlag: Exception-Objekt mit code/status/reason/body, das stringifiziert exakt die heutige Meldung liefert (rückwärtskompatibel). Net::Async::Kubernetes sollte dasselbe Objekt in failed Futures liefern (dort eigenes Ticket).
+
+Commit 3d1853e44abaa1263335f2bbfbb6cb76ad7fd3a4
