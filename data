@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T01:03:00Z
+claimed_by: ensure-followups
+class: standard
+completed: 2026-09-27T01:03:00Z
+created: 2026-09-27T00:02:32Z
+id: 39
+priority: low
+started: 2026-09-27T00:14:28Z
+status: done
+tags:
+- ensure
+title: 'ensure_only: Abgleich-Schlüssel ohne API-Gruppe'
+updated: 2026-09-27T01:03:00Z
+---
+
+Der Schlüssel ist Kind, Namespace, Name. Dieselbe Kind in zwei Gruppen (etwa Istio Gateway und Gateway API Gateway) mit gleichem Namen und Namespace gilt als ein Objekt, ein unerwartetes gelabeltes Item bleibt dann stehen. Behält nur zu viel, löscht nie zu viel. Gruppe aus api_version bzw. apiVersion in den Schlüssel aufnehmen; Net::Async::Kubernetes zieht nach.
+
+Umgesetzt auf fix/ensure-followups, uncommittet. Worker-Lauf prove -lr t/ 45 Dateien 687 Tests PASS, dzil build sauber. Orchestrator-Gegenprobe steht wegen Speicherdruck noch aus.
+
+2026-09-27 01:02 Committed 005f06d Key ensure_onlys listed items by API group as well as Kind. Verified isolated in a throwaway worktree at 005f06d: prove -lr t/ 45 files 687 tests pass 1 live-cluster test skipped as expected. Full branch tip prove -lr t/ and dzil build both clean afterward.
