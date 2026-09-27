@@ -23,7 +23,7 @@ HTTP status code.
 
 =head1 DESCRIPTION
 
-This error class belongs to the deprecated v0 API - the v1 API croaks instead of throwing structured exceptions. It stays around so code that still catches it keeps working.
+This error class belongs to the deprecated v0 API - the v1 API never throws it: an HTTP error status dies with a L<Kubernetes::REST::APIError>, anything else croaks with a string. It stays around so code that still catches it keeps working.
 
 Thrown for errors reported by the cluster itself, carrying the HTTP status alongside the message of L<Kubernetes::REST::Error>.
 

@@ -54,6 +54,12 @@ Revision history for Kubernetes-REST
  - schema_for answers undef without "Use of uninitialized value" warnings
    for a name that resolves to no class, such as a qualified name no class
    serves.
+ - An HTTP error status now dies with a Kubernetes::REST::APIError instead
+   of a plain string - from every call and from check_response - carrying
+   code, reason, message and details of the Status body, the decoded body,
+   context and response, plus is_not_found and is_conflict. It stringifies
+   to exactly the old message, caller line included, so printing or
+   matching $@ is unaffected; code that tests ref($@) sees an object now.
 
 1.108     2026-09-22 02:22:33Z
 

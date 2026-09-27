@@ -18,6 +18,7 @@ use IO::K8s::Unstructured ();
 use Time::HiRes ();
 use Kubernetes::REST::WatchEvent;
 use Kubernetes::REST::LogEvent;
+use Kubernetes::REST::APIError;
 use namespace::clean;
 
 has server => (
@@ -1233,8 +1234,15 @@ sub _check_response {
         # decode it (leniently - a truncated or non-UTF-8 body must not turn a
         # useful API error into an encoding croak).
         my $body = Encode::decode('UTF-8', $response->content // '', Encode::FB_DEFAULT);
-        croak "Kubernetes API error ($context): "
-            . $response->status . " " . $body;
+        # An object, so a caller can branch on the status instead of parsing
+        # the text; it stringifies to the message this croaked with before,
+        # at the same caller line (karr k50).
+        Kubernetes::REST::APIError->throw(
+            code     => 0 + $response->status,
+            body     => $body,
+            context  => $context,
+            response => $response,
+        );
     }
     return $response;
 }
@@ -1446,7 +1454,13 @@ sub check_response {
 
     $api->check_response($response, "get Pod");
 
-Validate an HTTP response. Croaks with a descriptive error if the status code is >= 400. Returns the response on success.
+Validate an HTTP response. Returns the response on success. On a status code
+>= 400 it dies with a L<Kubernetes::REST::APIError>, which carries the status
+(C<code>, C<is_not_found>, C<is_conflict>), the C<reason>, C<message> and
+C<details> of a Kubernetes C<Status> body, the decoded C<body>, the
+C<context> and the C<response>. It stringifies to the message this method
+croaked with as a plain string before, C<Kubernetes API error (get Pod): 404
+...>, naming the line that called C<check_response>. See L</ERROR HANDLING>.
 
 =cut
 
@@ -3049,6 +3063,28 @@ This module provides a simple REST client for the Kubernetes API using IO::K8s
 resource classes. The IO::K8s classes know their own metadata (API version,
 kind, whether they're namespaced), so URL building is automatic.
 
+=head1 ERROR HANDLING
+
+When the API server answers with an HTTP error status (400 and up), the call
+dies with a L<Kubernetes::REST::APIError>. It stringifies to the familiar
+message - C<Kubernetes API error (get Pod): 404 {...} at app.pl line 12.> -
+so printing C<$@> or matching it against a regex works as it always did, and
+it carries the status for code that has to tell cases apart:
+
+    my $ok = eval { $api->delete('Pod', 'web', namespace => 'default'); 1 };
+    unless ($ok) {
+        my $err = $@;
+        die $err unless ref $err && $err->isa('Kubernetes::REST::APIError')
+            && $err->is_not_found;    # already gone is fine
+    }
+
+Besides C<code>, C<is_not_found> and C<is_conflict> it has the C<reason>,
+C<message> and C<details> of the Kubernetes C<Status> body, the decoded
+C<body>, the C<context> and the C<response>.
+
+Everything else croaks with a plain string: invalid arguments, a resource
+name nothing resolves, a failed discovery or OpenAPI fetch, an expired watch.
+
 =head1 UPGRADING FROM 0.02
 
 B<WARNING: Version 1.00 contains breaking changes!>
@@ -3105,7 +3141,8 @@ public methods provide this:
 
 =item * C<prepare_request($method, $path, %opts)> - Build HTTP request with auth
 
-=item * C<check_response($response, $context)> - Validate HTTP status
+=item * C<check_response($response, $context)> - Validate HTTP status (dies
+with a L<Kubernetes::REST::APIError> on 400 and up)
 
 =item * C<inflate_object($class, $response)> - JSON to typed object
 
@@ -3253,6 +3290,8 @@ backends must honour that; see L<Kubernetes::REST::Role::IO/Encoding contract>.
 =item * L<Kubernetes::REST::WatchEvent> - Watch event object
 
 =item * L<Kubernetes::REST::LogEvent> - Log event object
+
+=item * L<Kubernetes::REST::APIError> - Error thrown for an HTTP error status
 
 =item * L<Kubernetes::REST::HTTPRequest> - HTTP request object
 

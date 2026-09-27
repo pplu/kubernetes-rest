@@ -49,7 +49,7 @@ Returns the full error message as a string, including detail if available.
 
 =head1 DESCRIPTION
 
-These error classes belong to the deprecated v0 API - the v1 API croaks instead of throwing structured exceptions. They stay around so code that still catches them keeps working.
+These error classes belong to the deprecated v0 API - the v1 API never throws them: an HTTP error status dies with a L<Kubernetes::REST::APIError>, anything else croaks with a string. They stay around so code that still catches them keeps working.
 
 See L<Kubernetes::REST/"UPGRADING FROM 0.02"> for migration guide.
 
