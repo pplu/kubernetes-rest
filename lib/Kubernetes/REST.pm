@@ -253,6 +253,12 @@ has resource_map => (
     lazy => 1,
     predicate => '_has_resource_map',
     clearer => '_clear_resource_map',
+    # Always a hash of our own: the inner IO::K8s merges the `with` providers
+    # into this hashref in place (IO::K8s::add). A map passed to the
+    # constructor is the caller's, and the fallback of a failed cluster fetch
+    # is IO::K8s's process-wide built-in map - neither may grow by the
+    # provider Kinds (karr k57). Moo coerces the default's value too.
+    coerce => sub { ref $_[0] eq 'HASH' ? { %{ $_[0] } } : $_[0] },
     default => sub {
         my $self = shift;
         # Built here, not passed in: absorb_discovery may rebuild it.
@@ -278,6 +284,13 @@ Override for custom resources:
     }
 
 The C<+> prefix tells L<IO::K8s> that this is a custom class (not in the IO::K8s:: namespace).
+
+The client keeps a copy of the hashref it is given: the Kinds of the L</with>
+providers are merged into that copy, never into your hash, and a change you
+make to your hash after construction is not seen. Change
+C<< $api->resource_map >> itself instead:
+
+    $api->resource_map->{StaticWebSite} = '+My::StaticWebSite';
 
 =cut
 

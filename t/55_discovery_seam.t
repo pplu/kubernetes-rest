@@ -159,11 +159,14 @@ subtest 'absorb_discovery replaces what an earlier catalog built' => sub {
 subtest 'a resource_map passed to the constructor stays' => sub {
     my $map = { %{ IO::K8s->default_resource_map }, Special => 'Api::Core::V1::ConfigMap' };
     my $api = api(resource_map => $map);
+    # The client's own copy of it (karr k57), held since construction.
+    my $held = $api->resource_map;
     ok($api->absorb_discovery(
         '/api'  => response(200, $CORE_A),
         '/apis' => response(200, $GROUPED_A),
     ), 'absorbed');
-    is($api->resource_map, $map, 'the very map that was passed');
+    is($api->resource_map, $held, 'the map held since construction, not rebuilt');
+    is($api->resource_map->{Special}, 'Api::Core::V1::ConfigMap', 'with the caller\'s entry');
     is($api->expand_class('Widget'), 'IO::K8s::Unstructured',
         'and the absorbed catalog still confirms Widget');
     is_deeply($api->io->calls, [], 'without a request');

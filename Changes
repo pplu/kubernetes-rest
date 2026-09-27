@@ -76,6 +76,11 @@ Revision history for Kubernetes-REST
    passed to the constructor instead of rebuilding it from the cluster or
    the built-in map, so its '+My::Class' entries - the Kind ensure_crd has
    just installed included - still resolve afterwards.
+ - The client keeps its own copy of a resource_map passed to it: `with`
+   providers are merged into that copy, no longer into the caller's hash,
+   and after a failed cluster fetch no longer into IO::K8s's process-wide
+   built-in map. A change to the passed hash after construction is not
+   seen; change $api->resource_map instead.
 
 1.108     2026-09-22 02:22:33Z
 
