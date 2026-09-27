@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-27T21:02:00Z
+claimed_by: backlog-6
+class: standard
+completed: 2026-09-27T21:01:56Z
+created: 2026-09-27T20:06:00Z
+id: 54
+priority: low
+started: 2026-09-27T20:21:02Z
+status: done
+tags:
+- schema
+title: 'schema_for: Definitionsnamen nur für IO::K8s::Api-Klassen'
+updated: 2026-09-27T21:02:00Z
+---
+
+Gefunden bei k47 (2026-09-27, beim Lesen). schema_for leitet den OpenAPI-Definitionsnamen nur für IO::K8s::Api::*-Klassen ab; für apiextensions/apiregistration (io.k8s.apiextensions-apiserver...), Unstructured- und +-Klassen kommt undef. Erst per Test belegen, dann aus der GVK bzw. dem Upstream-Namensschema ableiten oder dokumentieren.
+
+Commit 54221f2
