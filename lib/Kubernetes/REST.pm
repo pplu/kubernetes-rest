@@ -2256,6 +2256,8 @@ subject to a timeout. Only then is the discovery cache invalidated, so the
 next C<create>/C<list> of a custom resource does not race the apiserver
 registering the Kind (the reason plain C<ensure> of the CRD is not enough:
 the following call almost always creates a CR, which 404s until Established).
+A 404 while polling counts as not registered yet and is polled again; any
+other error status ends the wait at once and croaks with that API error.
 
 Returns the list of established CustomResourceDefinition objects (the objects
 read back from the final poll, carrying their C<Established> status).
@@ -2350,7 +2352,10 @@ versions.
 
 # Poll GET on a CustomResourceDefinition by name until its Established condition
 # is True, or croak on timeout. A 404 during polling means "not registered yet"
-# and is treated as not-established, not an error.
+# and is treated as not-established, not an error. That is read off the status
+# of the response, never out of the text of an error: any other failure - a
+# 500 whose message merely contains "404" too - ends the wait with that error
+# instead of being polled away into a timeout (karr k45).
 sub _wait_crd_established {
     my ($self, $crd, %opts) = @_;
 
@@ -2362,16 +2367,12 @@ sub _wait_crd_established {
     my $deadline = Time::HiRes::time() + $timeout;
 
     while (1) {
-        my $current = eval {
-            my $response = $self->_request('GET', $path);
-            return undef if $response->status == 404;
+        my $response = $self->_request('GET', $path);
+        unless ($response->status == 404) {
             $self->_check_response($response, "ensure_crd wait $name");
-            $self->_inflate_object($class, $response);
-        };
-        my $err = $@;
-        die $err if $err && $err !~ /\b404\b/;
-
-        return $current if $current && $self->_crd_established($current);
+            my $current = $self->_inflate_object($class, $response);
+            return $current if $current && $self->_crd_established($current);
+        }
         last if Time::HiRes::time() >= $deadline;
         Time::HiRes::sleep($interval);
     }

@@ -40,6 +40,9 @@ Revision history for Kubernetes-REST
    arrives intact instead of truncated, altered or dropped. Everything else,
    '=', ',', '!', '/', '(', ')' and ':' included, is sent as written, so
    typical label and field selectors render byte for byte as before.
+ - ensure_crd ends its wait for Established with the API error when a poll
+   fails with anything but 404, instead of polling on to the timeout
+   whenever the error text happened to contain "404".
 
 1.108     2026-09-22 02:22:33Z
 
