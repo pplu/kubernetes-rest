@@ -460,13 +460,24 @@ sub _expand_class_or_croak {
     my ($kind) = $self->_kind_from_expand_args($name);
     return $class unless $self->_is_unresolved($class, $kind);
     my $discovery_error = defined $kind ? $self->_discovery_error : undef;
-    # The recorded croak names a line in here; croak adds the caller's.
-    $discovery_error =~ s/(?: at \S+ line \d+\.)?\s*\z// if defined $discovery_error;
+    $discovery_error = $self->_error_reason($discovery_error) if defined $discovery_error;
     croak "unknown resource '" . ($name // '(undef)') . "': no IO::K8s class"
         . " for this apiVersion/kind (add it to resource_map if it is a CRD)"
         . (defined $discovery_error
             ? "; discovery failed, so the cluster could not confirm it: $discovery_error"
             : '');
+}
+
+# A caught error - a croak's string, or an APIError - as the reason another
+# message embeds: its text without the location it ends with. That location
+# names a line in here, or whatever frame a lazy builder left; the message it
+# goes into names the caller's line itself (karr k59). Once a file handle has
+# been read, Carp's location ends ', <$fh> line N.' (or 'chunk N').
+sub _error_reason {
+    my ($self, $error) = @_;
+    my $reason = "$error";
+    $reason =~ s/(?: at \S+ line \d+(?:, <[^>]*> (?:line|chunk) \d+)?\.)?\s*\z//;
+    return $reason;
 }
 
 # Extract the Kubernetes Kind (and any explicitly supplied apiVersion) from an
@@ -643,6 +654,11 @@ calling this again rebuilds the map from the cached catalog rather than
 re-querying the cluster. It does B<not> download C</openapi/v2> - that spec is
 fetched lazily only when L</schema_for> or L</compare_schema> need it.
 
+When discovery cannot be read, it croaks C<Could not load resource map from
+cluster:> followed by the reason - for an HTTP error status the message of
+the L<Kubernetes::REST::APIError>,
+C<Kubernetes API error (discovery GET /api): 401 ...>.
+
 B<Version selection (D17).> When a group serves a Kind in more than one
 version, the bare short name (C<Pod>, C<ServiceCIDR>) resolves to the version
 the B<cluster marks preferred> for that group - not to a fixed "stable beats
@@ -665,7 +681,8 @@ rather than being mapped to a class name that does not exist.
     # for schema_for/compare_schema only. The failure keeps this method's
     # documented wording; the underlying error rides along.
     my $catalog = eval { $self->_discovery };
-    croak "Could not load resource map from cluster: $@" unless $catalog;
+    croak 'Could not load resource map from cluster: ' . $self->_error_reason($@)
+        unless $catalog;
 
     return $self->_resource_map_from_catalog($catalog);
 }
@@ -763,8 +780,9 @@ has _discovery => (
     builder => sub { $_[0]->_fetch_discovery },
 );
 
-# The reason ($@ text) the last discovery fetch attempted from
-# _discovery_path_meta failed, kept so the croak in _build_path can name it: a
+# The reason the last discovery fetch attempted from _discovery_path_meta
+# failed - its $@, for an HTTP error status an APIError (karr k59), rendered
+# with _error_reason - kept so the croak in _build_path can name it: a
 # failed fetch and a healthy catalog without the Kind both come back from
 # _discovery_path_meta as undef (fail-closed, D16), and only this tells them
 # apart. Cleared by the next successful fetch and by invalidate_discovery.
@@ -815,13 +833,13 @@ sub _discovery_request {
 }
 
 # One discovery root's response, checked and decoded - for the synchronous
-# fetch and absorb_discovery alike. An HTTP error croaks; the second value
-# says whether the document is aggregated discovery (APIGroupDiscoveryList)
-# rather than the legacy one.
+# fetch and absorb_discovery alike. An HTTP error dies as an APIError like
+# any other checked response, carrying the body that says why (karr k59);
+# the second value says whether the document is aggregated discovery
+# (APIGroupDiscoveryList) rather than the legacy one.
 sub _discovery_document {
     my ($self, $root, $response) = @_;
-    croak "discovery GET $root failed: " . $response->status
-        if $response->status >= 400;
+    $self->_check_response($response, "discovery GET $root");
     my $body = $self->_json->decode($response->content);
     my $kind = ref $body eq 'HASH' ? ($body->{kind} // '') : '';
     return ($body, $kind eq 'APIGroupDiscoveryList');
@@ -1008,9 +1026,10 @@ reading legacy discovery takes a request per group and version, which only the
 synchronous path makes. The client then reads discovery itself when it first
 needs it, as it always did.
 
-An HTTP error status croaks the way the client's own discovery read does
-(C<discovery GET /apis failed: 503>), and so does a missing response or any
-key other than C</api> and C</apis>.
+An HTTP error status dies with a L<Kubernetes::REST::APIError>, as the
+client's own discovery read does, its C<context> naming the document:
+C<Kubernetes API error (discovery GET /apis): 503 ...>. A missing response,
+or any key other than C</api> and C</apis>, croaks.
 
 An async client hands the requests to its own transport and the responses
 back - here C<< $send->($request) >> stands for whatever runs a
@@ -1222,7 +1241,7 @@ sub _load_resource_map_from_cluster {
     my ($self) = @_;
     my $map = eval { $self->fetch_resource_map };
     if ($@) {
-        carp "Falling back to the built-in resource map: $@";
+        carp 'Falling back to the built-in resource map: ' . $self->_error_reason($@);
         return IO::K8s->default_resource_map;
     }
     return $map;
@@ -1297,6 +1316,7 @@ sub _build_path {
                 # pinned apiVersion is named: the Kind may well be served in
                 # another group or version, just not in this one (karr k43).
                 my $reason = $self->_discovery_error;
+                $reason = $self->_error_reason($reason) if defined $reason;
                 my $gvk = "Kind '$kind_hint'"
                     . (defined $av_hint && length $av_hint
                         ? " in apiVersion '$av_hint'" : '');
@@ -3452,10 +3472,17 @@ C<message> and C<details> of the Kubernetes C<Status> body, the decoded
 C<body>, the C<context> and the C<response>.
 
 That includes the C</openapi/v2> fetch behind C<schema_for> and
-C<compare_schema>. Everything else croaks with a plain string: invalid
-arguments, a resource name nothing resolves, a failed discovery, and an
-expired watch - its C<410> arrives as an C<ERROR> event in a stream the
-server answered with C<200>, not as an HTTP status (see L</watch>).
+C<compare_schema>, and the discovery documents (C<GET /api>, C<GET /apis>,
+context C<discovery GET /api>), which L</absorb_discovery> dies with
+directly. Where the client reads discovery for itself, a failure shows
+inside another message instead - the warning that the resource map falls
+back to the built-in one, the croak of L</fetch_resource_map>, the croak for
+a name discovery could not confirm - which embeds the error's text.
+
+Everything else croaks with a plain string: invalid arguments, a resource
+name nothing resolves, and an expired watch - its C<410> arrives as an
+C<ERROR> event in a stream the server answered with C<200>, not as an HTTP
+status (see L</watch>).
 
 =head1 UPGRADING FROM 0.02
 

@@ -65,7 +65,12 @@ Revision history for Kubernetes-REST
    matching $@ is unaffected; code that tests ref($@) sees an object now.
    The /openapi/v2 fetch behind schema_for and compare_schema dies with one
    too: "Could not fetch OpenAPI spec: 503" becomes "Kubernetes API error
-   (fetch OpenAPI spec): 503 <body>", at the caller's line.
+   (fetch OpenAPI spec): 503 <body>", at the caller's line. So does a
+   discovery read: "discovery GET /api failed: 401" becomes "Kubernetes API
+   error (discovery GET /api): 401 <body>", thrown by absorb_discovery and
+   embedded in the warning that falls back to the built-in resource map
+   and in the croaks of fetch_resource_map and build_path, which now name
+   one location instead of two.
  - delete takes propagationPolicy => 'Background', 'Foreground' or
    'Orphan', sent as a query parameter, and croaks on any other argument
    instead of ignoring it, so a misspelt option no longer silently orphans

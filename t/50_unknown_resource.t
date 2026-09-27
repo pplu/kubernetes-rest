@@ -158,7 +158,7 @@ subtest 'with discovery failing: the reason is named, not only the name' => sub 
     my $err = $@;
     like($err, qr/\Aunknown resource 'other\.example\.com\/v1\/Widget': no IO::K8s class/,
         'croaks naming the resource');
-    like($err, qr/discovery failed, so the cluster could not confirm it: .*discovery GET \/api failed: 404/s,
+    like($err, qr/discovery failed, so the cluster could not confirm it: Kubernetes API error \(discovery GET \/api\): 404 /,
         'and says discovery failed, with its reason');
     is_deeply([ grep { !m{\AGET /apis?\z} } @{ $io->calls } ], [],
         'nothing but the discovery attempts was sent');

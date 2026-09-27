@@ -45,7 +45,8 @@ aggregated-discovery `Accept` header) unsent; `absorb_discovery` takes the respo
 back. Two aggregated documents (`APIGroupDiscoveryList`) become the cached catalog and it
 returns true; a legacy document returns false and caches nothing — legacy discovery needs
 a request per group/version, which only the synchronous path makes. An HTTP error status
-croaks like the synchronous read (`discovery GET /apis failed: 503`).
+dies with a `Kubernetes::REST::APIError` like the synchronous read, context
+`discovery GET /apis` (k59).
 
 Changing the signature or return shape of any of these nine breaks a downstream
 distribution that has no way of knowing. Treat them as published API: additive changes
@@ -160,16 +161,22 @@ below). `RemoteError` inherits from `Error`, so `Error.pm` cannot load it — co
 ## Errors
 
 An HTTP error status dies with a `Kubernetes::REST::APIError` (k50), thrown by
-`_check_response` — so from every checked response, the `/openapi/v2` fetch included
-(k55). It carries `code` (`is_not_found`, `is_conflict`), the Status body's
-`reason`/`message`/`details`, the decoded `body`, `context` and `response`, and
+`_check_response` — so from every checked response, the `/openapi/v2` fetch (k55) and the
+discovery reads (k59) included. It carries `code` (`is_not_found`, `is_conflict`), the
+Status body's `reason`/`message`/`details`, the decoded `body`, `context` and `response`, and
 stringifies to the message the plain croak had, at the caller's line: `throw` trusts the
 throwing package through `@CARP_NOT`. A Moo lazy builder between the caller and the check
 breaks that chain (its calling frame is `Method::Generate::Accessor::_Generated`), which
 is why `_fetch_openapi_spec` is a method, not a builder.
 
-Everything else croaks with a plain string: invalid arguments, a name nothing resolves, a
-failed discovery read, and the watch `410` — an `ERROR` event inside a stream the server
+The client's own discovery read never dies as an APIError: it is caught
+(`_discovery_error`) and embedded. A message that embeds a caught error as its reason —
+the unknown-resource croak, the Unstructured `_build_path` croak, `fetch_resource_map`, the
+fallback carp — goes through `_error_reason`, which drops the error's own trailing
+location, so the message names one line (k59).
+
+Everything else croaks with a plain string: invalid arguments, a name nothing resolves,
+and the watch `410` — an `ERROR` event inside a stream the server
 answered with 200, answered with a re-list. An option key a method does not take croaks
 through `_croak_unknown_args` before any request (`delete`, `ensure_only`, `log`,
 `absorb_discovery`, and `list`, `get`, `watch` since k58); `ensure` croaks on anything

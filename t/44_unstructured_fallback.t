@@ -319,7 +319,7 @@ subtest 'a failing discovery fetch is named in the croak, not disguised as a mis
     like $err, qr/discovery failed/, 'the croak says discovery failed';
     like $err, qr/Kind 'MyCRD'/, 'names the Kind that was being resolved';
     like $err, qr/IO::K8s::Unstructured/, 'names the class the path was for';
-    like $err, qr/discovery GET \/api failed: 404/,
+    like $err, qr/Kubernetes API error \(discovery GET \/api\): 404 /,
         'carries the underlying reason from the discovery fetch';
     unlike $err, qr/no discovery entry/,
         'does not claim the catalog was consulted and came up empty';

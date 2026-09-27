@@ -44,7 +44,9 @@ so code that prints C<$@>, matches it against a regex or compares it with
 C<eq> keeps working. It is always true in boolean context.
 
 Everything else - invalid arguments, a resource name that resolves to no
-class, a failed discovery - still croaks with a plain string.
+class - still croaks with a plain string. Where such a message reports an
+API error behind it, such as a failed discovery read, it embeds this
+object's text.
 
 Not to be confused with L<Kubernetes::REST::Error>, the exception class of
 the deprecated v0 API.

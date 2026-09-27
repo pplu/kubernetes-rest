@@ -194,7 +194,7 @@ subtest 'legacy discovery: false, nothing cached' => sub {
     is_deeply($api->io->calls, [], 'no request');
 };
 
-subtest 'an HTTP error croaks as discovery does' => sub {
+subtest 'an HTTP error dies with an APIError, as discovery does' => sub {
     my $api = api();
     eval {
         $api->absorb_discovery(
@@ -202,7 +202,9 @@ subtest 'an HTTP error croaks as discovery does' => sub {
             '/apis' => response(503, 'unavailable'),
         );
     };
-    like($@, qr{\Adiscovery GET /apis failed: 503}, 'names the root and the status');
+    isa_ok($@, 'Kubernetes::REST::APIError', 'the error');
+    like($@, qr{\AKubernetes API error \(discovery GET /apis\): 503 unavailable at },
+        'names the root, the status and the body');
     ok(!$api->_has_discovery, 'no catalog cached');
 };
 
