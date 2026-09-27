@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-27T03:30:55Z
+claimed_by: backlog-2
+class: standard
+completed: 2026-09-27T03:30:55Z
+created: 2026-09-27T00:02:28Z
+id: 38
+priority: low
+started: 2026-09-27T02:51:31Z
+status: done
+tags:
+- test
+- docs
+title: Mock-Harness matcht Pfade inklusive Query-String, Skill sagt das Gegenteil
+updated: 2026-09-27T03:30:55Z
+---
+
+In t/lib/Test/Kubernetes/Mock.pm baut call() den Lookup-Key aus dem Pfad samt Query-String; die aufgezeichneten requests sind ohne Query. Der Skill kubernetes-rest-core sagt, Query-Strings würden fürs Matching entfernt. t/47 registriert deshalb Antworten mit labelSelector im Pfad. Skill-Text oder Harness angleichen.
+
+Umgesetzt auf fix/backlog-2, uncommittet. prove -lr t/ 46 Dateien 717 Tests PASS (Orchestrator-Gegenprobe), dzil build sauber.
+
+2026-09-27 03:30 Committed as eea3d46 (skills: describe the mock harness query-string matching as it is). No Changes entry (doc-only). Verified standalone in a temp worktree: prove -lr t/ 46 files, 717 tests, PASS.
