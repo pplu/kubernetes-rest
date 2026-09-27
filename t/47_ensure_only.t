@@ -412,4 +412,210 @@ subtest 'k39: an Unstructured item keys on the group in its own apiVersion' => s
         'the Unstructured gateway.example.com Gateway web goes');
 };
 
+# ---------------------------------------------------------------------------
+# karr k37: a prune that did nothing must not look like one that worked. A
+# failed list or delete warns with what was skipped and why, and the prune
+# goes on with the rest. A 404 stays silent: the cluster does not serve the
+# Kind, or the object is already gone. The return value is the applied
+# objects either way.
+# ---------------------------------------------------------------------------
+{
+    package Test::EnsureOnly::FailingIO;
+    use Moo;
+    extends 'Test::Kubernetes::Mock::IO';
+
+    use JSON::MaybeXS ();
+
+    # 'METHOD /path?query' => status. Those requests fail with a Status body
+    # naming the status; everything else goes to the mock, which answers 200
+    # for a registered response and 404 for anything else.
+    has fail => (is => 'ro', default => sub { {} });
+
+    my $wire_json = JSON::MaybeXS->new(utf8 => 1, canonical => 1);
+
+    around call => sub {
+        my ($orig, $self, $req) = @_;
+        (my $path = $req->url) =~ s{\Ahttps?://[^/]+}{};
+        my $status = $self->fail->{ $req->method . ' ' . $path }
+            or return $self->$orig($req);
+        (my $clean_path = $path) =~ s{\?.*}{};
+        push @{ $self->requests },
+            { method => $req->method, path => $clean_path, content => $req->content };
+        return Test::Kubernetes::Mock::Response->new(
+            status  => $status,
+            content => $wire_json->encode({
+                kind => 'Status', apiVersion => 'v1', status => 'Failure',
+                code => $status, message => "mock refuses with $status",
+            }),
+        );
+    };
+}
+
+sub failing_api {
+    my (%fail) = @_;
+    return Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        resource_map_from_cluster => 0,
+        io          => Test::EnsureOnly::FailingIO->new(fail => \%fail),
+    );
+}
+
+my $CM_DEFAULT = '/api/v1/namespaces/default/configmaps';
+my $CM_OTHER   = '/api/v1/namespaces/other/configmaps';
+
+sub cm_item {
+    my ($name, $ns) = @_;
+    return { metadata => { name => $name, namespace => $ns // 'default', labels => { app => 'demo' } } };
+}
+
+sub keep_me_cm {
+    my ($api) = @_;
+    return $api->k8s->new_object('ConfigMap', cm_item('keep-me'));
+}
+
+# keep-me is created in default; each given collection lists the given items.
+sub mock_cm_cluster {
+    my ($io, %items_in) = @_;
+    $io->add_response('POST', $CM_DEFAULT, {
+        apiVersion => 'v1', kind => 'ConfigMap',
+        metadata   => { %{ cm_item('keep-me')->{metadata} }, resourceVersion => '1' },
+    });
+    for my $collection (sort keys %items_in) {
+        $io->add_response('GET', $collection . $SEL, {
+            apiVersion => 'v1', kind => 'ConfigMapList', items => $items_in{$collection},
+        });
+    }
+}
+
+my $DELETED = { kind => 'Status', apiVersion => 'v1', status => 'Success' };
+
+sub ensure_only_warnings {
+    my ($api, %args) = @_;
+    my @warnings;
+    my @applied = do {
+        local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+        $api->ensure_only(label => 'app=demo', %args);
+    };
+    return (\@warnings, \@applied);
+}
+
+subtest 'k37: a Kind the cluster does not serve (list 404) is skipped silently' => sub {
+    my $api = failing_api();
+    my $io  = $api->io;
+    mock_cm_cluster($io, $CM_DEFAULT => [ cm_item('keep-me'), cm_item('stale') ]);
+    $io->add_response('DELETE', "$CM_DEFAULT/stale", $DELETED);
+    # No Role list registered: the mock answers 404, like a cluster that
+    # does not serve the Kind.
+
+    my ($warnings, $applied) = ensure_only_warnings($api,
+        objects    => [ keep_me_cm($api) ],
+        kinds      => [qw( Role ConfigMap )],
+        namespaces => ['default'],
+    );
+    is_deeply($warnings, [], 'no warning for a 404 list');
+    is(scalar @$applied, 1, 'the applied object is returned');
+    ok((grep { $_ eq '/apis/rbac.authorization.k8s.io/v1/namespaces/default/roles' }
+        @{ requests_for($io, 'GET') }), 'the Role list was attempted');
+    is_deeply(requests_for($io, 'DELETE'), [ "$CM_DEFAULT/stale" ],
+        'the next kinds entry is still pruned');
+};
+
+subtest 'k37: a failed list warns with Kind, namespace and reason; the rest still runs' => sub {
+    my $api = failing_api("GET $CM_DEFAULT$SEL" => 403);
+    my $io  = $api->io;
+    mock_cm_cluster($io, $CM_OTHER => [ cm_item('stale', 'other') ]);
+    $io->add_response('DELETE', "$CM_OTHER/stale", $DELETED);
+
+    my ($warnings, $applied) = ensure_only_warnings($api,
+        objects    => [ keep_me_cm($api) ],
+        kinds      => ['ConfigMap'],
+        namespaces => [qw( default other )],
+    );
+    is(scalar @$warnings, 1, 'one warning') or diag explain $warnings;
+    my $w = $warnings->[0] // '';
+    like($w, qr/\Aensure_only: cannot list ConfigMap in namespace 'default'/,
+        'it names the Kind and the namespace');
+    like($w, qr/403/, 'it names the status');
+    like($w, qr/mock refuses with 403/, 'it carries the server message');
+    like($w, qr/ at \Q${\ __FILE__}\E line \d+\.\n\z/, 'it points at the caller, once');
+    unlike($w, qr/ line \d+\..* line \d+\./s, 'no second location from the caught croak');
+
+    is(scalar @$applied, 1, 'the applied object is still returned');
+    is_deeply(requests_for($io, 'DELETE'), [ "$CM_OTHER/stale" ],
+        'the other namespace is still pruned');
+};
+
+subtest 'k37: a failed cluster-scoped list says so' => sub {
+    my $CLUSTER_ROLES = '/apis/rbac.authorization.k8s.io/v1/clusterroles';
+    my $api = failing_api("GET $CLUSTER_ROLES$SEL" => 500);
+
+    my ($warnings, $applied) = ensure_only_warnings($api,
+        objects => [],
+        kinds   => ['ClusterRole'],
+    );
+    is(scalar @$warnings, 1, 'one warning') or diag explain $warnings;
+    like($warnings->[0] // '', qr/cannot list ClusterRole at cluster scope/,
+        'it names the Kind and cluster scope');
+    like($warnings->[0] // '', qr/500/, 'it names the status');
+    is_deeply($applied, [], 'the return value is still the (empty) applied list');
+};
+
+subtest 'k37: a kinds entry no class resolves warns, it is not taken for a 404' => sub {
+    my $api = failing_api();
+
+    my ($warnings) = ensure_only_warnings($api,
+        objects    => [],
+        kinds      => ['NoSuchKind'],
+        namespaces => ['default'],
+    );
+    is(scalar @$warnings, 1, 'one warning') or diag explain $warnings;
+    like($warnings->[0] // '', qr/cannot list NoSuchKind in namespace 'default'/,
+        'it names the kinds entry');
+    is_deeply($api->io->requests, [], 'nothing was sent');
+};
+
+subtest 'k37: a delete 404 is silent, a failed delete warns and the prune goes on' => sub {
+    my $api = failing_api("DELETE $CM_DEFAULT/locked" => 403);
+    my $io  = $api->io;
+    mock_cm_cluster($io, $CM_DEFAULT =>
+        [ map { cm_item($_) } qw( keep-me gone locked stale ) ]);
+    # No DELETE registered for gone: the mock answers 404 - already deleted.
+    $io->add_response('DELETE', "$CM_DEFAULT/stale", $DELETED);
+
+    my ($warnings, $applied) = ensure_only_warnings($api,
+        objects    => [ keep_me_cm($api) ],
+        kinds      => ['ConfigMap'],
+        namespaces => ['default'],
+    );
+    is(scalar @$warnings, 1, 'one warning, for locked only') or diag explain $warnings;
+    my $w = $warnings->[0] // '';
+    like($w, qr/\Aensure_only: cannot delete ConfigMap 'locked' in namespace 'default'/,
+        'it names the Kind, the name and the namespace');
+    like($w, qr/403/, 'it names the status');
+    like($w, qr/mock refuses with 403/, 'it carries the server message');
+
+    is_deeply(requests_for($io, 'DELETE'),
+        [ map { "$CM_DEFAULT/$_" } qw( gone locked stale ) ],
+        'every unexpected item was tried, stale after the failed locked');
+    is(scalar @$applied, 1, 'the applied object is returned');
+};
+
+subtest 'k37: the warnings can be promoted to errors' => sub {
+    my $api = failing_api("GET $CM_DEFAULT$SEL" => 403);
+    mock_cm_cluster($api->io);
+
+    my @applied = eval {
+        local $SIG{__WARN__} = sub { die @_ };
+        $api->ensure_only(
+            label      => 'app=demo',
+            objects    => [ keep_me_cm($api) ],
+            kinds      => ['ConfigMap'],
+            namespaces => ['default'],
+        );
+    };
+    like($@, qr/cannot list ConfigMap in namespace 'default'/, 'ensure_only dies with the warning');
+    is(scalar @applied, 0, 'and returns nothing');
+};
+
 done_testing;

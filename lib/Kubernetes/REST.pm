@@ -1402,6 +1402,19 @@ Supports C<labelSelector> and C<fieldSelector> query parameters for server-side 
 
 =cut
 
+    my ($class, $response) = $self->_list_request($short_class, %args);
+    $self->_check_response($response, "list $short_class");
+
+    return $self->_inflate_list($class, $response);
+}
+
+# list() up to the response, unchecked: returns the resolved class and the raw
+# response. ensure_only() needs the status itself - a 404 there means the Kind
+# is not served, not a failure - and must not read it back out of the text
+# _check_response croaks with.
+sub _list_request {
+    my ($self, $short_class, %args) = @_;
+
     # Extract query parameters before building path
     my $label_selector = delete $args{labelSelector};
     my $field_selector = delete $args{fieldSelector};
@@ -1417,9 +1430,7 @@ Supports C<labelSelector> and C<fieldSelector> query parameters for server-side 
     my $response = %params
         ? $self->_request('GET', $path, undef, parameters => \%params)
         : $self->_request('GET', $path);
-    $self->_check_response($response, "list $short_class");
-
-    return $self->_inflate_list($class, $response);
+    return ($class, $response);
 }
 
 sub get {
@@ -1732,6 +1743,18 @@ Delete a resource. Returns true on success.
 
 =cut
 
+    my ($class, $response) = $self->_delete_request($class_or_object, @rest);
+    $self->_check_response($response, "delete $class");
+
+    return 1;
+}
+
+# delete() up to the response, unchecked: returns the resolved class and the
+# raw response, for the same reason as _list_request - ensure_only() treats a
+# 404 (already gone) differently from a failure.
+sub _delete_request {
+    my ($self, $class_or_object, @rest) = @_;
+
     my ($class, $name, $namespace);
 
     if (ref($class_or_object)) {
@@ -1764,10 +1787,7 @@ Delete a resource. Returns true on success.
 
     my $path = $self->_build_path($class, name => $name, namespace => $namespace,
         $self->_unstructured_hint($class, $class_or_object));
-    my $response = $self->_request('DELETE', $path);
-    $self->_check_response($response, "delete $class");
-
-    return 1;
+    return ($class, $self->_request('DELETE', $path));
 }
 
 # Shared hashref handling for ensure() and ensure_only(): turns a manifest into
@@ -1986,7 +2006,19 @@ C<gateway.networking.k8s.io> Gateway of the same name is deleted. The version
 is not compared, so an object applied as C<autoscaling/v1> is kept when the
 listing goes through C<autoscaling/v2>.
 
-Returns the list of applied objects (from L</ensure_all>).
+Pruning goes on past a failure, and says so. When a C<kinds> entry cannot be
+listed in one namespace - an HTTP error, or an entry that resolves to no
+class - that combination is skipped with a warning naming the entry, the
+namespace (or cluster scope) and the reason; anything stale there survives
+this run. A 404 is silent: the cluster does not serve that Kind, so there is
+nothing to prune. A delete that fails warns with the Kind, name, namespace and
+reason, and the next object is tried; a 404 there means the object is already
+gone and is silent too. Promote the warnings to a fatal error with
+C<< local $SIG{__WARN__} = sub { die @_ } >> if a partial prune is
+unacceptable to you.
+
+Returns the list of applied objects (from L</ensure_all>), whether or not the
+pruning was complete.
 
 =cut
 
@@ -2018,15 +2050,50 @@ Returns the list of applied objects (from L</ensure_all>).
     };
     my %expected = map { $key_of->($_) => 1 } @objects;
 
+    # A failed list or delete leaves stale objects behind, so it is reported
+    # rather than swallowed - but only a real failure: a 404 on the list means
+    # the cluster does not serve the Kind, a 404 on the delete that the object
+    # is already gone. The status comes from the response, never from the text
+    # of an error. The caught croak already names the caller's line, which
+    # carp adds again, so the reason drops it.
+    my $where = sub {
+        my ($ns) = @_;
+        return defined $ns ? "in namespace '$ns'" : 'at cluster scope';
+    };
+    my $reason_of = sub {
+        my ($error) = @_;
+        $error =~ s/\s+\z//;
+        $error =~ s/ at \S+ line \d+\.\z//;
+        return $error;
+    };
+
     for my $kind (@kinds) {
         for my $ns (@namespaces) {
             my %list_args = (labelSelector => $label);
             $list_args{namespace} = $ns if defined $ns;
-            my $list = eval { $self->list($kind, %list_args) };
-            next unless $list;
+            my $list = eval {
+                my ($class, $response) = $self->_list_request($kind, %list_args);
+                return if $response->status == 404;
+                $self->_check_response($response, "list $kind");
+                $self->_inflate_list($class, $response);
+            };
+            unless ($list) {
+                carp "ensure_only: cannot list $kind " . $where->($ns)
+                    . ', nothing pruned there: ' . $reason_of->($@)
+                    if $@;
+                next;
+            }
             for my $item (@{$list->items}) {
                 next if $expected{ $key_of->($item) };
-                eval { $self->delete($item) };
+                next if eval {
+                    my ($class, $response) = $self->_delete_request($item);
+                    $response->status == 404
+                        || $self->_check_response($response, "delete $class");
+                };
+                my (undef, $item_kind) = $self->_api_version_and_kind($item);
+                carp "ensure_only: cannot delete $item_kind '" . $item->metadata->name
+                    . "' " . $where->($item->metadata->namespace)
+                    . ': ' . $reason_of->($@);
             }
         }
     }
