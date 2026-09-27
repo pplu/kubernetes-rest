@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-27T03:29:55Z
+claimed_by: backlog-2
+class: standard
+completed: 2026-09-27T03:29:55Z
+created: 2026-09-26T22:17:53Z
+id: 37
+priority: low
+started: 2026-09-27T02:51:07Z
+status: done
+tags:
+- ensure
+title: 'ensure_only: fehlgeschlagene List- und Delete-Requests ohne Signal'
+updated: 2026-09-27T03:29:55Z
+---
+
+ensure_only überspringt scheiternde List-Requests und ignoriert scheiternde Deletes. Ein Prune, der nichts getan hat, sieht aus wie Erfolg. Zu klären: warnen, zurückgeben oder eine Option zum Durchschlagen. Der Async-Client spiegelt die Semantik und zieht nach.
+
+Entscheidung Orchestrator 2026-09-27: Rückgabewert bleibt die Liste der angewendeten Objekte. Fehlgeschlagener List-Request warnt per carp mit Kind, Namespace und Grund, außer bei 404 (Kind nicht angeboten). Fehlgeschlagenes Delete warnt mit Kind, Namespace, Name und Grund, außer bei 404 (schon weg). Kosten falls falsch: zu viele oder zu wenige Warnungen; Option zum harten Abbruch später möglich.
+
+Umgesetzt auf fix/backlog-2, uncommittet. prove -lr t/ 46 Dateien 717 Tests PASS (Orchestrator-Gegenprobe), dzil build sauber.
+
+2026-09-27 03:29 Committed as ffa3a6a (Warn when ensure_only cannot list or delete, except on 404). Verified standalone in a temp worktree: prove -lr t/ 45 files, 693 tests, PASS.
