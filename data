@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-27T22:31:31Z
+claimed_by: backlog-8
+class: standard
+completed: 2026-09-27T22:31:26Z
+created: 2026-09-27T21:30:10Z
+id: 64
+priority: low
+started: 2026-09-27T21:45:21Z
+status: done
+tags:
+- errors
+- k59-followup
+title: Fallback-carp der Resource-Map nennt den Moo-Builder statt der Aufruferzeile
+updated: 2026-09-27T22:31:31Z
+---
+
+Gefunden bei k59 (2026-09-27), vorbestehend. Der carp beim Rückfall auf die eingebaute Resource-Map nennt REST.pm line 145 (Lazy-Builder von k8s) statt der Zeile des Aufrufers; die Carp-Kette reißt am Moo-Builder (wie bei k55 für den OpenAPI-Abruf gelöst). Gleiches Muster anwenden.
+
+Commit 2dd1a0b
