@@ -9,6 +9,10 @@ use lib "$FindBin::Bin/lib";
 use lib "$FindBin::Bin/../lib";
 
 use Test::Kubernetes::Mock qw(mock_api);
+use Kubernetes::REST;
+use Kubernetes::REST::Server;
+use Kubernetes::REST::AuthToken;
+use IO::K8s::Unstructured;
 
 my $api = mock_api();
 my $io  = $api->io;
@@ -179,6 +183,236 @@ sub requests_since {
     like($@, qr{autoscaling/v9}, 'unknown apiVersion: the error names the apiVersion');
     like($@, qr{HorizontalPodAutoscaler}, 'unknown apiVersion: the error names the Kind');
     is(scalar(my @sent = requests_since($mark)), 0, 'unknown apiVersion: no request sent');
+}
+
+# ---------------------------------------------------------------------------
+# karr k36: the PersistentVolumeClaim and Job special cases belong to the
+# built-in Kinds - core v1 PersistentVolumeClaim and batch/v1 Job - recognised
+# by apiVersion and Kind, not by the last segment of the class name. A custom
+# resource that reuses one of those Kind names in its own group is ensured like
+# any other object: GET, then PUT at the server's resourceVersion.
+# ---------------------------------------------------------------------------
+sub calls_since {
+    my ($api_io, $mark) = @_;
+    my @requests = @{ $api_io->requests };
+    return [ map { "$_->{method} $_->{path}" } @requests[ $mark .. $#requests ] ];
+}
+
+my $PIPELINE = '/apis/pipeline.example.com/v1/namespaces/default';
+
+# Case 9: a CRD Kind named Job in its own group. The Job path would call
+# status->succeeded on its plain-map status and die, or - without a status -
+# delete and recreate the object instead of updating it.
+{
+    add('GET', "$PIPELINE/jobs/nightly", {
+        apiVersion => 'pipeline.example.com/v1',
+        kind       => 'Job',
+        metadata   => { name => 'nightly', namespace => 'default', resourceVersion => '5' },
+        spec       => { schedule => 'daily' },
+        status     => { phase => 'Running' },
+    });
+    add('PUT', "$PIPELINE/jobs/nightly", {
+        apiVersion => 'pipeline.example.com/v1',
+        kind       => 'Job',
+        metadata   => { name => 'nightly', namespace => 'default', resourceVersion => '6' },
+        spec       => { schedule => 'hourly' },
+    });
+
+    my $job = $k8s->new_object('+My::Pipeline::Job',
+        metadata => { name => 'nightly', namespace => 'default' },
+        spec     => { schedule => 'hourly' },
+    );
+    my $mark = @{ $io->requests };
+    my $result = eval { $api->ensure($job) };
+    is($@, '', 'CRD Job: ensure does not die');
+    isa_ok($result, 'My::Pipeline::Job', 'CRD Job: result');
+    is_deeply(calls_since($io, $mark),
+        [ "GET $PIPELINE/jobs/nightly", "PUT $PIPELINE/jobs/nightly" ],
+        'CRD Job: a plain GET then PUT - no batch Job delete/recreate');
+    is($job->metadata->resourceVersion, '5', 'CRD Job: PUT at the server resourceVersion');
+    is($result && $result->metadata->resourceVersion, '6', 'CRD Job: the updated object is returned');
+}
+
+# Case 10: a CRD Kind named PersistentVolumeClaim in its own group. The PVC
+# path would return the existing object and silently drop the update.
+{
+    add('GET', "$PIPELINE/persistentvolumeclaims/cache", {
+        apiVersion => 'pipeline.example.com/v1',
+        kind       => 'PersistentVolumeClaim',
+        metadata   => { name => 'cache', namespace => 'default', resourceVersion => '8' },
+        spec       => { size => '1Gi' },
+    });
+    add('PUT', "$PIPELINE/persistentvolumeclaims/cache", {
+        apiVersion => 'pipeline.example.com/v1',
+        kind       => 'PersistentVolumeClaim',
+        metadata   => { name => 'cache', namespace => 'default', resourceVersion => '9' },
+        spec       => { size => '2Gi' },
+    });
+
+    my $claim = $k8s->new_object('+My::Pipeline::PersistentVolumeClaim',
+        metadata => { name => 'cache', namespace => 'default' },
+        spec     => { size => '2Gi' },
+    );
+    my $mark = @{ $io->requests };
+    my $result = eval { $api->ensure($claim) };
+    is($@, '', 'CRD PersistentVolumeClaim: ensure does not die');
+    is_deeply(calls_since($io, $mark),
+        [ "GET $PIPELINE/persistentvolumeclaims/cache", "PUT $PIPELINE/persistentvolumeclaims/cache" ],
+        'CRD PersistentVolumeClaim: updated, not returned unchanged');
+    is($result && $result->metadata->resourceVersion, '9',
+        'CRD PersistentVolumeClaim: the updated object is returned');
+}
+
+# Cases 11 and 12: the real batch/v1 Job keeps its special case - a succeeded
+# Job is returned unchanged, a failed one is deleted and recreated. Never a PUT.
+my $JOBS = '/apis/batch/v1/namespaces/default/jobs';
+
+sub batch_job {
+    my ($name, %extra) = @_;
+    return {
+        apiVersion => 'batch/v1',
+        kind       => 'Job',
+        metadata   => { name => $name, namespace => 'default' },
+        spec       => {
+            template => {
+                spec => {
+                    restartPolicy => 'Never',
+                    containers    => [ { name => 'run', image => 'busybox' } ],
+                },
+            },
+        },
+        %extra,
+    };
+}
+
+{
+    add('GET', "$JOBS/done", {
+        %{ batch_job('done', status => { succeeded => 1 }) },
+        metadata => { name => 'done', namespace => 'default', resourceVersion => '3' },
+    });
+
+    my $mark = @{ $io->requests };
+    my $result = eval { $api->ensure(batch_job('done')) };
+    is($@, '', 'batch/v1 Job succeeded: ensure does not die');
+    isa_ok($result, 'IO::K8s::Api::Batch::V1::Job', 'batch/v1 Job succeeded: result');
+    is_deeply(calls_since($io, $mark), [ "GET $JOBS/done" ],
+        'batch/v1 Job succeeded: returned unchanged, nothing written');
+    is($result && $result->metadata->resourceVersion, '3',
+        'batch/v1 Job succeeded: the existing object is returned');
+}
+
+{
+    add('GET', "$JOBS/broken", {
+        %{ batch_job('broken', status => { failed => 1 }) },
+        metadata => { name => 'broken', namespace => 'default', resourceVersion => '4' },
+    });
+    add('DELETE', "$JOBS/broken", { kind => 'Status', apiVersion => 'v1', status => 'Success' });
+    add('POST', $JOBS, {
+        %{ batch_job('broken') },
+        metadata => { name => 'broken', namespace => 'default', resourceVersion => '10' },
+    });
+
+    my $mark = @{ $io->requests };
+    my $result = eval { $api->ensure(batch_job('broken')) };
+    is($@, '', 'batch/v1 Job failed: ensure does not die');
+    is_deeply(calls_since($io, $mark),
+        [ "GET $JOBS/broken", "DELETE $JOBS/broken", "POST $JOBS" ],
+        'batch/v1 Job failed: deleted and recreated, no PUT');
+    is($result && $result->metadata->resourceVersion, '10',
+        'batch/v1 Job failed: the recreated object is returned');
+}
+
+# Cases 13-15: IO::K8s::Unstructured follows the same rule through its
+# instance data - its class name says nothing about the Kind it holds.
+{
+    my $uio = Test::Kubernetes::Mock::IO->new;
+    $uio->add_response('GET', '/api', {
+        kind  => 'APIGroupDiscoveryList',
+        items => [ { metadata => { name => '' }, versions => [ { version => 'v1', resources => [] } ] } ],
+    });
+    my $jobs_in = sub {
+        my ($group, $version) = @_;
+        return {
+            version   => $version,
+            resources => [ {
+                resource     => 'jobs',
+                responseKind => { group => $group, version => $version, kind => 'Job' },
+                scope        => 'Namespaced',
+            } ],
+        };
+    };
+    # batch/v2 does not exist; it stands for "an apiVersion the Job special
+    # case was not written for".
+    $uio->add_response('GET', '/apis', {
+        kind  => 'APIGroupDiscoveryList',
+        items => [
+            { metadata => { name => 'batch' },
+              versions => [ $jobs_in->('batch', 'v1'), $jobs_in->('batch', 'v2') ] },
+            { metadata => { name => 'example.com' },
+              versions => [ $jobs_in->('example.com', 'v1') ] },
+        ],
+    });
+    my $uapi = Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        io          => $uio,
+    );
+
+    # The resource calls only - the first path build fetches discovery.
+    my $resource_calls = sub {
+        my ($mark) = @_;
+        return [ grep { !m{\AGET /apis?\z} } @{ calls_since($uio, $mark) } ];
+    };
+
+    my $unstructured = sub {
+        my ($api_version, $name) = @_;
+        return IO::K8s::Unstructured->FROM_HASH({
+            apiVersion => $api_version,
+            kind       => 'Job',
+            metadata   => { name => $name, namespace => 'default' },
+        });
+    };
+
+    # Case 13: apiVersion batch/v1, Kind Job - the real Job, special-cased.
+    my $BATCH = '/apis/batch/v1/namespaces/default/jobs';
+    $uio->add_response('GET', "$BATCH/u-done", {
+        apiVersion => 'batch/v1', kind => 'Job',
+        metadata   => { name => 'u-done', namespace => 'default', resourceVersion => '3' },
+        status     => { succeeded => 1 },
+    });
+    my $mark = @{ $uio->requests };
+    my $result = eval { $uapi->ensure($unstructured->('batch/v1', 'u-done')) };
+    is($@, '', 'Unstructured batch/v1 Job: ensure does not die');
+    isa_ok($result, 'IO::K8s::Unstructured', 'Unstructured batch/v1 Job: result');
+    is_deeply($resource_calls->($mark), [ "GET $BATCH/u-done" ],
+        'Unstructured batch/v1 Job: succeeded, returned unchanged');
+
+    # Cases 14 and 15: Kind Job in another group, or under an apiVersion other
+    # than batch/v1, is an ordinary object - GET then PUT.
+    for my $case (
+        [ 'example.com/v1', '/apis/example.com/v1/namespaces/default/jobs', 'Job in its own group' ],
+        [ 'batch/v2',       '/apis/batch/v2/namespaces/default/jobs',       'Job under batch/v2' ],
+    ) {
+        my ($api_version, $collection, $label) = @$case;
+        $uio->add_response('GET', "$collection/u-run", {
+            apiVersion => $api_version, kind => 'Job',
+            metadata   => { name => 'u-run', namespace => 'default', resourceVersion => '5' },
+            status     => { phase => 'Running' },
+        });
+        $uio->add_response('PUT', "$collection/u-run", {
+            apiVersion => $api_version, kind => 'Job',
+            metadata   => { name => 'u-run', namespace => 'default', resourceVersion => '6' },
+        });
+
+        my $object = $unstructured->($api_version, 'u-run');
+        my $mark = @{ $uio->requests };
+        my $result = eval { $uapi->ensure($object) };
+        is($@, '', "Unstructured $label: ensure does not die");
+        is_deeply($resource_calls->($mark), [ "GET $collection/u-run", "PUT $collection/u-run" ],
+            "Unstructured $label: a plain GET then PUT");
+        is($object->metadata->resourceVersion, '5',
+            "Unstructured $label: PUT at the server resourceVersion");
+    }
 }
 
 done_testing;

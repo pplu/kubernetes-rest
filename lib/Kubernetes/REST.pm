@@ -1792,6 +1792,22 @@ sub _manifest_to_object {
     return $self->k8s->struct_to_object($class, $manifest);
 }
 
+# The apiVersion and Kind an object is an instance of, for ensure() and
+# ensure_only() to tell resources apart by. A typed object answers from its
+# class (api_version(), kind()); IO::K8s::Unstructured from its instance data,
+# since its class name says nothing about what it holds. The last segment of a
+# class name is not enough on its own: a CRD is free to reuse a built-in Kind
+# name in its own group.
+sub _api_version_and_kind {
+    my ($self, $object) = @_;
+    my $api_version = ref($object) eq 'IO::K8s::Unstructured' ? $object->apiVersion
+                    : $object->can('api_version')           ? $object->api_version
+                    : undef;
+    my $kind = $object->can('kind') ? $object->kind : undef;
+    ($kind = ref $object) =~ s/.*::// unless defined $kind;
+    return ($api_version // '', $kind);
+}
+
 sub ensure {
     my ($self, $object) = @_;
 
@@ -1841,13 +1857,20 @@ Special-cases for kinds with server-side mutation constraints:
 
 =over 4
 
-=item * C<PersistentVolumeClaim> - spec is immutable after creation, so an existing
-PVC is returned unchanged.
+=item * C<PersistentVolumeClaim> (core C<v1>) - spec is immutable after
+creation, so an existing PVC is returned unchanged.
 
-=item * C<Job> - spec is immutable; an existing Job that is active or has
-succeeded is returned unchanged. A failed Job is deleted and recreated.
+=item * C<Job> (C<batch/v1>) - spec is immutable; an existing Job that is
+active or has succeeded is returned unchanged. A failed Job is deleted and
+recreated.
 
 =back
+
+Both are recognised by apiVersion and Kind together: a typed object's
+C<api_version> and C<kind>, or an L<IO::K8s::Unstructured> object's
+C<apiVersion> and C<kind> fields - never by the class name. A custom resource
+that reuses one of these Kind names in its own group is ensured like any other
+object, and so is a C<Job> under any apiVersion other than C<batch/v1>.
 
 =cut
 
@@ -1855,7 +1878,14 @@ succeeded is returned unchanged. A failed Job is deleted and recreated.
 
     my $class = ref($object);
     croak "ensure requires an IO::K8s object or hashref" unless blessed($object);
-    (my $kind = $class) =~ s/.*:://;
+    my ($api_version, $kind) = $self->_api_version_and_kind($object);
+    # The special cases below are the built-in core v1 PersistentVolumeClaim
+    # and batch/v1 Job only. The apiVersion is compared exactly, not just its
+    # group: the Job branch reads batch/v1's status fields and deletes what it
+    # takes for a failed Job, so an apiVersion it was not written for falls
+    # through to the plain update, where a mismatch fails loudly instead.
+    my $is_pvc = $api_version eq 'v1'       && $kind eq 'PersistentVolumeClaim';
+    my $is_job = $api_version eq 'batch/v1' && $kind eq 'Job';
     my $metadata = $object->metadata or croak "object must have metadata";
     my $name = $metadata->name or croak "object must have metadata.name";
     my $namespace = $metadata->namespace;
@@ -1874,12 +1904,12 @@ succeeded is returned unchanged. A failed Job is deleted and recreated.
     die $get_err if $get_err && $get_err !~ /\b404\b/;
 
     if ($existing) {
-        return $existing if $kind eq 'PersistentVolumeClaim';
-        if ($kind eq 'Job') {
-            my $status = $existing->status;
-            my $succeeded = $status && $status->succeeded;
-            my $active    = $status && $status->active;
-            return $existing if $succeeded || $active;
+        return $existing if $is_pvc;
+        if ($is_job) {
+            # Read from TO_JSON, not status(): an IO::K8s::Unstructured Job has
+            # no status accessor, its status rides in the unknown-fields bag.
+            my $status = $existing->TO_JSON->{status} || {};
+            return $existing if $status->{succeeded} || $status->{active};
             eval { $self->delete($existing) };
             return $self->create($object);
         }
@@ -1903,7 +1933,7 @@ succeeded is returned unchanged. A failed Job is deleted and recreated.
         my $response = $self->_request('GET', $path);
         $self->_check_response($response, "ensure post-409 get $kind/$name");
         $existing = $self->_inflate_object($class, $response);
-        return $existing if $kind eq 'PersistentVolumeClaim';
+        return $existing if $is_pvc;
         $object->metadata->resourceVersion($existing->metadata->resourceVersion);
         return $self->update($object);
     }

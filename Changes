@@ -11,6 +11,10 @@ Revision history for Kubernetes-REST
    autoscaling/v2. An apiVersion no known class serves now croaks, naming
    the Kind and apiVersion, instead of falling back to the Kind's default
    version.
+ - ensure special-cases only the built-in core v1 PersistentVolumeClaim and
+   batch/v1 Job, matched by apiVersion and Kind; a custom resource reusing
+   either Kind name is updated like any other object instead of dying on
+   status->succeeded or silently skipping the update.
 
 1.108     2026-09-22 02:22:33Z
 
