@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-27T22:31:05Z
+claimed_by: backlog-8
+class: standard
+completed: 2026-09-27T22:31:00Z
+created: 2026-09-27T21:29:59Z
+id: 62
+priority: low
+started: 2026-09-27T21:45:12Z
+status: done
+tags:
+- v0
+- k58-followup
+title: v0 Read*Status liest die Hauptressource statt der Status-Subresource
+updated: 2026-09-27T22:31:05Z
+---
+
+Gefunden bei k58 (2026-09-27). V0Group verwirft das Status-Suffix von Read*Status still; gelesen wird die Hauptressource. Seit k58 nimmt get subresource => 'status' - durchreichen.
+
+Commit 10d596a
