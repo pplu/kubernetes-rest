@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T21:44:03Z
+claimed_by: backlog-7
+class: standard
+completed: 2026-09-27T21:43:59Z
+created: 2026-09-27T20:44:00Z
+id: 58
+priority: medium
+started: 2026-09-27T21:03:04Z
+status: done
+tags:
+- api
+- args
+- k53-followup
+title: 'list, get, watch: unbekannte Options-Keys verschwinden still'
+updated: 2026-09-27T21:44:03Z
+---
+
+Gefunden bei k53 (2026-09-27). list, get und watch ignorieren unbekannte Keys: label_selector liefert ungefiltert, namespce fragt clusterweit ab. Strikt machen braucht einen Filter in V0Group::_dispatch für list/read/watch (wie bei delete in k49) und eine Entscheidung über undokumentiert durchgereichte Argumente (name bei list/watch, subresource bei get). ensure($obj, ...) ignoriert zusätzliche Argumente.
+
+Commit f7b2f0c
