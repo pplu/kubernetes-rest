@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T00:11:30Z
+claimed_by: ensure-followups
+class: standard
+completed: 2026-09-27T00:11:30Z
+created: 2026-09-26T22:17:38Z
+id: 34
+priority: medium
+started: 2026-09-26T23:48:08Z
+status: done
+tags:
+- ensure
+title: ensure und ensure_only typisieren Hashrefs nur über kind, apiVersion wird ignoriert
+updated: 2026-09-27T00:11:30Z
+---
+
+Ein Hashref-Manifest mit apiVersion autoscaling/v1 und kind HorizontalPodAutoscaler wird über expand_class(kind) als Default-Version v2 inflatiert und an den v2-Pfad geschickt. Ansatz: apiVersion mit an expand_class geben, wenn vorhanden. Der Async-Client (Net::Async::Kubernetes) übernimmt das danach.
+
+Umgesetzt auf fix/ensure-followups, uncommittet. prove -lr t/ 45 Dateien 661 Tests PASS, dzil build sauber.
+
+2026-09-27 00:11 Committed as e968101 on fix/ensure-followups: shared _manifest_to_object helper resolves a hashref manifest apiVersion via expand_class(kind, api_version), croaking when no class serves it. Cases 6-8 in t/17_ensure.t plus two k34 subtests in t/47_ensure_only.t. Verified in isolated worktree: prove -lr t/ 45 files 661 tests PASS.
