@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T03:58:34Z
+claimed_by: backlog-3
+class: standard
+completed: 2026-09-27T03:58:34Z
+created: 2026-09-27T03:16:44Z
+id: 44
+priority: medium
+started: 2026-09-27T03:37:11Z
+status: done
+tags:
+- ensure
+title: ensure erkennt 404 und 409 per Regex im Croak-Text
+updated: 2026-09-27T03:58:34Z
+---
+
+ensure prüft auf 404 und 409 mit Wortgrenzen-Regex im Fehlertext von _check_response. Enthält ein Response-Body diese Ziffern, verzweigt ensure falsch. Umstellen auf den Status der Response, wie seit k37 in ensure_only über _list_request und _delete_request.
+
+Umgesetzt auf fix/backlog-3, uncommittet. prove -lr t/ 46 Dateien 726 Tests PASS (Orchestrator-Gegenprobe), dzil build sauber.
+
+Committed as a8e34d9 - Branch ensure on the response status, not the error text k44. Verified in an isolated worktree at that commit: prove -lr t/ 46 files 726 tests PASS. Branch head after both k43 519244e and k44 a8e34d9 also 46 files 726 tests PASS, dzil build clean.
