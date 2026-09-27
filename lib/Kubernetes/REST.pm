@@ -2450,8 +2450,17 @@ that; any other value croaks before anything is applied.
 Returns the list of applied objects (from L</ensure_all>), whether or not the
 pruning was complete.
 
+Any argument other than C<label>, C<objects>, C<kinds>, C<namespaces> and
+C<propagationPolicy> croaks before anything is applied, naming it: a
+misspelt option is not ignored.
+
 =cut
 
+    # A misspelt option is not ignored, before anything is applied: a
+    # propagation_policy typo would prune with Background, a namespace typo
+    # scan cluster scope only (karr k53).
+    $self->_croak_unknown_args('ensure_only', \%args,
+        qw(label objects kinds namespaces propagationPolicy));
     my $label      = $args{label} or croak "ensure_only requires 'label'";
     my @objects    = @{$args{objects} || []};
     my @kinds      = @{$args{kinds} || []};
@@ -2859,7 +2868,9 @@ Also accepts, for namespaced resources, C<namespace>; and as further optional
 arguments: C<container> (name, for multi-container pods), C<sinceSeconds> /
 C<sinceTime> (show only recent output), C<timestamps> (prepend a timestamp to
 each line), C<previous> (logs from the container's previous run, after a
-restart), and C<limitBytes> (byte cap on the response).
+restart), and C<limitBytes> (byte cap on the response). Any other argument
+croaks before the request is sent, naming it: a misspelt option is not
+ignored.
 
 =cut
 
@@ -2873,6 +2884,11 @@ restart), and C<limitBytes> (byte cap on the response).
     } else {
         croak "Invalid arguments to log()";
     }
+    # A misspelt option is not ignored (karr k53): tail_lines => 10 would
+    # fetch the whole log.
+    $self->_croak_unknown_args('log', \%args, qw(name namespace container
+        follow tailLines sinceSeconds sinceTime timestamps previous limitBytes
+        on_line));
 
     croak "name required for log" unless $args{name};
 
