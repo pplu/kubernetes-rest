@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T03:30:42Z
+claimed_by: backlog-2
+class: standard
+completed: 2026-09-27T03:30:42Z
+created: 2026-09-27T01:23:30Z
+id: 42
+priority: low
+started: 2026-09-27T02:51:21Z
+status: done
+tags:
+- resolve
+title: expand_class verliert bei GVK-Map-Einträgen die Plus-Markierung
+updated: 2026-09-27T03:30:42Z
+---
+
+Für einen GVK-Map-Eintrag mit Plus-Klassennamen wie +My::X liefert expand_class den Namen ohne Plus. IO::K8s struct_to_object expandiert einen noch nicht geladenen Namen dann erneut zu IO::K8s::My::X (Cant locate IO/K8s/My/X.pm). In Net::Async::Kubernetes durch den Vorab-Check aus k43 verdeckt; ensure mit Hashref und apiVersion hier dürfte betroffen sein. Zuerst reproduzieren, ggf. Ursache in IO::K8s.
+
+Umgesetzt auf fix/backlog-2, uncommittet. prove -lr t/ 46 Dateien 717 Tests PASS (Orchestrator-Gegenprobe), dzil build sauber.
+
+2026-09-27 03:30 Committed as 93063dc (Inflate a resolved class exactly instead of re-resolving its name). Verified standalone in a temp worktree: prove -lr t/ 46 files, 717 tests, PASS.
