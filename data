@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T19:34:19Z
+claimed_by: backlog-4
+class: standard
+completed: 2026-09-27T19:34:19Z
+created: 2026-09-26T22:17:43Z
+id: 35
+priority: low
+started: 2026-09-27T04:26:27Z
+status: done
+tags:
+- http
+title: prepare_request kodiert Query-Parameterwerte nicht
+updated: 2026-09-27T19:34:19Z
+---
+
+prepare_request hängt parameters als key=value ohne Kodierung an. Für Label-Selectoren unkritisch, aber ein fieldSelector-Wert mit & + # % oder ; würde vom API-Server falsch geparst. Werte URI-kodieren; Tests im Async-Client matchen teils den rohen Query-String und müssten dann mitziehen.
+
+Umgesetzt auf fix/backlog-4, uncommittet. Worker: prove -lr t/ 48 Dateien 754 Tests PASS, NAK-Suite gegen diesen Baum 37 Dateien 285 Tests PASS, dzil build sauber.
+
+2026-09-27 19:34 Committed 6a072ca: Percent-encode query parameters that would split or alter the query. prove -lr t/ green in isolated worktree (47 Dateien, 748 Tests) and on branch HEAD; dzil build clean.
