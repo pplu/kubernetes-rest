@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-27T03:58:13Z
+claimed_by: backlog-3
+class: standard
+completed: 2026-09-27T03:58:13Z
+created: 2026-09-27T03:16:40Z
+id: 43
+priority: high
+started: 2026-09-27T03:37:07Z
+status: done
+tags:
+- unstructured
+- discovery
+title: 'Discovery-Rückfall: gepinnter GV weicht auf andere Gruppe aus'
+updated: 2026-09-27T03:58:13Z
+---
+
+Wird eine gepinnte Gruppe/Version nicht bedient, weicht _discovery_path_meta auf jede Gruppe aus, die die Kind anbietet. expand_class mit other.org/v1/Widget bestätigt dann über example.org, und list geht dorthin. Mit ensure_only kann das in der falschen Gruppe löschen. Repro vom Worker liegt im Scratchpad als k40_unserved_pin.pl. Semantikfrage aus Design D16: ein qualifizierter Name sollte fail-closed sein, wenn sein GV nicht bedient wird.
+
+Umgesetzt auf fix/backlog-3, uncommittet. prove -lr t/ 46 Dateien 726 Tests PASS (Orchestrator-Gegenprobe), dzil build sauber.
+
+Committed as 519244e - Fail closed when a qualified name's group/version is not served k43. Verified in an isolated worktree at that commit: prove -lr t/ 46 files 726 tests wait
+
+Correction: the isolated worktree at 519244e ran 46 files, 720 tests, PASS - not 726 quoted above by mistake. 726 is the branch head after both commits 519244e and a8e34d9. dzil build clean at head.
