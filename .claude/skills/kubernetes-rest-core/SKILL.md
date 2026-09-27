@@ -95,7 +95,8 @@ Subresource paths are the resource path plus a suffix: `/log`, `/exec`, `/attach
 
 `resource_map_from_cluster` defaults to **1**: the map is built lazily from the cluster's
 aggregated discovery (`GET /api` + `GET /apis`, design D11; a cluster older than 1.27
-answers with legacy discovery and gets a request per group/version), cached per instance
+answers with legacy discovery and gets a request per group/version; one answering an
+error status is skipped with a `carp`, a 404 silently, k63), cached per instance
 in `_discovery` and dropped by `invalidate_discovery`. If reading it fails, the map falls
 back to `IO::K8s->default_resource_map` with a `carp` — a failed fetch degrades, it does
 not die. `_resource_map_from_catalog` skips `*List` kinds, gives a Kind to the version the
@@ -168,13 +169,15 @@ Status body's `reason`/`message`/`details`, the decoded `body`, `context` and `r
 stringifies to the message the plain croak had, at the caller's line: `throw` trusts the
 throwing package through `@CARP_NOT`. A Moo lazy builder between the caller and the check
 breaks that chain (its calling frame is `Method::Generate::Accessor::_Generated`), which
-is why `_fetch_openapi_spec` is a method, not a builder.
+is why `_fetch_openapi_spec` is a method, not a builder. A warning that has to be raised
+inside a builder — the legacy discovery skip runs in `_discovery`'s (k63) — goes through
+`_carp_past_builders`, which trusts those generated frames for that one `carp` only.
 
 The client's own discovery read never dies as an APIError: it is caught
 (`_discovery_error`) and embedded. A message that embeds a caught error as its reason —
 the unknown-resource croak, the Unstructured `_build_path` croak, `fetch_resource_map`, the
-fallback carp — goes through `_error_reason`, which drops the error's own trailing
-location, so the message names one line (k59).
+fallback carp, the legacy discovery skip — goes through `_error_reason`, which drops the
+error's own trailing location, so the message names one line (k59).
 
 Everything else croaks with a plain string: invalid arguments, a name nothing resolves,
 and the watch `410` — an `ERROR` event inside a stream the server

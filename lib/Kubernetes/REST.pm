@@ -480,6 +480,20 @@ sub _error_reason {
     return $reason;
 }
 
+# carp, for a warning raised while a lazy attribute is built - the discovery
+# catalog, the resource map built from it. Carp skips the frames of Moo's
+# generated accessors (Moo marks them internal), but not the frame where this
+# package calls into one, so a plain carp named the line in here that first
+# asked for the attribute (karr k63, k64). Trusting the generated accessors
+# for this one warning lets it name the caller's line, as a warning from a
+# plain method does. Not package-wide: that would move every other croak.
+sub _carp_past_builders {
+    my ($self, $message) = @_;
+    local our @CARP_NOT = ('Method::Generate::Accessor::_Generated');
+    carp $message;
+    return;
+}
+
 # Extract the Kubernetes Kind (and any explicitly supplied apiVersion) from an
 # expand_class() argument list, for the D16 rung-4 discovery-confirmation
 # check. Only bare short names ('Widget') and domain-qualified strings
@@ -658,6 +672,15 @@ When discovery cannot be read, it croaks C<Could not load resource map from
 cluster:> followed by the reason - for an HTTP error status the message of
 the L<Kubernetes::REST::APIError>,
 C<Kubernetes API error (discovery GET /api): 401 ...>.
+
+A cluster older than Kubernetes 1.27 answers with legacy discovery, which
+takes one more request per group and version. When one of those answers with
+an HTTP error status, that group/version's Kinds are missing from the map,
+and a warning names its apiVersion and the error - C<discovery: cannot read
+apiVersion 'metrics.k8s.io/v1beta1', its Kinds are missing from the resource
+map: Kubernetes API error (discovery GET /apis/metrics.k8s.io/v1beta1): 503
+...>; the other groups are read on. A 404 there is silent: the group/version
+went away after the list of groups was read.
 
 B<Version selection (D17).> When a group serves a Kind in more than one
 version, the bare short name (C<Pod>, C<ServiceCIDR>) resolves to the version
@@ -878,8 +901,9 @@ sub _fetch_discovery_legacy_core {
 
     my @versions = @{$body->{versions} // []};
     for my $version (@versions) {
-        my $response = $self->_request('GET', "/api/$version");
-        next if $response->status >= 400;
+        my $path = "/api/$version";
+        my $response = $self->_request('GET', $path);
+        next unless $self->_legacy_resource_list_ok($response, $version, $path);
         my $list = $self->_json->decode($response->content);
         $self->_absorb_api_resource_list($catalog, '', $version, $list);
     }
@@ -898,8 +922,9 @@ sub _fetch_discovery_legacy_groups {
         for my $v (@{$group->{versions} // []}) {
             my $version = $v->{version};
             next unless defined $version && length $version;
-            my $response = $self->_request('GET', "/apis/$gname/$version");
-            next if $response->status >= 400;
+            my $path = "/apis/$gname/$version";
+            my $response = $self->_request('GET', $path);
+            next unless $self->_legacy_resource_list_ok($response, "$gname/$version", $path);
             my $list = $self->_json->decode($response->content);
             $self->_absorb_api_resource_list($catalog, $gname, $version, $list);
         }
@@ -907,6 +932,23 @@ sub _fetch_discovery_legacy_groups {
         $catalog->{groups}{$gname}{preferred} = $pref
             if defined $pref && exists $catalog->{groups}{$gname};
     }
+}
+
+# Whether the legacy APIResourceList response for one group/version
+# ($api_version, fetched from $path) can be read into the catalog. An error
+# status leaves that group/version's Kinds out of the catalog, and so out of
+# the resource map: any other status than 404 warns, naming it and the reason
+# the APIError gives, and the other groups are read on (karr k63). A 404 is
+# silent - the group/version went away between the group list and this
+# request.
+sub _legacy_resource_list_ok {
+    my ($self, $response, $api_version, $path) = @_;
+    return 1 if $response->status < 400;
+    return 0 if $response->status == 404;
+    eval { $self->_check_response($response, "discovery GET $path") };
+    $self->_carp_past_builders("discovery: cannot read apiVersion '$api_version',"
+        . ' its Kinds are missing from the resource map: ' . $self->_error_reason($@));
+    return 0;
 }
 
 # APIResourceList (legacy per-group discovery). Subresource entries carry a
@@ -3527,7 +3569,9 @@ context C<discovery GET /api>), which L</absorb_discovery> dies with
 directly. Where the client reads discovery for itself, a failure shows
 inside another message instead - the warning that the resource map falls
 back to the built-in one, the croak of L</fetch_resource_map>, the croak for
-a name discovery could not confirm - which embeds the error's text.
+a name discovery could not confirm, the warning for a legacy group/version
+it could not read (see L</fetch_resource_map>) - which embeds the error's
+text.
 
 Everything else croaks with a plain string: invalid arguments, a resource
 name nothing resolves, and an expired watch - its C<410> arrives as an
