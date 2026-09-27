@@ -296,6 +296,15 @@ Resolve a short resource name (C<'Pod'>), a domain-qualified name
 fully-qualified class name to its L<IO::K8s> class - the same contract as
 L<IO::K8s/expand_class>, against this client's L</resource_map>.
 
+With L</resource_map_from_cluster> on (the default), a Kind no shipped class,
+L</with> provider or AutoGen class resolves becomes L<IO::K8s::Unstructured>
+when the cluster's discovery serves it. A bare Kind is looked up in whichever
+group serves it, at that group's preferred version. A qualified name
+(C<'example.org/v1/Widget'>, or C<('Widget', 'example.org/v1')>) counts only
+in exactly that group and version: when the cluster does not serve those, it
+stays unresolved (C<undef>), even if another group or another version serves
+a Kind of the same name - nothing is ever sent there instead.
+
 Pure name resolution does not cost a cluster roundtrip: as long as the
 resource map has not been fetched yet (and none was passed to the
 constructor), a name the built-in L<IO::K8s> map resolves to a loadable
@@ -374,9 +383,12 @@ inflation already does.
     # catalog was already fetched building the cluster map, so this consults a
     # cache and never adds a round-trip. A Kind discovery does not serve stays
     # fail-closed (rung 5): the fabricated name (or undef) is returned so the
-    # load error still names the Kind. A discovery *failure* (cluster
-    # unreachable, expired token) is deliberately treated the same as "not
-    # served" here -- rung 5, fail-closed -- with the reason kept in
+    # load error still names the Kind. A qualified name, or a Kind plus
+    # apiVersion, is confirmed only in exactly its group/version: another
+    # group or version serving the Kind leaves it at rung 5 too (karr k43).
+    # A discovery *failure* (cluster unreachable, expired token) is
+    # deliberately treated the same as "not served" here -- rung 5,
+    # fail-closed -- with the reason kept in
     # _discovery_error; on the CRUD path the carp from
     # _load_resource_map_from_cluster has already named it while building the
     # cluster map.
@@ -423,9 +435,10 @@ sub _kind_from_expand_args {
 # confirmed) -- but the reason is kept in _discovery_error so _build_path can
 # name it instead of claiming a missing entry.
 #
-# $want_api_version, when given (an Unstructured object's own apiVersion),
-# pins the group/version; otherwise the group's discovery-preferred version
-# wins, matching _resource_map_from_catalog and D17.
+# $want_api_version, when given (a qualified name's group/version, or an
+# Unstructured object's own apiVersion), pins the group/version, and nothing
+# else will do; without it the group's discovery-preferred version wins,
+# matching _resource_map_from_catalog and D17.
 sub _discovery_path_meta {
     my ($self, $kind, $want_api_version) = @_;
     return unless $self->resource_map_from_cluster;
@@ -446,16 +459,23 @@ sub _discovery_path_meta {
         };
     };
 
-    # An explicit apiVersion pins the exact group/version first.
+    # An explicit apiVersion pins the exact group/version, and only that one.
+    # It names one GVK, and a cluster that does not serve that GVK has not
+    # confirmed it (D16) - not even when another group, or another version of
+    # the same group, serves a Kind of that name. Falling back there would
+    # address that other resource: list, delete and ensure_only's prune would
+    # land in it (karr k43). The same rule as IO::K8s's exact-GVK resolution,
+    # where an explicit version never falls back to the bare Kind's.
     if (defined $want_api_version && length $want_api_version) {
         my ($g, $v) = $want_api_version =~ m{/}
             ? split(m{/}, $want_api_version, 2)
             : ('', $want_api_version);
         my $res = $catalog->{groups}{$g}{versions}{$v}{kinds}{$kind};
-        return $meta_for->($g, $v, $res) if $res;
+        return unless $res;
+        return $meta_for->($g, $v, $res);
     }
 
-    # Otherwise the preferred version of whichever group serves the Kind.
+    # A bare Kind: the preferred version of whichever group serves it (D17).
     for my $group (sort keys %{$catalog->{groups}}) {
         my $gdata = $catalog->{groups}{$group};
         my @order = @{$gdata->{version_order} // []};
@@ -995,13 +1015,18 @@ sub _build_path {
                 # A failed fetch and a catalog without the Kind both come back
                 # undef (fail-closed, see _discovery_path_meta); only the
                 # recorded reason tells them apart, and a catalog that was
-                # never read must not be reported as one lacking an entry.
+                # never read must not be reported as one lacking an entry. A
+                # pinned apiVersion is named: the Kind may well be served in
+                # another group or version, just not in this one (karr k43).
                 my $reason = $self->_discovery_error;
+                my $gvk = "Kind '$kind_hint'"
+                    . (defined $av_hint && length $av_hint
+                        ? " in apiVersion '$av_hint'" : '');
                 croak defined $reason
-                    ? "discovery failed, so Kind '$kind_hint' is unconfirmed"
+                    ? "discovery failed, so $gvk is unconfirmed"
                         . " - cannot build a path for IO::K8s::Unstructured:"
                         . " $reason"
-                    : "no discovery entry for Kind '$kind_hint' - cannot"
+                    : "no discovery entry for $gvk - cannot"
                         . " build a path for IO::K8s::Unstructured";
             }
             ($api_version, $resource, $is_namespaced) =
@@ -1295,7 +1320,7 @@ C<build_path> also accepts C<kind>, C<api_version>, C<resource> and C<namespaced
     );
     # => /apis/example.com/v1/namespaces/default/mycrds/my-instance
 
-Passing C<api_version>, C<resource> and C<namespaced> together, as above, resolves the path directly with no discovery lookup - the case for a caller (such as an async wrapper) that already knows the resource's metadata. Otherwise C<kind> is required (C<build_path> croaks without it), and resource/namespaced/apiVersion are looked up in the client's cached discovery catalog instead, preferring the cluster's preferred version unless C<api_version> pins a specific group/version; C<build_path> croaks if discovery has no entry for the Kind, and equally if the catalog could not be fetched at all (cluster unreachable, expired token) - in that case the message names that failure rather than claiming a missing entry, and the fallback stays fail-closed either way.
+Passing C<api_version>, C<resource> and C<namespaced> together, as above, resolves the path directly with no discovery lookup - the case for a caller (such as an async wrapper) that already knows the resource's metadata. Otherwise C<kind> is required (C<build_path> croaks without it), and resource/namespaced/apiVersion are looked up in the client's cached discovery catalog instead, preferring the cluster's preferred version unless C<api_version> pins a specific group/version - then only that group/version counts, never another group or version that serves a Kind of the same name; C<build_path> croaks if discovery has no entry for the Kind (in the pinned group/version, which the message then names), and equally if the catalog could not be fetched at all (cluster unreachable, expired token) - in that case the message names that failure rather than claiming a missing entry, and the fallback stays fail-closed either way.
 
 This is a public API for async wrappers like L<Net::Async::Kubernetes> that need to construct request paths independently.
 

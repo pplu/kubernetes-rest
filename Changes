@@ -22,9 +22,11 @@ Revision history for Kubernetes-REST
  - ensure handles an object that appears between its GET and POST (409
    AlreadyExists) like one that existed: a batch/v1 Job is kept or
    recreated instead of PUT onto its immutable Pod template.
- - A qualified name resolved to IO::K8s::Unstructured
-   ('example.org/v1/Widget') addresses its own group and version in list,
-   get, delete, patch and ensure_only, not another group serving the Kind.
+ - A qualified name ('example.org/v1/Widget', or a Kind plus apiVersion)
+   resolved to IO::K8s::Unstructured addresses exactly its own group and
+   version in list, get, delete, patch and ensure_only. One the cluster does
+   not serve stays unresolved - build_path croaks naming the apiVersion -
+   instead of going to another group or version serving the Kind.
  - Objects of a single-segment class registered as '+Gizmo' inflate as that
    class - in ensure, CRUD, watch and inflate_object/inflate_list/
    process_watch_chunk - instead of dying on IO/K8s/Gizmo.pm, dropping list

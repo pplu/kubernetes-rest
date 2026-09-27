@@ -29,6 +29,7 @@ use Test::Kubernetes::Mock ();
 use Kubernetes::REST;
 use Kubernetes::REST::Server;
 use Kubernetes::REST::AuthToken;
+use IO::K8s::Unstructured;
 
 # Mock IO that records every request (METHOD PATH), as in t/36/t/41.
 {
@@ -497,6 +498,74 @@ subtest 'a qualified name builds its path in its own group, not the first one se
 
     is_deeply [ grep { m{a\.example\.org} } @{ $io->calls } ], [],
         'nothing went to a.example.org';
+};
+
+# ---------------------------------------------------------------------------
+# karr k43: a qualified name is fail-closed on its own group and version. A
+# cluster that does not serve exactly that group/version has not confirmed
+# the GVK (D16), even when another group - or another version of the same
+# group - serves a Kind of that name, so nothing resolves and nothing is sent
+# there. Only a bare Kind goes to whichever group serves it (D17). In
+# disco_api() example.com/v1 is the only group/version serving Widget.
+# ---------------------------------------------------------------------------
+subtest 'k43: a qualified name whose group/version is not served fails closed' => sub {
+    my ($api, $io) = disco_api();
+
+    is $api->expand_class('other.example.com/v1/Widget'), undef,
+        'another group: the qualified name does not resolve';
+    is $api->expand_class('Widget', 'other.example.com/v1'), undef,
+        'nor does the same GVK as Kind plus apiVersion';
+    is $api->expand_class('example.com/v2/Widget'), undef,
+        'another version of the serving group does not resolve either';
+    is $api->expand_class('Widget', 'example.com/v2'), undef,
+        'nor as Kind plus apiVersion';
+
+    is $api->expand_class('example.com/v1/Widget'), 'IO::K8s::Unstructured',
+        'the served group/version still resolves';
+    is $api->expand_class('Widget'), 'IO::K8s::Unstructured',
+        'a bare Kind still resolves through the group that serves it';
+
+    my $mark = @{ $io->calls };
+    for my $name (qw( other.example.com/v1/Widget example.com/v2/Widget )) {
+        ok !eval { $api->list($name, namespace => 'ns', labelSelector => 'app=x'); 1 },
+            "list $name dies";
+        ok !eval { $api->get($name, 'w1', namespace => 'ns'); 1 },
+            "get $name dies";
+        ok !eval { $api->delete($name, 'w1', namespace => 'ns'); 1 },
+            "delete $name dies";
+    }
+    is_deeply [ @{ $io->calls }[ $mark .. $#{ $io->calls } ] ], [],
+        'no request went anywhere - above all not to example.com/v1';
+};
+
+subtest 'k43: an object of an unserved group/version is not sent to another group' => sub {
+    my ($api, $io) = disco_api();
+
+    throws_ok {
+        $api->build_path('IO::K8s::Unstructured', kind => 'Widget',
+            api_version => 'other.example.com/v1', name => 'w1', namespace => 'ns');
+    } qr{no discovery entry for Kind 'Widget' in apiVersion 'other\.example\.com/v1'},
+      'build_path names the Kind and the apiVersion it cannot confirm';
+
+    my $widget = IO::K8s::Unstructured->FROM_HASH({
+        apiVersion => 'other.example.com/v1',
+        kind       => 'Widget',
+        metadata   => { name => 'w1', namespace => 'ns' },
+    });
+    my $mark = @{ $io->calls };
+    for my $method (qw( create update delete ensure )) {
+        ok !eval { $api->$method($widget); 1 }, "$method dies";
+    }
+    throws_ok {
+        $api->ensure({
+            apiVersion => 'other.example.com/v1',
+            kind       => 'Widget',
+            metadata   => { name => 'w1', namespace => 'ns' },
+        });
+    } qr{no IO::K8s class for apiVersion 'other\.example\.com/v1', kind 'Widget'},
+      'ensure of a manifest croaks naming its apiVersion and Kind';
+    is_deeply [ @{ $io->calls }[ $mark .. $#{ $io->calls } ] ], [],
+        'no request went anywhere - above all not to example.com/v1';
 };
 
 # ---------------------------------------------------------------------------

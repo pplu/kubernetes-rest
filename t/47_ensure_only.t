@@ -618,4 +618,62 @@ subtest 'k37: the warnings can be promoted to errors' => sub {
     is(scalar @applied, 0, 'and returns nothing');
 };
 
+# ---------------------------------------------------------------------------
+# karr k43: a qualified kinds entry names one group/version. When the cluster
+# does not serve exactly that one, the entry resolves to no class and is
+# warned about like any other such entry (k37) - it is never listed, let alone
+# pruned, in another group or version that happens to serve the Kind. In
+# %GROUPED_DISCOVERY example.com/v1 is the only group/version serving Widget.
+# ---------------------------------------------------------------------------
+subtest 'k43: a qualified kinds entry of an unserved group/version prunes nothing elsewhere' => sub {
+    my $WIDGETS = '/apis/example.com/v1/namespaces/default/widgets';
+    my $widget_cluster = sub {
+        my $io = Test::Kubernetes::Mock::IO->new;
+        $io->add_response('GET', '/api',  \%CORE_DISCOVERY);
+        $io->add_response('GET', '/apis', \%GROUPED_DISCOVERY);
+        $io->add_response('GET', $WIDGETS . $SEL, {
+            apiVersion => 'example.com/v1', kind => 'WidgetList',
+            items      => [ {
+                apiVersion => 'example.com/v1', kind => 'Widget',
+                metadata   => { name => 'stale', namespace => 'default', labels => { app => 'demo' } },
+            } ],
+        });
+        $io->add_response('DELETE', "$WIDGETS/stale", $DELETED);
+        my $api = Kubernetes::REST->new(
+            server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+            credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+            io          => $io,
+        );
+        return ($api, $io);
+    };
+
+    for my $entry (qw( other.example.com/v1/Widget example.com/v2/Widget )) {
+        my ($api, $io) = $widget_cluster->();
+        my ($warnings, $applied) = ensure_only_warnings($api,
+            objects    => [],
+            kinds      => [$entry],
+            namespaces => ['default'],
+        );
+        is_deeply(requests_for($io, 'DELETE'), [], "$entry: nothing deleted");
+        is_deeply([ grep { m{/widgets} } @{ requests_for($io, 'GET') } ], [],
+            "$entry: the example.com/v1 Widgets are not even listed");
+        is(scalar @$warnings, 1, "$entry: one warning") or diag explain $warnings;
+        like($warnings->[0] // '',
+            qr/\Aensure_only: cannot list \Q$entry\E in namespace 'default', nothing pruned there/,
+            "$entry: it names the entry and the namespace");
+    }
+
+    # The bare Kind is unchanged: it resolves through the group serving it
+    # (D17) and prunes there.
+    my ($api, $io) = $widget_cluster->();
+    my ($warnings) = ensure_only_warnings($api,
+        objects    => [],
+        kinds      => ['Widget'],
+        namespaces => ['default'],
+    );
+    is_deeply($warnings, [], 'bare Widget: no warning');
+    is_deeply(requests_for($io, 'DELETE'), [ "$WIDGETS/stale" ],
+        'bare Widget: the stale example.com Widget goes');
+};
+
 done_testing;
