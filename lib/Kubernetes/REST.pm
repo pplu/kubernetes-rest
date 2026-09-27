@@ -305,6 +305,20 @@ in exactly that group and version: when the cluster does not serve those, it
 stays unresolved (C<undef>), even if another group or another version serves
 a Kind of the same name - nothing is ever sent there instead.
 
+The methods that take a resource name - L</list>, L</get>, L</patch>,
+L</patch_status>, L</delete>, L</watch>, L</log>, L</port_forward>,
+L</exec>, L</attach> and L</compare_schema> - croak on a name that stays
+unresolved, before sending anything, and name it:
+
+    unknown resource 'other.org/v1/Widget': no IO::K8s class for this
+    apiVersion/kind (add it to resource_map if it is a CRD)
+
+A bare Kind nothing resolves (C<expand_class> answers with the class name
+C<IO::K8s::E<lt>KindE<gt>>, which does not exist) is reported the same way.
+When the cluster's discovery could not be read, the message goes on to say so
+and why - the cluster could not confirm the name, which is not the same as not
+serving it.
+
 Pure name resolution does not cost a cluster roundtrip: as long as the
 resource map has not been fetched yet (and none was passed to the
 constructor), a name the built-in L<IO::K8s> map resolves to a loadable
@@ -362,15 +376,9 @@ inflation already does.
     # 'IO::K8s::<Kind>' whether or not such a class exists, and the fail-closed
     # error only surfaces later when require_module() cannot load it. For an
     # exact-GVK or domain-qualified request it fails *closed*, returning undef.
-    # Both -- and nothing else -- mean unresolved.
+    # Both -- and nothing else -- mean unresolved (_is_unresolved).
     my ($kind, $api_version) = $self->_kind_from_expand_args(@args);
-    my $unresolved =
-        !defined $class
-        || (defined $kind
-            && $class eq "IO::K8s::$kind"
-            && !($class->can('new') || eval { require_module($class); 1 }));
-
-    return $class unless $unresolved && defined $kind;
+    return $class unless defined $kind && $self->_is_unresolved($class, $kind);
 
     # Rung 4 (D16): the Kind resolved to nothing that ships. If the cluster
     # confirms this GVK through aggregated discovery, resolve to
@@ -396,6 +404,48 @@ inflation already does.
         if $self->_discovery_path_meta($kind, $api_version);
 
     return $class;
+}
+
+# Whether $class, what expand_class() made of a name whose Kind is $kind (from
+# _kind_from_expand_args), is the signal that nothing resolved it: undef, or
+# the 'IO::K8s::<Kind>' IO::K8s fabricates for a bare Kind when that class does
+# not load (see expand_class). Every real resolution is resolved, including a
+# '+'-class that is not loaded yet.
+sub _is_unresolved {
+    my ($self, $class, $kind) = @_;
+    return 1 unless defined $class;
+    return defined $kind
+        && $class eq "IO::K8s::$kind"
+        && !($class->can('new') || eval { require_module($class); 1 });
+}
+
+# expand_class() for the methods that take a resource name and build a request
+# path from its class (list, get, patch, patch_status, delete, watch, log,
+# port_forward, exec, attach) or load it (compare_schema). A name nothing
+# resolves croaks here, naming it the way Net::Async::Kubernetes does, before
+# any request (karr k46) - instead of in _build_path, where require_module saw
+# only expand_class's answer: undef for a qualified name ("argument is not a
+# module name"), or a bare Kind's fabricated class ("Can't locate
+# IO/K8s/<Kind>.pm", naming a module that does not exist). A discovery
+# failure is named with it: an unreachable cluster could not confirm the name,
+# which is not the same as a cluster that does not serve it (karr k28). Only
+# for a name with a Kind - expand_class consulted discovery for exactly that
+# one, so the recorded failure is this call's. expand_class itself keeps
+# returning undef or the fabricated name: that is its public contract, and
+# _manifest_to_object reads the undef.
+sub _expand_class_or_croak {
+    my ($self, $name) = @_;
+    my $class = $self->expand_class($name);
+    my ($kind) = $self->_kind_from_expand_args($name);
+    return $class unless $self->_is_unresolved($class, $kind);
+    my $discovery_error = defined $kind ? $self->_discovery_error : undef;
+    # The recorded croak names a line in here; croak adds the caller's.
+    $discovery_error =~ s/(?: at \S+ line \d+\.)?\s*\z// if defined $discovery_error;
+    croak "unknown resource '" . ($name // '(undef)') . "': no IO::K8s class"
+        . " for this apiVersion/kind (add it to resource_map if it is a CRD)"
+        . (defined $discovery_error
+            ? "; discovery failed, so the cluster could not confirm it: $discovery_error"
+            : '');
 }
 
 # Extract the Kubernetes Kind (and any explicitly supplied apiVersion) from an
@@ -930,7 +980,7 @@ Returns the comparison result from C<< $class->compare_to_schema >>, the method 
 
 =cut
 
-    my $class = $self->expand_class($kind);
+    my $class = $self->_expand_class_or_croak($kind);
     require_module($class);
 
     my $schema = $self->schema_for($kind);
@@ -1515,7 +1565,7 @@ sub _list_request {
     my $label_selector = delete $args{labelSelector};
     my $field_selector = delete $args{fieldSelector};
 
-    my $class = $self->expand_class($short_class);
+    my $class = $self->_expand_class_or_croak($short_class);
     my $path = $self->_build_path($class, %args,
         $self->_unstructured_hint($class, $short_class));
 
@@ -1557,7 +1607,7 @@ Get a single resource by name. Returns a typed L<IO::K8s> object.
         croak "Invalid arguments to get()";
     }
 
-    my $class = $self->expand_class($short_class);
+    my $class = $self->_expand_class_or_croak($short_class);
     croak "name required for get" unless $args{name};
 
     my $path = $self->_build_path($class, %args,
@@ -1674,7 +1724,7 @@ sub _unpack_patch_args {
             croak "Invalid arguments to $label()";
         }
 
-        $class = $self->expand_class($class_or_object);
+        $class = $self->_expand_class_or_croak($class_or_object);
         $name = $args{name} or croak "name required for $label";
         $namespace = $args{namespace};
         $patch = $args{patch} // croak "$label requires 'patch' parameter";
@@ -1894,7 +1944,7 @@ sub _delete_request {
             croak "Invalid arguments to delete()";
         }
 
-        $class = $self->expand_class($class_or_object);
+        $class = $self->_expand_class_or_croak($class_or_object);
         $name = $args{name} or croak "name required for delete";
         $namespace = $args{namespace};
     }
@@ -2473,7 +2523,7 @@ there:
     my $label_selector   = delete $args{labelSelector};
     my $field_selector   = delete $args{fieldSelector};
 
-    my $class = $self->expand_class($short_class);
+    my $class = $self->_expand_class_or_croak($short_class);
     my $path = $self->_build_path($class, %args,
         $self->_unstructured_hint($class, $short_class));
 
@@ -2574,7 +2624,7 @@ restart), and C<limitBytes> (byte cap on the response).
     my $previous     = delete $args{previous};
     my $limit_bytes  = delete $args{limitBytes};
 
-    my $class = $self->expand_class($short_class);
+    my $class = $self->_expand_class_or_croak($short_class);
     my $path = $self->_build_path($class, %args, subresource => 'log',
         $self->_unstructured_hint($class, $short_class));
 
@@ -2677,7 +2727,7 @@ session/handle object managed by that backend).
     my $on_close = delete $args{on_close};
     my $on_error = delete $args{on_error};
 
-    my $class = $self->expand_class($short_class);
+    my $class = $self->_expand_class_or_croak($short_class);
     my $path = $self->_build_path($class, %args, subresource => 'portforward',
         $self->_unstructured_hint($class, $short_class));
 
@@ -2772,7 +2822,7 @@ session/handle object managed by that backend).
     my $on_close = delete $args{on_close};
     my $on_error = delete $args{on_error};
 
-    my $class = $self->expand_class($short_class);
+    my $class = $self->_expand_class_or_croak($short_class);
     my $path = $self->_build_path($class, %args, subresource => 'exec',
         $self->_unstructured_hint($class, $short_class));
 
@@ -2866,7 +2916,7 @@ session/handle object managed by that backend).
     my $on_close = delete $args{on_close};
     my $on_error = delete $args{on_error};
 
-    my $class = $self->expand_class($short_class);
+    my $class = $self->_expand_class_or_croak($short_class);
     my $path = $self->_build_path($class, %args, subresource => 'attach',
         $self->_unstructured_hint($class, $short_class));
 
