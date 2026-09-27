@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-27T20:18:48Z
+claimed_by: backlog-5
+class: standard
+completed: 2026-09-27T20:18:43Z
+created: 2026-09-27T04:52:50Z
+id: 47
+priority: low
+started: 2026-09-27T19:35:53Z
+status: done
+tags:
+- resolve
+title: schema_for mit unaufgelöstem Namen warnt uninitialized und liefert still undef
+updated: 2026-09-27T20:18:48Z
+---
+
+schema_for ist eine Suche und liefert bei Fehlschlag undef, gibt dabei aber Use of uninitialized value-Warnungen aus. Sauber undef ohne Warnung liefern.
+
+Commit 58969bd93197f2a2d827a5473f21ce52cf62de0d
