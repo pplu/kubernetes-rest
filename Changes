@@ -19,6 +19,9 @@ Revision history for Kubernetes-REST
  - ensure_only warns when it cannot list a kinds entry in a namespace or
    delete a stale object, naming Kind, namespace, name and reason, instead
    of skipping silently; a 404 stays silent and the return value is unchanged.
+ - ensure handles an object that appears between its GET and POST (409
+   AlreadyExists) like one that existed: a batch/v1 Job is kept or
+   recreated instead of PUT onto its immutable Pod template.
 
 1.108     2026-09-22 02:22:33Z
 

@@ -415,4 +415,160 @@ sub batch_job {
     }
 }
 
+# ---------------------------------------------------------------------------
+# karr k41: the object appears between ensure's GET and its POST, and the POST
+# answers 409 AlreadyExists. From there on it is an existing object like any
+# other: a batch/v1 Job gets the Job special case - never a PUT onto its
+# immutable Pod template - and a PersistentVolumeClaim is returned unchanged.
+#
+# The mock answers every request for a path the same way; the race needs a
+# sequence (the GET before the POST finds nothing, the one after the 409 finds
+# the object). This subclass answers from a per-request script first -
+# 'METHOD /path' => [ [ status, body ], ... ], consumed in order - and hands
+# everything else to the mock.
+# ---------------------------------------------------------------------------
+{
+    package Test::Ensure::ScriptedIO;
+    use Moo;
+    extends 'Test::Kubernetes::Mock::IO';
+
+    use JSON::MaybeXS ();
+
+    has script => (is => 'ro', default => sub { {} });
+
+    my $wire_json = JSON::MaybeXS->new(utf8 => 1, canonical => 1);
+
+    around call => sub {
+        my ($orig, $self, $req) = @_;
+        (my $path = $req->url) =~ s{\Ahttps?://[^/]+}{};
+        my $steps = $self->script->{ $req->method . ' ' . $path };
+        return $self->$orig($req) unless $steps && @$steps;
+        my ($status, $body) = @{ shift @$steps };
+        push @{ $self->requests },
+            { method => $req->method, path => $path, content => $req->content };
+        return Test::Kubernetes::Mock::Response->new(
+            status  => $status,
+            content => $wire_json->encode($body),
+        );
+    };
+}
+
+sub scripted_api {
+    my (%script) = @_;
+    return Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        resource_map_from_cluster => 0,
+        io          => Test::Ensure::ScriptedIO->new(script => \%script),
+    );
+}
+
+sub failure {
+    my ($code, $reason) = @_;
+    return [ $code, { kind => 'Status', apiVersion => 'v1', status => 'Failure',
+                      code => $code, reason => $reason } ];
+}
+
+sub served {
+    my ($manifest, $rv) = @_;
+    return [ 200, { %$manifest, metadata => { %{ $manifest->{metadata} }, resourceVersion => $rv } } ];
+}
+
+# Case 16: an active Job appeared - returned as it is, no PUT.
+{
+    my $sapi = scripted_api(
+        "GET $JOBS/late"  => [ failure(404, 'NotFound'),
+                               served(batch_job('late', status => { active => 1 }), '11') ],
+        "POST $JOBS"      => [ failure(409, 'AlreadyExists') ],
+    );
+    my $result = eval { $sapi->ensure(batch_job('late')) };
+    is($@, '', 'Job after 409, active: ensure does not die');
+    is_deeply(calls_since($sapi->io, 0),
+        [ "GET $JOBS/late", "POST $JOBS", "GET $JOBS/late" ],
+        'Job after 409, active: returned unchanged - no PUT onto the Pod template');
+    is($result && $result->metadata->resourceVersion, '11',
+        'Job after 409, active: the existing object is returned');
+}
+
+# Case 17: a failed Job appeared - deleted and recreated, as in the main path.
+{
+    my $sapi = scripted_api(
+        "GET $JOBS/late"    => [ failure(404, 'NotFound'),
+                                 served(batch_job('late', status => { failed => 1 }), '11') ],
+        "POST $JOBS"        => [ failure(409, 'AlreadyExists'), served(batch_job('late'), '12') ],
+        "DELETE $JOBS/late" => [ [ 200, { kind => 'Status', apiVersion => 'v1', status => 'Success' } ] ],
+    );
+    my $result = eval { $sapi->ensure(batch_job('late')) };
+    is($@, '', 'Job after 409, failed: ensure does not die');
+    is_deeply(calls_since($sapi->io, 0),
+        [ "GET $JOBS/late", "POST $JOBS", "GET $JOBS/late", "DELETE $JOBS/late", "POST $JOBS" ],
+        'Job after 409, failed: deleted and recreated, no PUT');
+    is($result && $result->metadata->resourceVersion, '12',
+        'Job after 409, failed: the recreated object is returned');
+}
+
+# Case 18: unchanged - a PersistentVolumeClaim that appeared is returned as it is.
+{
+    my $PVCS = '/api/v1/namespaces/default/persistentvolumeclaims';
+    my $claim = {
+        apiVersion => 'v1', kind => 'PersistentVolumeClaim',
+        metadata   => { name => 'late', namespace => 'default' },
+        spec       => { accessModes => ['ReadWriteOnce'] },
+    };
+    my $sapi = scripted_api(
+        "GET $PVCS/late" => [ failure(404, 'NotFound'), served($claim, '21') ],
+        "POST $PVCS"     => [ failure(409, 'AlreadyExists') ],
+    );
+    my $result = eval { $sapi->ensure($claim) };
+    is($@, '', 'PVC after 409: ensure does not die');
+    is_deeply(calls_since($sapi->io, 0),
+        [ "GET $PVCS/late", "POST $PVCS", "GET $PVCS/late" ],
+        'PVC after 409: returned unchanged, no PUT');
+    is($result && $result->metadata->resourceVersion, '21',
+        'PVC after 409: the existing object is returned');
+}
+
+# Cases 19 and 20: any other object that appeared is updated at the server's
+# resourceVersion - and that update is retried once on a 409 Conflict, as on
+# the main path.
+{
+    my $CMS = '/api/v1/namespaces/default/configmaps';
+    my $cm = {
+        apiVersion => 'v1', kind => 'ConfigMap',
+        metadata   => { name => 'late', namespace => 'default' },
+        data       => { key => 'value' },
+    };
+
+    my $sapi = scripted_api(
+        "GET $CMS/late" => [ failure(404, 'NotFound'), served($cm, '7') ],
+        "POST $CMS"     => [ failure(409, 'AlreadyExists') ],
+        "PUT $CMS/late" => [ served($cm, '8') ],
+    );
+    my $object = $sapi->k8s->struct_to_object('ConfigMap', $cm);
+    my $result = eval { $sapi->ensure($object) };
+    is($@, '', 'ConfigMap after 409: ensure does not die');
+    is_deeply(calls_since($sapi->io, 0),
+        [ "GET $CMS/late", "POST $CMS", "GET $CMS/late", "PUT $CMS/late" ],
+        'ConfigMap after 409: updated');
+    is($object->metadata->resourceVersion, '7', 'ConfigMap after 409: PUT at the server resourceVersion');
+    is($result && $result->metadata->resourceVersion, '8', 'ConfigMap after 409: the updated object is returned');
+
+    $sapi = scripted_api(
+        "GET $CMS/late" => [ failure(404, 'NotFound'), served($cm, '7'), served($cm, '9') ],
+        "POST $CMS"     => [ failure(409, 'AlreadyExists') ],
+        "PUT $CMS/late" => [ failure(409, 'Conflict'), served($cm, '10') ],
+    );
+    $object = $sapi->k8s->struct_to_object('ConfigMap', $cm);
+    $result = eval { $sapi->ensure($object) };
+    is($@, '', 'ConfigMap after 409, update conflict: ensure does not die');
+    is_deeply(calls_since($sapi->io, 0),
+        [ "GET $CMS/late", "POST $CMS", "GET $CMS/late", "PUT $CMS/late",
+          "GET $CMS/late", "PUT $CMS/late" ],
+        'ConfigMap after 409, update conflict: re-fetched and retried once');
+    is($object->metadata->resourceVersion, '9',
+        'ConfigMap after 409, update conflict: the retry uses the re-fetched resourceVersion');
+    is($result && $result->metadata->resourceVersion, '10',
+        'ConfigMap after 409, update conflict: the updated object is returned');
+}
+
 done_testing;

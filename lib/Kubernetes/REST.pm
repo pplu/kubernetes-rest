@@ -1866,7 +1866,8 @@ Handles common race conditions:
 =item * 404 on initial get is treated as "does not exist" and falls through to create.
 
 =item * 409 AlreadyExists on create (resource appeared between get and create) is
-retried as an update.
+re-fetched and handled like a resource that existed from the start: updated,
+or - for the special cases below - returned unchanged or recreated.
 
 =item * 409 Conflict on update (resourceVersion changed server-side, e.g. a
 controller wrote status) is retried by re-fetching and re-applying.
@@ -1923,37 +1924,34 @@ object, and so is a C<Job> under any apiVersion other than C<batch/v1>.
     my $get_err = $@;
     die $get_err if $get_err && $get_err !~ /\b404\b/;
 
-    if ($existing) {
-        return $existing if $is_pvc;
-        if ($is_job) {
-            # Read from TO_JSON, not status(): an IO::K8s::Unstructured Job has
-            # no status accessor, its status rides in the unknown-fields bag.
-            my $status = $existing->TO_JSON->{status} || {};
-            return $existing if $status->{succeeded} || $status->{active};
-            eval { $self->delete($existing) };
-            return $self->create($object);
-        }
-        $object->metadata->resourceVersion($existing->metadata->resourceVersion);
-        my $updated = eval { $self->update($object) };
-        return $updated if $updated;
-        if ($@ =~ /\b409\b/) {
-            $existing = $self->_request('GET', $path);
-            $self->_check_response($existing, "ensure refetch $kind/$name");
-            $existing = $self->_inflate_object($class, $existing);
-            $object->metadata->resourceVersion($existing->metadata->resourceVersion);
-            return $self->update($object);
-        }
-        die $@;
-    }
-
-    my $created = eval { $self->create($object) };
-    return $created if $created;
-
-    if ($@ =~ /\b409\b/) {
+    unless ($existing) {
+        my $created = eval { $self->create($object) };
+        return $created if $created;
+        die $@ unless $@ =~ /\b409\b/;
+        # 409 AlreadyExists: it appeared between the GET and the POST. From
+        # here on it is an existing object like any other, special cases
+        # included - a Job must not get a PUT onto its immutable Pod template.
         my $response = $self->_request('GET', $path);
         $self->_check_response($response, "ensure post-409 get $kind/$name");
         $existing = $self->_inflate_object($class, $response);
-        return $existing if $is_pvc;
+    }
+
+    return $existing if $is_pvc;
+    if ($is_job) {
+        # Read from TO_JSON, not status(): an IO::K8s::Unstructured Job has
+        # no status accessor, its status rides in the unknown-fields bag.
+        my $status = $existing->TO_JSON->{status} || {};
+        return $existing if $status->{succeeded} || $status->{active};
+        eval { $self->delete($existing) };
+        return $self->create($object);
+    }
+    $object->metadata->resourceVersion($existing->metadata->resourceVersion);
+    my $updated = eval { $self->update($object) };
+    return $updated if $updated;
+    if ($@ =~ /\b409\b/) {
+        $existing = $self->_request('GET', $path);
+        $self->_check_response($existing, "ensure refetch $kind/$name");
+        $existing = $self->_inflate_object($class, $existing);
         $object->metadata->resourceVersion($existing->metadata->resourceVersion);
         return $self->update($object);
     }
