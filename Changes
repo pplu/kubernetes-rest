@@ -34,6 +34,12 @@ Revision history for Kubernetes-REST
  - ensure tells a missing object (404), AlreadyExists and Conflict (409)
    apart by the response status; an error whose message merely contains
    "404" or "409" now croaks instead of creating, re-fetching or retrying.
+ - prepare_request percent-encodes query keys and values where the API
+   server would otherwise split or change them: a fieldSelector with &, +,
+   #, % or ;, a space, a control character or non-ASCII (sent as UTF-8) now
+   arrives intact instead of truncated, altered or dropped. Everything else,
+   '=', ',', '!', '/', '(', ')' and ':' included, is sent as written, so
+   typical label and field selectors render byte for byte as before.
 
 1.108     2026-09-22 02:22:33Z
 

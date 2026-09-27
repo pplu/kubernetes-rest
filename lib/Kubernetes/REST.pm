@@ -1109,16 +1109,17 @@ sub _prepare_request {
     my $parameters = $opts{parameters};
     my $extra_headers = $opts{headers} // {};
 
-    # Append query parameters to URL
+    # Append query parameters to URL, keys and values through _query_escape
     if ($parameters && %$parameters) {
         my @pairs;
         for my $key (sort keys %$parameters) {
             my $val = $parameters->{$key};
             next unless defined $val;
+            my $k = $self->_query_escape($key);
             if (ref($val) eq 'ARRAY') {
-                push @pairs, map { "$key=$_" } grep { defined } @$val;
+                push @pairs, map { "$k=" . $self->_query_escape($_) } grep { defined } @$val;
             } else {
-                push @pairs, "$key=$val";
+                push @pairs, "$k=" . $self->_query_escape($val);
             }
         }
         if (@pairs) {
@@ -1147,6 +1148,27 @@ sub _prepare_request {
         headers => \%headers,
         ($body ? (content => $self->_json->encode($body)) : ()),
     );
+}
+
+# Percent-encode a query key or value - but only what would otherwise change
+# what the API server reads (karr k35). The server splits a query with Go's
+# net/url ParseQuery: into pairs at '&', dropping a pair that holds a ';'
+# whole, then key from value at the FIRST '=', reading '+' as a space and
+# '%XX' as a byte, and dropping a pair with a malformed '%'. A '#' ends the
+# URL before it is sent (URI and HTTP::Tiny take the rest for a fragment), and
+# a space, a control character or a non-ASCII byte has no place in a request
+# target. Those are encoded - characters as their UTF-8 bytes, the contract
+# the JSON body follows too. Everything else stays as it is, above all '=',
+# ',', '!', '/', '(', ')' and ':': the server reads them the same either way
+# (a value's '=' is past the first one), a selector stays readable in the URL,
+# and whoever compares the rendered query - this distribution's mock harness,
+# Net::Async::Kubernetes's - sees the string it always did. Keys go the same
+# way; they are the API's parameter names, none of which holds an '='.
+sub _query_escape {
+    my ($self, $string) = @_;
+    my $bytes = Encode::encode('UTF-8', "$string");
+    $bytes =~ s/([\x00-\x20\x7F-\xFF%&+#;])/sprintf('%%%02X', ord $1)/ge;
+    return $bytes;
 }
 
 sub _check_response {
@@ -1345,6 +1367,15 @@ headers, and optional query parameters or JSON body.
 Query parameter values may be scalars or arrayrefs (arrayrefs are emitted as
 repeated C<key=value> pairs). Extra request headers can be provided via
 C<headers =E<gt> \%headers>.
+
+Keys and values are percent-encoded where they would otherwise split or
+change the query on its way to the API server: C<%>, C<&>, C<+>, C<#>, C<;>,
+space, control characters, and non-ASCII characters (as their UTF-8 bytes).
+Everything else is sent as written, so a selector such as
+C<app.kubernetes.io/name=web,tier!=db> appears in the URL exactly as it was
+passed. Pass characters, not bytes - a value that already holds UTF-8 bytes
+is encoded twice. A query string that is already part of C<$path> is left
+untouched.
 
 This is a public API for async wrappers that execute HTTP requests through their own event loop.
 
