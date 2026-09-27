@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-27T03:30:30Z
+claimed_by: backlog-2
+class: standard
+completed: 2026-09-27T03:30:30Z
+created: 2026-09-27T00:50:31Z
+id: 40
+priority: low
+started: 2026-09-27T02:51:16Z
+status: done
+tags:
+- unstructured
+title: _unstructured_hint verliert bei einem String Gruppe und Version
+updated: 2026-09-27T03:30:30Z
+---
+
+Für einen qualifizierten String wie example.org/v1/Widget liefert _unstructured_hint nur kind Widget. Löst list darauf zu Unstructured auf, wählt build_path die Gruppe über Discovery-Präferenz bzw. alphabetisch. Bei derselben Kind in zwei Gruppen kann ein qualifizierter kinds-Eintrag in ensure_only die falsche Gruppe listen. Nur aus dem Code gelesen, nicht reproduziert; zuerst Test.
+
+Umgesetzt auf fix/backlog-2, uncommittet. prove -lr t/ 46 Dateien 717 Tests PASS (Orchestrator-Gegenprobe), dzil build sauber.
+
+2026-09-27 03:30 Committed as ce7211c (Keep group and version of a qualified name in the Unstructured path hint). Verified standalone in a temp worktree: prove -lr t/ 45 files, 711 tests, PASS.
