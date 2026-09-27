@@ -436,6 +436,70 @@ subtest 'list() inflates a list of Unstructured objects' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# karr k40: a qualified name keeps its group and version on the way to the
+# path. 'example.org/v1/Widget' is confirmed as that exact GVK; the path must
+# not then fall back to whichever group serving a Widget sorts first.
+# ---------------------------------------------------------------------------
+subtest 'a qualified name builds its path in its own group, not the first one serving the Kind' => sub {
+    my $widgets_in = sub {
+        my ($group) = @_;
+        return {
+            metadata => { name => $group },
+            versions => [ {
+                version   => 'v1',
+                resources => [ {
+                    resource     => 'widgets',
+                    responseKind => { group => $group, version => 'v1', kind => 'Widget' },
+                    scope        => 'Namespaced',
+                } ],
+            } ],
+        };
+    };
+    my $io = Counting::Mock::IO->new;
+    $io->add_response('GET', '/api', \%CORE_DISCOVERY);
+    # a.example.org sorts ahead of example.org - the group a bare 'Widget'
+    # would pick.
+    $io->add_response('GET', '/apis', {
+        kind  => 'APIGroupDiscoveryList',
+        items => [ $widgets_in->('a.example.org'), $widgets_in->('example.org') ],
+    });
+    my $api = Kubernetes::REST->new(
+        server      => Kubernetes::REST::Server->new(endpoint => 'http://mock.local'),
+        credentials => Kubernetes::REST::AuthToken->new(token => 'MockToken'),
+        io          => $io,
+    );
+
+    my $WIDGETS = '/apis/example.org/v1/namespaces/ns/widgets';
+    my $w1 = {
+        apiVersion => 'example.org/v1', kind => 'Widget',
+        metadata   => { name => 'w1', namespace => 'ns' },
+    };
+    $io->add_response('GET', $WIDGETS,
+        { apiVersion => 'example.org/v1', kind => 'WidgetList', items => [ $w1 ] });
+    $io->add_response('GET', "$WIDGETS/w1", $w1);
+    $io->add_response('DELETE', "$WIDGETS/w1",
+        { kind => 'Status', apiVersion => 'v1', status => 'Success' });
+
+    is $api->expand_class('example.org/v1/Widget'), 'IO::K8s::Unstructured',
+        'the qualified name resolves to Unstructured';
+
+    my $list = eval { $api->list('example.org/v1/Widget', namespace => 'ns') };
+    is $@, '', 'list does not die';
+    is count_calls($io, "GET $WIDGETS"), 1, 'list: the example.org collection';
+
+    my $obj = eval { $api->get('example.org/v1/Widget', 'w1', namespace => 'ns') };
+    is $@, '', 'get does not die';
+    is count_calls($io, "GET $WIDGETS/w1"), 1, 'get: the example.org object';
+
+    eval { $api->delete('example.org/v1/Widget', 'w1', namespace => 'ns') };
+    is $@, '', 'delete does not die';
+    is count_calls($io, "DELETE $WIDGETS/w1"), 1, 'delete: the example.org object';
+
+    is_deeply [ grep { m{a\.example\.org} } @{ $io->calls } ], [],
+        'nothing went to a.example.org';
+};
+
+# ---------------------------------------------------------------------------
 # Rung 5 still holds: a Kind discovery does not serve stays fail-closed.
 # ---------------------------------------------------------------------------
 subtest 'a Kind not in discovery stays fail-closed (rung 5, not Unstructured)' => sub {

@@ -465,9 +465,11 @@ sub _discovery_path_meta {
 
 # The extra _build_path arguments an IO::K8s::Unstructured resolution needs,
 # derived from whatever identifier expand_class was given: an IO::K8s object
-# (its kind/apiVersion accessors) or a name string (the Kind is its last
-# '/'-delimited segment). Empty for every typed class, so typed path building
-# is completely unchanged.
+# (its kind/apiVersion accessors) or a name string. A string is split the way
+# expand_class split it to confirm the GVK, so a qualified
+# 'example.org/v1/Widget' keeps its group/version and does not land in
+# whichever other group serving a Widget discovery lists first. Empty for
+# every typed class, so typed path building is completely unchanged.
 sub _unstructured_hint {
     my ($self, $class, $ident) = @_;
     return () unless defined $class && $class eq 'IO::K8s::Unstructured';
@@ -477,7 +479,11 @@ sub _unstructured_hint {
             (defined $ident->apiVersion ? (api_version => $ident->apiVersion) : ()),
         );
     }
-    return (kind => (split m{/}, $ident)[-1]);
+    my ($kind, $api_version) = $self->_kind_from_expand_args($ident);
+    return (
+        (defined $kind        ? (kind        => $kind)        : ()),
+        (defined $api_version ? (api_version => $api_version) : ()),
+    );
 }
 
 # Kubernetes groups whose IO::K8s classes do NOT live under IO::K8s::Api::.
