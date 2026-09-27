@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-27T22:31:18Z
+claimed_by: backlog-8
+class: standard
+completed: 2026-09-27T22:31:13Z
+created: 2026-09-27T21:30:04Z
+id: 63
+priority: low
+started: 2026-09-27T21:45:16Z
+status: done
+tags:
+- discovery
+- k59-followup
+title: Legacy-Discovery überspringt HTTP-Fehler pro Gruppe/Version still
+updated: 2026-09-27T22:31:18Z
+---
+
+Gefunden bei k59 (2026-09-27). _fetch_discovery_legacy_* überspringt HTTP-Fehler pro Gruppe/Version (next if status >= 400); die Kinds dieser Gruppe fehlen dann kommentarlos in der Resource-Map. Mindestens carp mit Gruppe/Version und Status; 404 (Gruppe verschwunden) ggf. still.
+
+Commit f5c1011
