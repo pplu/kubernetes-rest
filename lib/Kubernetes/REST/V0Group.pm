@@ -60,10 +60,10 @@ sub AUTOLOAD {
     $params{subresource} = 'status' if $status && $action eq 'read';
 
     # Show deprecation warning
-    $self->_warn_deprecated($method, $action, $class, \%params);
+    $self->_warn_deprecated($method, $action, $class, \%params, $status);
 
     # Call new API
-    return $self->_dispatch($action, $class, \%params);
+    return $self->_dispatch($action, $class, \%params, $status);
 }
 
 sub _parse_method {
@@ -104,7 +104,7 @@ sub _build_class {
 }
 
 sub _warn_deprecated {
-    my ($self, $method, $action, $class, $params) = @_;
+    my ($self, $method, $action, $class, $params, $status) = @_;
 
     return if $ENV{HIDE_KUBERNETES_REST_V0_API_WARNING};
 
@@ -121,13 +121,15 @@ sub _warn_deprecated {
     } elsif ($action eq 'create') {
         $new_call = "\$api->create(\$object)";
     } elsif ($action eq 'replace') {
-        $new_call = "\$api->update(\$object)";
+        $new_call = $status ? "\$api->update_status(\$object)"
+                            : "\$api->update(\$object)";
     } elsif ($action eq 'delete') {
         my $ns = $params->{namespace} ? ", namespace => '$params->{namespace}'" : '';
         $new_call = "\$api->delete('$class', name => '$params->{name}'$ns)";
     } elsif ($action eq 'patch') {
         my $ns = $params->{namespace} ? ", namespace => '$params->{namespace}'" : '';
-        $new_call = "\$api->patch('$class', name => '$params->{name}'$ns, patch => \\%patch)";
+        my $name = $status ? 'patch_status' : 'patch';
+        $new_call = "\$api->$name('$class', name => '$params->{name}'$ns, patch => \\%patch)";
     } elsif ($action eq 'watch') {
         my $ns = $params->{namespace} ? ", namespace => '$params->{namespace}'" : '';
         $new_call = "\$api->watch('$class'$ns, on_event => sub { ... })";
@@ -139,7 +141,7 @@ sub _warn_deprecated {
 }
 
 sub _dispatch {
-    my ($self, $action, $class, $params) = @_;
+    my ($self, $action, $class, $params, $status) = @_;
     my $api = $self->api;
 
     if ($action eq 'list') {
@@ -162,7 +164,10 @@ sub _dispatch {
         return $api->create($body);
     } elsif ($action eq 'replace') {
         my $body = $params->{body} // croak "replace requires 'body' parameter";
-        return $api->update($body);
+        # Replace*Status replaces through the /status subresource: a plain
+        # update writes the main endpoint, where the server drops the status
+        # and still answers 2xx, losing it silently (karr k65).
+        return $status ? $api->update_status($body) : $api->update($body);
     } elsif ($action eq 'delete') {
         # delete croaks on arguments it does not take. The v0 parameters it
         # has no use for (body, gracePeriodSeconds, dryRun, ...) were ignored
@@ -176,7 +181,9 @@ sub _dispatch {
         # stay ignored, as with delete above.
         my %args = map { exists $params->{$_} ? ($_ => $params->{$_}) : () }
             qw(name namespace patch type);
-        return $api->patch($class, %args);
+        # Patch*Status patches through /status, for the same reason as
+        # Replace*Status above (karr k65).
+        return $status ? $api->patch_status($class, %args) : $api->patch($class, %args);
     } elsif ($action eq 'watch') {
         my %args = map { exists $params->{$_} ? ($_ => $params->{$_}) : () }
             qw(on_event timeout resourceVersion labelSelector fieldSelector namespace);
@@ -236,11 +243,15 @@ reads the status subresource, C<< get(..., subresource => 'status') >>
 
 =item * Create -> create()
 
-=item * Replace -> update()
+=item * Replace -> update(); a name ending in C<Status>
+(C<ReplaceNamespacedPodStatus>) replaces through the status subresource,
+C<update_status()>
 
 =item * Delete -> delete()
 
-=item * Patch -> patch()
+=item * Patch -> patch(); a name ending in C<Status>
+(C<PatchNamespacedPodStatus>) patches through the status subresource,
+C<patch_status()>
 
 =item * Watch -> watch()
 
