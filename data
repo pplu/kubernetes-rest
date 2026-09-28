@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-28T00:08:57Z
+claimed_by: backlog-9
+class: standard
+completed: 2026-09-28T00:08:53Z
+created: 2026-09-27T22:08:03Z
+id: 65
+priority: medium
+started: 2026-09-27T23:36:34Z
+status: done
+tags:
+- v0
+- status
+title: v0 Replace*Status und Patch*Status schreiben auf den Haupt-Endpunkt, der Status
+  geht verloren
+updated: 2026-09-28T00:08:57Z
+---
+
+Gefunden bei k62 (2026-09-28), nachgestellt. ReplaceNamespacedPodStatus sendet PUT .../pods/web; der API-Server verwirft dort status und antwortet 2xx, der Status geht still verloren. Replace*Status auf update_status und Patch*Status auf patch_status dispatchen.
+
+Commit 44826eac8cdf9ef1e6bc3955812b5f2cb79e4075
