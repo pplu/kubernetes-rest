@@ -130,6 +130,9 @@ Revision history for Kubernetes-REST
    ReadComponentStatus reach the componentstatuses endpoint instead of
    dying while loading a non-existent Component class. A genuine status
    subresource such as ReadNamespacedPodStatus still reads /status.
+ - An error from a call through the v0 compatibility layer, an APIError or a
+   croak raised in list/get/update/... behind it, now reports the caller's
+   line instead of a line inside V0Group.pm.
 
 1.108     2026-09-22 02:22:33Z
 

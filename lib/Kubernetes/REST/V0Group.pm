@@ -46,6 +46,13 @@ my %STATUS_KIND = map { $_ => 1 }
 
 our $AUTOLOAD;
 
+# AUTOLOAD dispatches to list/get/update/... in Kubernetes::REST, so an
+# APIError thrown there - or a plain croak - has this layer's frames between
+# it and the caller. Trust Kubernetes::REST so Carp's bidirectional check
+# walks past both packages and blames the code that made the v0 call, not
+# V0Group.pm; the object model's own errors are unaffected (karr k67).
+our @CARP_NOT = ('Kubernetes::REST');
+
 sub AUTOLOAD {
     my ($self, @args) = @_;
     my $method = $AUTOLOAD;
