@@ -138,8 +138,13 @@ changes here need a test that pins what is *not* deleted, not only what is.
 
 `Kubernetes::REST::V0Group` + 17 one-line subclasses (`::Core`, `::Apps`, …) translate the
 0.01/0.02 method names (`ListNamespacedPod`) onto the v1 API via `AUTOLOAD`, parsing
-`{Action}{Namespaced?}{Resource}{ForAllNamespaces|Status?}` (`Read*Status` gets with
-`subresource => 'status'`, k62) and dispatching to
+`{Action}{Namespaced?}{Resource}{ForAllNamespaces|Status?}`. A trailing `Status` is a
+subresource suffix only when what precedes it is a real Kind: `Read*Status` gets with
+`subresource => 'status'` (k62), `Replace*Status` dispatches to `update_status` and
+`Patch*Status` to `patch_status` (k65 — else the status write hits the main endpoint,
+where the server drops it and still answers 2xx). A Kind whose own name ends in `Status`
+(`ComponentStatus`, the only built-in one, checked against the Kinds IO::K8s ships) is kept
+whole (k66). Otherwise dispatch goes to
 `list`/`get`/`create`/`update`/`delete`/`patch`/`watch`. Every call carps unless
 `$ENV{HIDE_KUBERNETES_REST_V0_API_WARNING}` is set. `list`, `get`, `watch`, `delete` and
 `patch` croak on arguments they do not take, so `_dispatch` passes each only its own keys

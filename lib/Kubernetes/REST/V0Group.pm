@@ -3,10 +3,21 @@ our $VERSION = '1.109';
 # ABSTRACT: Base class for backwards-compatible v0 API group wrappers
 use Moo;
 use Carp qw(croak carp);
+use IO::K8s ();
 
 has api => (is => 'ro', required => 1);
 has group => (is => 'ro', required => 1);
 has version => (is => 'ro', default => sub { 'v1' });
+
+# Kinds whose own name ends in Status - ComponentStatus is the only built-in
+# one. _parse_method's non-greedy resource capture would otherwise read
+# ListComponentStatus as the Kind Component plus a Status subresource suffix
+# and die loading a non-existent IO::K8s::Api::Core::V1::Component. Built once
+# from what the installed IO::K8s ships (bare Kind names, not the versioned
+# aliases), so a future Status-named Kind is handled too (karr k66).
+my %STATUS_KIND = map { $_ => 1 }
+    grep { /Status\z/ && !m{/} }
+    keys %{ IO::K8s->default_resource_map };
 
 # ============================================================================
 # BACKWARDS COMPATIBILITY LAYER (v0 API → v1 API)
@@ -73,6 +84,15 @@ sub _parse_method {
     # The fourth value says whether the name ends in Status.
     if ($method =~ /^(List|Read|Create|Replace|Patch|Delete|Watch)(Namespaced)?(\w+?)(ForAllNamespaces|Status)?$/) {
         my ($action, $namespaced, $resource, $suffix) = ($1, $2, $3, $4);
+
+        # A Kind that itself ends in Status (ComponentStatus) is one whole
+        # resource, not a shorter Kind plus a Status subresource: the
+        # non-greedy capture split it, so put the suffix back (karr k66).
+        if ($suffix && $suffix eq 'Status' && $STATUS_KIND{$resource . $suffix}) {
+            $resource .= $suffix;
+            $suffix = undef;
+        }
+
         $namespaced = 0 if $suffix && $suffix eq 'ForAllNamespaces';
         return (lc($action), $namespaced ? 1 : 0, $resource,
             ($suffix && $suffix eq 'Status') ? 1 : 0);
@@ -264,6 +284,12 @@ C<resourceVersion>, C<labelSelector>, C<fieldSelector> and C<namespace>;
 C<name>, C<namespace> and C<propagationPolicy>; C<name>, C<namespace>,
 C<patch> and C<type> - and ignore the others, which the new methods croak
 on.
+
+The trailing C<Status> is only a subresource suffix when the Kind before it is
+a real Kind. A Kind whose own name ends in C<Status> - C<ComponentStatus> is
+the only built-in one - is kept whole: C<ListComponentStatus> and
+C<ReadComponentStatus> resolve the C<ComponentStatus> Kind itself, not a
+C<Status> subresource of a C<Component>.
 
 =head1 SEE ALSO
 
