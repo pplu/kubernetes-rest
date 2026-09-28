@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-28T00:09:23Z
+claimed_by: backlog-9
+class: standard
+completed: 2026-09-28T00:09:18Z
+created: 2026-09-27T22:08:12Z
+id: 67
+priority: low
+started: 2026-09-27T23:36:44Z
+status: done
+tags:
+- v0
+- errors
+title: Fehler über die v0-Schicht nennen V0Group.pm statt der Aufruferzeile
+updated: 2026-09-28T00:09:23Z
+---
+
+Gefunden bei k62 (2026-09-28). Fehler aus Aufrufen über V0Group (AUTOLOAD/_dispatch) nennen V0Group.pm line 158, weil Carp V0Group nicht vertraut. our @CARP_NOT bzw. Vertrauen zu Kubernetes::REST ergänzen, mit Test auf die Aufruferzeile.
+
+Commit 2a3aca4f92f80bc54bf29203a9e6fe3ccb596b25
