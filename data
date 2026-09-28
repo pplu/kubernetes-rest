@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-28T00:09:10Z
+claimed_by: backlog-9
+class: standard
+completed: 2026-09-28T00:09:06Z
+created: 2026-09-27T22:08:07Z
+id: 66
+priority: low
+started: 2026-09-27T23:36:39Z
+status: done
+tags:
+- v0
+title: v0 *ComponentStatus wird als Kind Component plus Status-Suffix geparst
+updated: 2026-09-28T00:09:10Z
+---
+
+Gefunden bei k62 (2026-09-28), vorbestehend. ListComponentStatus endet mit Can't locate IO/K8s/Api/Core/V1/Component.pm und @INC-Dump, obwohl IO::K8s ComponentStatus mitliefert. _parse_method muss Kinds, die selbst auf Status enden, vor dem Status-Suffix erkennen.
+
+Commit 6abddf1b54f4133e139be4d6db6cba67c83202b2
