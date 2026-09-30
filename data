@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-30T05:51:45Z
+id: 69
+priority: medium
+status: backlog
+tags:
+- watch
+title: 'watch(): the resourceVersion returned after a watch started without one can
+  replay history'
+updated: 2026-09-30T05:51:45Z
+---
+
+Found 2026-09-30 by the Net::Async::Kubernetes live check (its card 73) against kube-apiserver v1.36.1. A watch started without resourceVersion first sends synthetic ADDED events for existing objects, sorted by name, each with its own (older) resourceVersion. watch() returns the last event's version; a caller that resumes from it after a quiet server timeout gets history replayed (state goes backwards, duplicate ADDED, DELETED for objects gone before the watch started). Likely fix, same as proposed for Net::Async::Kubernetes: allowWatchBookmarks=true and keep the bookmark's version (v1.36 sends one right after the initial events), or list-then-watch. Not a regression; decide together with nak card 73.
