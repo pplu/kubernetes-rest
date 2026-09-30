@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-30T05:33:13Z
+claimed_by: kubernetes-rest
+class: standard
+completed: 2026-09-30T05:33:13Z
+created: 2026-09-30T05:27:16Z
+id: 68
+priority: medium
+started: 2026-09-30T05:27:25Z
+status: done
+tags:
+- release
+- changes
+title: Consolidate the 1.109 Changes section before release
+updated: 2026-09-30T05:33:13Z
+---
+
+Pre-release audit for 1.109: the {{$NEXT}} section had same-topic duplicates (v0 Read*Status vs Replace/Patch*Status, ensure Job special case vs 409 handling, invalidate_discovery vs resource_map copy, two caller-line bullets, ensure 404/409 vs ensure_crd poll). Merge them and trim over-detailed entries without dropping a user-visible behaviour or failure-mode change.
+
+2026-09-30 05:33 Committed as 4a79f53. Every commit in 1.108..HEAD still covered.
