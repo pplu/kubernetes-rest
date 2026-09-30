@@ -2,6 +2,10 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - Require IO::K8s 1.109: string-map fields (labels, annotations, ConfigMap
+   data, ...) now serialize numeric values as JSON strings, which the API
+   server requires.
+
  - ensure and ensure_only resolve a hashref manifest through its
    apiVersion: an autoscaling/v1 HorizontalPodAutoscaler is no longer sent
    as autoscaling/v2. An apiVersion no known class serves croaks, naming
