@@ -1,5 +1,5 @@
 package Kubernetes::REST::Batch;
-our $VERSION = '1.109';
+our $VERSION = '1.110';
 # ABSTRACT: Compatibility helper for deprecated v0 Batch calls
 use Moo;
 extends 'Kubernetes::REST::V0Group';

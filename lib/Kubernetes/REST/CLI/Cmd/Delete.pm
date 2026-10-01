@@ -1,5 +1,5 @@
 package Kubernetes::REST::CLI::Cmd::Delete;
-our $VERSION = '1.109';
+our $VERSION = '1.110';
 # ABSTRACT: The delete command of kube_client
 use Moo;
 use MooX::Cmd;

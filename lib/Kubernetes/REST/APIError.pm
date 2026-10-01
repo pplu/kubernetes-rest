@@ -1,5 +1,5 @@
 package Kubernetes::REST::APIError;
-our $VERSION = '1.109';
+our $VERSION = '1.110';
 # ABSTRACT: An HTTP error status answered by the Kubernetes API
 use Moo;
 use Carp ();

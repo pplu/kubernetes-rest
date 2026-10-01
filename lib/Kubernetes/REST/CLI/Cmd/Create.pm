@@ -1,5 +1,5 @@
 package Kubernetes::REST::CLI::Cmd::Create;
-our $VERSION = '1.109';
+our $VERSION = '1.110';
 # ABSTRACT: The create command of kube_client
 use Moo;
 use MooX::Options;

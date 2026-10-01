@@ -1,6 +1,6 @@
 package Kubernetes::REST::CLI;
 # ABSTRACT: CLI base class for Kubernetes::REST command-line tools
-our $VERSION = '1.109';
+our $VERSION = '1.110';
 use Moo;
 use MooX::Options;
 use MooX::Cmd;

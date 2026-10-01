@@ -1,5 +1,5 @@
 package Kubernetes::REST::CLI::Minikube;
-our $VERSION = '1.109';
+our $VERSION = '1.110';
 # ABSTRACT: Bring up a minikube test cluster and run a command against it
 use Moo;
 use MooX::Options;
