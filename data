@@ -1,0 +1,31 @@
+---
+class: standard
+completed: 2026-10-18T06:32:30Z
+created: 2026-10-06T19:39:07Z
+id: 73
+priority: low
+started: 2026-10-18T05:41:36Z
+status: done
+tags:
+- kubeconfig
+- auth
+- review-2026-10-06
+title: Exec credential tokens are fetched once and never refreshed (expirationTimestamp
+  ignored)
+updated: 2026-10-18T06:32:30Z
+---
+
+File-based tokens rotate through `Kubernetes::REST::AuthTokenFile`, but an exec plugin's result is frozen into a plain `AuthToken` (lib/Kubernetes/REST/Kubeconfig.pm:513-517). `status.expirationTimestamp` is not read (`grep -rn expirationTimestamp lib t` is empty), and `status.clientCertificateData`/`clientKeyData` (plugins that hand out certificates instead of a token) end in 'exec credential did not return token'. EKS tokens live 15 minutes, GKE/AKS about an hour: a long-running process built from such a kubeconfig - a `watch` loop, a Net::Async::Kubernetes watcher or controller, a Comb daemon - starts getting 401 after that and can only recover by rebuilding the client.
+
+Done when: an exec-backed credential object re-runs the plugin once the reported expiry is near (or on demand after a 401), mirroring the AuthTokenFile approach, and the POD of `api` states what is supported; certificate-returning plugins either work or fail with a message that says so.
+
+---
+Fleet review 2026-10-06 · kind: improvement · confidence: verified
+
+2026-10-18 06:16 AuthExec.pm built, plugin execution moved out of Kubeconfig::_exec_credential; t/75 + full suite green. POD: AuthExec, Kubeconfig api exec paragraph. No new deps (Time::Local is core).
+
+2026-10-18 06:16 Done: Kubernetes::REST::AuthExec, Kubeconfig delegates; prove -lr t/ green (73 files, 907 tests)
+
+Commit 9168abd
+
+2026-10-18 06:32 Hub 2026-10-18: geprüft (Suite 73/907 grün, neue Tests gegen altes lib rot; Gegenprobe NAK, rex-rancher, p5-mcp-k8s, p5-kubernetes-comb, kubernetes-ocp grün), per ff auf master 9168abd, nicht gepusht.
