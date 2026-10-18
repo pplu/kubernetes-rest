@@ -1,0 +1,42 @@
+---
+class: standard
+completed: 2026-10-18T06:32:30Z
+created: 2026-10-06T19:38:50Z
+id: 70
+priority: high
+started: 2026-10-18T05:41:00Z
+status: done
+tags:
+- bug
+- kubeconfig
+- auth
+- review-2026-10-06
+title: 'Kubeconfig exec credential plugin: command and args go through a shell unquoted'
+updated: 2026-10-18T06:32:30Z
+---
+
+`_exec_credential` (lib/Kubernetes/REST/Kubeconfig.pm:498-518) runs the plugin with backticks: ``my $output = `$cmd @args`;`` (line 510). kubectl/client-go exec the command directly with the args as an argv list. Here the args are joined with spaces and parsed by /bin/sh, so any arg with a space, quote, `$`, `;`, `*`, `&` or `|` is split or interpreted.
+
+Reproduce (kubeconfig user):
+
+```
+exec:
+  apiVersion: client.authentication.k8s.io/v1
+  command: /bin/sh
+  args: ["-c", "echo '{\"status\":{\"token\":\"abc\"}}'; echo INJECTED >&2"]
+```
+
+`Kubernetes::REST::Kubeconfig->new(kubeconfig_path => ...)->api` prints `INJECTED` from the *outer* shell and croaks 'exec credential did not return token' - with kubectl the same entry yields the token. Real-world victims: `sh -c` wrappers, `--exec-arg` values with JSON, profile or cluster names with spaces, Windows-style paths. It is also needless shell exposure for a value read from a file.
+
+No test runs an exec plugin with args (t/33 only uses a bare command, t/32 only checks the command is not path-resolved).
+
+Done when: the plugin is started without a shell (`open my $fh, '-|', $cmd, @args` or IPC::Open3), stderr of the plugin stays visible, the exit status is in the croak, and a test covers an arg containing a space and a quote.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+Commit 4abe6be
+
+Also found: .worktreeinclude is untracked in the main checkout and skilletor-managed skills (.claude/skills/*) are gitignored, so a fresh worktree lacks them and the briefing hook rejects every kubernetes-rest-* agent ('unknown skill(s)'); I copied the skills into the worktree by hand. Also: HTTP::Tiny minimum 0.054 is evidenced only from local source of 0.054_01/0.056/0.080/0.096, no upstream Changes checked.
+
+2026-10-18 06:32 Hub 2026-10-18: geprüft (Suite 73/907 grün, neue Tests gegen altes lib rot; Gegenprobe NAK, rex-rancher, p5-mcp-k8s, p5-kubernetes-comb, kubernetes-ocp grün), per ff auf master 9168abd, nicht gepusht.
