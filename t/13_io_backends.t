@@ -2,6 +2,8 @@
 use strict;
 use warnings;
 use Test::More;
+use IO::Socket::SSL qw( SSL_VERIFY_PEER SSL_VERIFY_NONE );
+use HTTP::Tiny;
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/lib";
 
@@ -195,6 +197,39 @@ subtest 'HTTPTinyIO - ua is HTTP::Tiny' => sub {
     my $io = Kubernetes::REST::HTTPTinyIO->new;
     my $ua = $io->ua;
     isa_ok $ua, 'HTTP::Tiny';
+};
+
+# What HTTP::Tiny really hands to IO::Socket::SSL for a connection, built the
+# same way HTTP::Tiny::_open_handle builds its handle from the ua.
+sub tiny_ssl_args {
+    my ($ua, $host) = @_;
+    my $handle = HTTP::Tiny::Handle->new(
+        SSL_options => $ua->{SSL_options},
+        verify_SSL  => $ua->{verify_SSL},
+    );
+    return $handle->_ssl_args($host);
+}
+
+subtest 'HTTPTinyIO - ssl_verify_server => 1 verifies cert and hostname' => sub {
+    my $io = Kubernetes::REST::HTTPTinyIO->new(
+        ssl_verify_server => 1,
+        ssl_ca_file       => $INC{'Kubernetes/REST/HTTPTinyIO.pm'},
+    );
+    my $ua = $io->ua;
+    is $ua->verify_SSL, 1, 'ua verify_SSL is 1';
+    my $args = tiny_ssl_args($ua, 'k8s.example.com');
+    is $args->{SSL_verifycn_scheme}, 'http', 'hostname verification on';
+    is $args->{SSL_verifycn_name}, 'k8s.example.com', 'verified against the connect host';
+    is $args->{SSL_verify_mode}, SSL_VERIFY_PEER, 'SSL_VERIFY_PEER';
+};
+
+subtest 'HTTPTinyIO - ssl_verify_server => 0 disables verification' => sub {
+    my $io = Kubernetes::REST::HTTPTinyIO->new(ssl_verify_server => 0);
+    my $ua = $io->ua;
+    is $ua->verify_SSL, 0, 'ua verify_SSL is 0 (not left at the HTTP::Tiny default)';
+    my $args = tiny_ssl_args($ua, 'k8s.example.com');
+    is $args->{SSL_verifycn_scheme}, 'none', 'hostname verification off';
+    is $args->{SSL_verify_mode}, SSL_VERIFY_NONE, 'SSL_VERIFY_NONE';
 };
 
 subtest 'HTTPTinyIO - implements Role::IO' => sub {

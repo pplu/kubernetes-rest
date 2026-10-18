@@ -1,6 +1,6 @@
 requires 'LWP::UserAgent';
 recommends 'LWP::ConsoleLogger';
-recommends 'HTTP::Tiny';
+recommends 'HTTP::Tiny', '0.054';
 requires 'IO::Socket::SSL';
 requires 'IO::K8s', '1.109';
 requires 'Moo';

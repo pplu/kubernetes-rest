@@ -2,6 +2,12 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - HTTPTinyIO passes verify_SSL and an explicit SSL_verify_mode:
+   ssl_verify_server => 1 now also checks the host name on HTTP::Tiny
+   older than 0.083, and ssl_verify_server => 0 (kubeconfig
+   insecure-skip-tls-verify) is honoured on HTTP::Tiny 0.083 and newer.
+   HTTP::Tiny 0.054 or newer is recommended.
+
  - Kubeconfig exec credential plugins are started without a shell (k70):
    every configured arg reaches the plugin as exactly one argument, so args
    with spaces, quotes, "$" or ";" no longer get split or interpreted. The

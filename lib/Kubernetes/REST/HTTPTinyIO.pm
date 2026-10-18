@@ -36,6 +36,8 @@ has ssl_verify_server => (is => 'ro', isa => Bool, default => 1);
 
 Boolean. Whether to verify the server's SSL certificate. Defaults to true.
 
+The value drives both C<verify_SSL> of L<HTTP::Tiny> and the C<SSL_verify_mode> handed to L<IO::Socket::SSL> (C<SSL_VERIFY_PEER> or C<SSL_VERIFY_NONE>), so it covers the certificate chain and the hostname check together. Both are set explicitly; the backend does not rely on the L<HTTP::Tiny> default (on since 0.083). Use L<HTTP::Tiny> 0.054 or newer: from that version C<verify_SSL> controls the hostname check, and older releases do not honour the option reliably.
+
 =cut
 
 has ssl_cert_file => (is => 'ro');
@@ -99,7 +101,7 @@ has ua => (is => 'ro', lazy => 1, default => sub {
     require IO::Socket::SSL::Utils;
 
     my %options;
-    $options{ SSL_verify_mode } = SSL_VERIFY_PEER if ($self->ssl_verify_server);
+    $options{ SSL_verify_mode } = $self->ssl_verify_server ? SSL_VERIFY_PEER : SSL_VERIFY_NONE;
 
     if (defined $self->ssl_cert_pem) {
         $options{ SSL_cert } = [ IO::Socket::SSL::Utils::PEM_string2cert($self->ssl_cert_pem) ];
@@ -122,6 +124,7 @@ has ua => (is => 'ro', lazy => 1, default => sub {
     return HTTP::Tiny->new(
       agent => 'Kubernetes::REST Perl Client ' . ($Kubernetes::REST::VERSION // 'dev'),
       timeout => $self->timeout,
+      verify_SSL => $self->ssl_verify_server ? 1 : 0,
       SSL_options => \%options,
     );
 });
