@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-10-18T06:32:31Z
+created: 2026-10-06T19:39:23Z
+id: 76
+priority: low
+started: 2026-10-18T05:41:15Z
+status: done
+tags:
+- bug
+- in-cluster
+- ipv6
+- review-2026-10-06
+title: In-cluster endpoint is built without brackets for an IPv6 KUBERNETES_SERVICE_HOST
+updated: 2026-10-18T06:32:31Z
+---
+
+`_in_cluster_api` (lib/Kubernetes/REST/Kubeconfig.pm:527-532) builds `"https://$host:$port"` from `KUBERNETES_SERVICE_HOST` / `KUBERNETES_SERVICE_PORT`. In an IPv6-only or IPv6-primary dual-stack cluster the kubelet sets the host to an address literal such as `fd00:10:96::1`, which gives `https://fd00:10:96::1:443` - not a valid URL; LWP and HTTP::Tiny cannot split host and port. client-go uses `net.JoinHostPort` for the same two variables. Net::Async::Kubernetes and Kubernetes::Comb reach the in-cluster case through this method.
+
+Done when: a host containing ':' is wrapped in '[...]', with a test in t/14_kubeconfig.t (or next to the in-cluster tests) for an IPv4, an IPv6 and a DNS-name host.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+Commit fae1e34
+
+2026-10-18 06:32 Hub 2026-10-18: geprüft (Suite 73/907 grün, neue Tests gegen altes lib rot; Gegenprobe NAK, rex-rancher, p5-mcp-k8s, p5-kubernetes-comb, kubernetes-ocp grün), per ff auf master 9168abd, nicht gepusht.
