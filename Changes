@@ -2,6 +2,10 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - Require LWP::Protocol::https: it is a separate distribution since
+   libwww-perl 6, and without it the default LWPIO backend answered every
+   request to an https:// API server with LWP's internal 501.
+
  - HTTPTinyIO passes verify_SSL and an explicit SSL_verify_mode:
    ssl_verify_server => 1 now also checks the host name on HTTP::Tiny
    older than 0.083, and ssl_verify_server => 0 (kubeconfig

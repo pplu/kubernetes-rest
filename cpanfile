@@ -1,4 +1,5 @@
 requires 'LWP::UserAgent';
+requires 'LWP::Protocol::https';
 recommends 'LWP::ConsoleLogger';
 recommends 'HTTP::Tiny', '0.054';
 requires 'IO::Socket::SSL';
