@@ -2957,7 +2957,8 @@ connection after this many seconds.
 =item resourceVersion
 
 Resume watching from a specific resource version - pass the return value of a
-previous C<watch()> call to avoid missing events.
+previous C<watch()> call to avoid missing events. Without one, the server
+starts with synthetic C<ADDED> events for everything that exists.
 
 =item labelSelector
 
@@ -2977,9 +2978,20 @@ Any other argument croaks before a request is sent, naming it: a misspelt
 option is not ignored. That includes C<name>: to watch one object, pass
 C<< fieldSelector => 'metadata.name=NAME' >>.
 
-Returns the last C<resourceVersion> seen. Croaks on 410 Gone once the given
-C<resourceVersion> has expired - re-list to get a fresh one and resume from
-there:
+Every watch requests C<allowWatchBookmarks=true>. C<BOOKMARK> events are never
+passed to C<on_event>; their C<resourceVersion> only advances the resume
+point, so a quiet watch can still be resumed without a C<410>.
+
+Returns the resume point, the C<resourceVersion> to pass to the next call. With
+a start C<resourceVersion> that is the version of the last event or bookmark,
+or the start version if none arrived. Without one it is the version of the
+first C<BOOKMARK> (or of later events); the synthetic initial C<ADDED> events
+do not count, as they are older than the server state and resuming from one
+would replay history. If the server sent no bookmark (older servers) the
+return value is C<undef>: start again without a version, or re-list.
+
+Croaks on 410 Gone once the given C<resourceVersion> has expired - re-list to
+get a fresh one and resume from there:
 
     my $rv;
     while (1) {
@@ -2997,11 +3009,14 @@ there:
         }
     }
 
-That croak is a plain string, not a L<Kubernetes::REST::APIError>: the watch
-request itself was answered with C<200>, and the C<410> arrived inside the
-stream as an C<ERROR> event, which C<on_event> has already been given. It
-calls for a re-list, not error handling. An HTTP error status on the watch
-request itself dies with an L<Kubernetes::REST::APIError> as usual.
+That croak is a plain string, not a L<Kubernetes::REST::APIError>. It is raised
+when the stream carries a C<410> as an C<ERROR> event (the request itself was
+answered with C<200>; C<on_event> has already been given that event), and also
+when the watch request itself is answered with HTTP C<410> and a
+C<resourceVersion> was given. Either way it calls for a re-list, not error
+handling. Any other HTTP error status on the watch request, and a C<410> when
+no C<resourceVersion> was given, dies with an L<Kubernetes::REST::APIError>
+as usual.
 
 =cut
 
@@ -3024,6 +3039,8 @@ request itself dies with an L<Kubernetes::REST::APIError> as usual.
     my %params = (
         watch          => 'true',
         timeoutSeconds => $timeout,
+        # BOOKMARK events carry the server's current resourceVersion (k69).
+        allowWatchBookmarks => 'true',
     );
     $params{resourceVersion} = $resource_version if defined $resource_version;
     $params{labelSelector}   = $label_selector   if defined $label_selector;
@@ -3033,19 +3050,31 @@ request itself dies with an L<Kubernetes::REST::APIError> as usual.
 
     my $buffer = '';
     my $last_rv = $resource_version;
+    # Without a start resourceVersion the server first replays the existing
+    # objects as ADDED events, each with its own older version: no resume
+    # point until the first BOOKMARK (k69).
+    my $trusted = defined $resource_version ? 1 : 0;
     my $got_410 = 0;
 
     my $data_callback = sub {
         my ($chunk) = @_;
         for my $result ($self->_process_watch_chunk($class, \$buffer, $chunk)) {
-            $last_rv = $result->{resourceVersion} if $result->{resourceVersion};
+            my $is_bookmark = $result->{event}->type eq 'BOOKMARK';
+            $trusted = 1 if $is_bookmark;
+            $last_rv = $result->{resourceVersion}
+                if $result->{resourceVersion} && $trusted;
             $got_410 = 1 if $result->{error_code} == 410;
+            next if $is_bookmark;
             $on_event->($result->{event});
         }
     };
 
     my $response = $self->io->call_streaming($req, $data_callback);
 
+    # 410 on the request itself is the same expired resourceVersion as the
+    # ERROR event; without a resourceVersion it stays an APIError (k69).
+    croak "Watch expired (410 Gone): resourceVersion too old, re-list to get a fresh resourceVersion"
+        if $response->status == 410 && defined $resource_version;
     $self->_check_response($response, "watch $short_class");
 
     croak "Watch expired (410 Gone): resourceVersion too old, re-list to get a fresh resourceVersion"

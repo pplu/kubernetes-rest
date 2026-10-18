@@ -734,6 +734,13 @@ This is the foundation for building Kubernetes controllers.
         # Normal timeout, just restart the watch
     }
 
+The server sends C<BOOKMARK> events, which C<watch()> keeps away from
+C<on_event>; it resumes from their C<resourceVersion>. C<watch()> returns
+C<undef> when it has no safe resume point, which happens on a watch started
+without a C<resourceVersion> against a server that sent no bookmark. The
+loop above then starts over without a version, so the server replays the
+current state as C<ADDED> events. See L<Kubernetes::REST/watch> for the details.
+
 =head2 Watch with selectors
 
     $api->watch('Pod',

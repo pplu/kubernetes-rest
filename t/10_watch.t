@@ -140,8 +140,9 @@ subtest 'last resourceVersion returned' => sub {
     ]);
 
     my $last_rv = $api->watch('Pod',
-        namespace => 'kube-system',
-        on_event  => sub {},
+        namespace       => 'kube-system',
+        resourceVersion => '400',
+        on_event        => sub {},
     );
 
     is($last_rv, '505', 'returns last resourceVersion');

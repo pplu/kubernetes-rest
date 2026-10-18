@@ -162,7 +162,7 @@ subtest 'watch: the arguments it takes still go out' => sub {
         on_event => sub { push @types, $_[0]->type });
     is_deeply(\@types, ['ADDED'], 'the event');
     is_deeply($api->io->calls,
-        [ "GET $PODS?fieldSelector=status.phase=Running&labelSelector=app=web"
+        [ "GET $PODS?allowWatchBookmarks=true&fieldSelector=status.phase=Running&labelSelector=app=web"
             . '&resourceVersion=7&timeoutSeconds=5&watch=true' ],
         'every option in the query');
 };
@@ -201,7 +201,7 @@ subtest 'v0 List*, Read*, Watch*: parameters the new method does not take stay i
         timeoutSeconds => 5, on_event => sub { push @types, $_[0]->type });
     is_deeply(\@types, ['ADDED'], 'WatchNamespacedPod: the event');
     is_deeply($api->io->calls,
-        [ "GET $PODS", "GET $PODS/web", "GET $PODS?timeoutSeconds=300&watch=true" ],
+        [ "GET $PODS", "GET $PODS/web", "GET $PODS?allowWatchBookmarks=true&timeoutSeconds=300&watch=true" ],
         'the collection, the object, the watch - as the new methods take them');
 };
 

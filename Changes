@@ -2,6 +2,15 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - watch() no longer returns a resourceVersion that replays history (k69).
+   It sends allowWatchBookmarks=true, takes the resourceVersion of BOOKMARK
+   events as resume point and never passes a BOOKMARK to on_event. Started
+   without a resourceVersion, the versions of the initial ADDED events are
+   not a resume point: the return value is that of the first bookmark or of
+   later events, and undef if the server sent no bookmark. An HTTP 410 on
+   the watch request itself, with a resourceVersion given, croaks with the
+   same "Watch expired (410 Gone)" as the ERROR event form.
+
  - call_streaming of both IO backends rethrows an exception from the data
    callback unchanged (k71): a die in on_event or on_line now reaches the
    caller of watch() and log() instead of ending the stream silently under
