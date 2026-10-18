@@ -548,8 +548,8 @@ sub _exec_credential {
     return Kubernetes::REST::AuthToken->new(token => $token);
 }
 
-my $SA_TOKEN = '/var/run/secrets/kubernetes.io/serviceaccount/token';
-my $SA_CA    = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
+our $SA_TOKEN = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+our $SA_CA    = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
 
 sub _in_cluster_api {
     my ($self) = @_;
@@ -557,6 +557,7 @@ sub _in_cluster_api {
 
     my $host = $ENV{KUBERNETES_SERVICE_HOST} // 'kubernetes.default.svc';
     my $port = $ENV{KUBERNETES_SERVICE_PORT} // '443';
+    $host = "[$host]" if $host =~ /:/ && $host !~ /^\[/;
 
     return Kubernetes::REST->new(
         server => Kubernetes::REST::Server->new(

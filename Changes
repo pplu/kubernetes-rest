@@ -2,11 +2,15 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
- - Require LWP::Protocol::https: it is a separate distribution since
+ - The in-cluster endpoint wraps an IPv6 KUBERNETES_SERVICE_HOST in
+   brackets (k76): fd00:10:96::1 gives https://[fd00:10:96::1]:443 instead
+   of an unparsable URL.
+
+ - Require LWP::Protocol::https (k72): it is a separate distribution since
    libwww-perl 6, and without it the default LWPIO backend answered every
    request to an https:// API server with LWP's internal 501.
 
- - HTTPTinyIO passes verify_SSL and an explicit SSL_verify_mode:
+ - HTTPTinyIO passes verify_SSL and an explicit SSL_verify_mode (k75):
    ssl_verify_server => 1 now also checks the host name on HTTP::Tiny
    older than 0.083, and ssl_verify_server => 0 (kubeconfig
    insecure-skip-tls-verify) is honoured on HTTP::Tiny 0.083 and newer.
