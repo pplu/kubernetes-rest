@@ -1,0 +1,38 @@
+---
+class: standard
+completed: 2026-10-18T06:32:30Z
+created: 2026-10-06T19:39:12Z
+id: 74
+priority: medium
+started: 2026-10-18T05:41:31Z
+status: done
+tags:
+- api
+- list
+- watch
+- review-2026-10-06
+title: list() cannot paginate and drops the list's metadata (resourceVersion, continue)
+updated: 2026-10-18T06:35:22Z
+---
+
+`list` takes only `namespace`, `labelSelector` and `fieldSelector` (lib/Kubernetes/REST.pm:1884) - `limit`, `continue` and `resourceVersion` croak as unknown arguments - and `_inflate_list` builds the result from the items alone (`IO::K8s::List->new(items => \@objects, item_class => $class)`, line 1611), although IO::K8s::List has a `metadata` attribute for exactly this.
+
+```
+perl -Ilib -MKubernetes::REST -MKubernetes::REST::HTTPResponse -e 'my $api=Kubernetes::REST->new(server=>{endpoint=>"https://x"},credentials=>{token=>"t"},resource_map_from_cluster=>0); my $l=$api->inflate_list("Pod",Kubernetes::REST::HTTPResponse->new(status=>200,content=>q({"kind":"PodList","apiVersion":"v1","metadata":{"resourceVersion":"4711","continue":"abc"},"items":[]}))); print defined $l->metadata ? "present" : "undef", "\n"'
+# undef
+```
+
+Consequences: a large collection can only be fetched in one response (the API server's own chunking, `limit` + `continue`, is unreachable), and the collection resourceVersion is lost, so the list-then-watch pattern - the clean fix discussed for k69 and for Net::Async::Kubernetes k73 - cannot be built on the public API. The watch POD's own 410 recipe lists and then has to set `$rv = undef` for that reason (line 2990-2994). Net::Async::Kubernetes `list` has the same argument list and goes through the same `inflate_list`.
+
+Done when: `inflate_list` hands the response's `metadata` to IO::K8s::List, `list` accepts `limit`, `continue` and `resourceVersion` (sent as query parameters), the POD shows a paging loop and list-then-watch, and Net::Async::Kubernetes follows (its allowed-argument list).
+
+---
+Fleet review 2026-10-06 · kind: improvement · confidence: verified
+
+2026-10-18 06:11 list: limit/continue/resourceVersion as query params, _inflate_list passes ListMeta; t/61 LIST_ALLOWED string extended (the croak message lists allowed keys). prove -lr t/ green except that, now fixed.
+
+Commit 0adcaf0. Folge in p5-net-async-kubernetes: list-Argumentliste (limit, continue, resourceVersion) dort nachziehen; Net::Async wurde nicht angefasst.
+
+2026-10-18 06:32 Hub 2026-10-18: geprüft (Suite 73/907 grün, neue Tests gegen altes lib rot; Gegenprobe NAK, rex-rancher, p5-mcp-k8s, p5-kubernetes-comb, kubernetes-ocp grün), per ff auf master 9168abd, nicht gepusht.
+
+2026-10-18 06:35 Hub 2026-10-18: Folge in p5-net-async-kubernetes erledigt: 629991b (list nimmt limit/continue/resourceVersion, Liste trägt metadata; t/52-list-paging.t rot vorher, Suite 54/391 grün).
