@@ -1,0 +1,29 @@
+---
+class: standard
+completed: 2026-10-18T06:32:30Z
+created: 2026-10-06T19:39:01Z
+id: 72
+priority: medium
+started: 2026-10-18T05:41:10Z
+status: done
+tags:
+- hygiene
+- deps
+- review-2026-10-06
+title: 'cpanfile: LWP::Protocol::https is not required, the default backend cannot
+  reach an https API server on a fresh install'
+updated: 2026-10-18T06:32:30Z
+---
+
+The default IO backend is `Kubernetes::REST::LWPIO` (LWP::UserAgent). cpanfile requires `LWP::UserAgent` and `IO::Socket::SSL` but not `LWP::Protocol::https`, which has been a separate distribution since libwww-perl 6 and is not a hard prerequisite of it. `grep -rn 'Protocol::https' lib cpanfile dist.ini README.md` finds nothing. On a perl that only got `cpanm Kubernetes::REST`, every request to an `https://` endpoint - i.e. every real cluster - comes back as LWP's internal 501 'Protocol scheme 'https' is not supported (LWP::Protocol::https not installed)', surfaced as `Kubernetes API error (...): 501`. Same class of gap Net::Async::Kubernetes 0.009 just closed for IO::Async::SSL. Dependants (MCP::K8s, Kubernetes::Comb) inherit it.
+
+Done when: `requires 'LWP::Protocol::https';` is in cpanfile with a Changes line. Optional: make the 501-internal case croak with a hint instead of looking like an API error.
+
+---
+Fleet review 2026-10-06 · kind: hygiene · confidence: verified
+
+Commit 358ede7. Optionaler Teil (501-intern mit Hinweis croaken) wird zusammen mit k71 gebaut (gleicher Mechanismus: LWP-interne Antworten); Hash dort.
+
+Optionaler Teil (LWP-intern 501 -> 599 mit LWP::Protocol::https-Hinweis im content) in Commit 410e283
+
+2026-10-18 06:32 Hub 2026-10-18: geprüft (Suite 73/907 grün, neue Tests gegen altes lib rot; Gegenprobe NAK, rex-rancher, p5-mcp-k8s, p5-kubernetes-comb, kubernetes-ocp grün), per ff auf master 9168abd, nicht gepusht.
