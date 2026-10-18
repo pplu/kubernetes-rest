@@ -1608,7 +1608,15 @@ sub _inflate_list {
             . " INCOMPLETE (often IO::K8s version drift against the cluster):\n  %s",
             scalar @dropped, scalar @$items, $class, join("\n  ", @dropped);
     }
-    return IO::K8s::List->new(items => \@objects, item_class => $class);
+    my $meta = $struct->{metadata};
+    my $metadata = ref $meta eq 'HASH'
+        ? $self->k8s->struct_to_object(
+            'IO::K8s::Apimachinery::Pkg::Apis::Meta::V1::ListMeta', $meta)
+        : undef;
+    return IO::K8s::List->new(
+        items => \@objects, item_class => $class,
+        (defined $metadata ? (metadata => $metadata) : ()),
+    );
 }
 
 sub _process_watch_chunk {
@@ -1874,6 +1882,56 @@ Accepts short class names (C<Pod>) or full class paths. For namespaced resources
 
 Supports C<labelSelector> and C<fieldSelector> query parameters for server-side filtering.
 
+Three more options are sent as query parameters when given:
+
+=over 4
+
+=item limit
+
+Server-side chunking: at most this many items per response. If more match,
+the list carries a continue token in C<< $list->metadata->continue >>.
+
+=item continue
+
+The token from the previous page's C<< $list->metadata->continue >>. Repeat
+the same selectors and C<limit> on every page.
+
+=item resourceVersion
+
+Read at this version instead of the server's current state.
+
+=back
+
+C<< $list->metadata >> is the L<IO::K8s::List> C<ListMeta>, with
+C<resourceVersion>, C<continue> and C<remainingItemCount>; it is C<undef> when
+the response carries no list metadata. An empty or undefined
+C<continue> marks the last page.
+
+    # Page through a large collection
+    my ($continue, @pods);
+    do {
+        my $page = $api->list('Pod',
+            namespace => 'default',
+            limit     => 500,
+            (defined $continue ? (continue => $continue) : ()),
+        );
+        push @pods, $page->items->@*;
+        $continue = $page->metadata ? $page->metadata->continue : undef;
+    } while (defined $continue && length $continue);
+
+    # List, then watch from exactly that state
+    my $list = $api->list('Pod', namespace => 'default');
+    handle_pod($_) for $list->items->@*;
+    $api->watch('Pod',
+        namespace       => 'default',
+        resourceVersion => $list->metadata->resourceVersion,
+        on_event        => sub { handle_event($_[0]) },
+    );
+
+When paging, the server holds the C<resourceVersion> constant across all pages
+of one list, so the one from the last page is the point to start a
+C<watch> from.
+
 Any other argument croaks before a request is sent, naming it: a misspelt
 option is not ignored. That includes C<name>: the list endpoint selects one
 object with C<< fieldSelector => 'metadata.name=NAME' >>, and L</get>
@@ -1884,7 +1942,7 @@ fetches it.
     # A misspelt option is not ignored (karr k58): label_selector listed
     # unfiltered, namespce across the cluster. name and subresource are out
     # too: they made the request a GET of one object, read as an empty list.
-    $self->_croak_unknown_args('list', \%args, qw(namespace labelSelector fieldSelector));
+    $self->_croak_unknown_args('list', \%args, qw(namespace labelSelector fieldSelector limit continue resourceVersion));
     my ($class, $response) = $self->_list_request($short_class, %args);
     $self->_check_response($response, "list $short_class");
 
@@ -1901,6 +1959,7 @@ sub _list_request {
     # Extract query parameters before building path
     my $label_selector = delete $args{labelSelector};
     my $field_selector = delete $args{fieldSelector};
+    my %paging = map { $_ => delete $args{$_} } qw(limit continue resourceVersion);
 
     my $class = $self->_expand_class_or_croak($short_class);
     my $path = $self->_build_path($class, %args,
@@ -1909,6 +1968,7 @@ sub _list_request {
     my %params;
     $params{labelSelector} = $label_selector if defined $label_selector;
     $params{fieldSelector} = $field_selector if defined $field_selector;
+    defined $paging{$_} and $params{$_} = $paging{$_} for sort keys %paging;
 
     my $response = %params
         ? $self->_request('GET', $path, undef, parameters => \%params)
@@ -3003,9 +3063,11 @@ get a fresh one and resume from there:
             );
         };
         if ($@ && $@ =~ /410 Gone/) {
-            # resourceVersion expired, re-list to get fresh version
+            # resourceVersion expired: re-list, process the items, and
+            # resume from the version the fresh list was read at
             my $list = $api->list('Pod', namespace => 'default');
-            $rv = undef;  # start fresh
+            handle_pod($_) for $list->items->@*;
+            $rv = $list->metadata->resourceVersion;
         }
     }
 

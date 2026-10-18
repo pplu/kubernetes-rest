@@ -76,7 +76,7 @@ sub refuses {
     is_deeply($api->io->calls, [], "$method: nothing was sent, discovery included");
 }
 
-my $LIST_ALLOWED = 'namespace, labelSelector, fieldSelector';
+my $LIST_ALLOWED = 'namespace, labelSelector, fieldSelector, limit, continue, resourceVersion';
 
 subtest 'list: an argument it does not take croaks' => sub {
     # [ the key named - the first unknown one in sort order, the call ]

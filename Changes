@@ -2,6 +2,11 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - list() accepts limit, continue and resourceVersion, sent as query
+   parameters (k74), and inflate_list hands the response's metadata
+   (resourceVersion, continue, remainingItemCount) to the IO::K8s::List, so
+   paging and list-then-watch work on the public API. The POD shows both.
+
  - watch() no longer returns a resourceVersion that replays history (k69).
    It sends allowWatchBookmarks=true, takes the resourceVersion of BOOKMARK
    events as resume point and never passes a BOOKMARK to on_event. Started

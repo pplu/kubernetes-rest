@@ -723,10 +723,12 @@ This is the foundation for building Kubernetes controllers.
             );
         };
         if ($@ && $@ =~ /410 Gone/) {
-            # resourceVersion too old, re-list to get fresh state
+            # resourceVersion too old: re-list, then resume from the
+            # version the fresh list was read at
             warn "Watch expired, re-listing...\n";
-            $api->list('Pod', namespace => 'default');
-            $rv = undef;
+            my $list = $api->list('Pod', namespace => 'default');
+            say "Now: " . $_->metadata->name for @{ $list->items };
+            $rv = $list->metadata->resourceVersion;
         } elsif ($@) {
             warn "Watch error: $@\n";
             sleep 5;
