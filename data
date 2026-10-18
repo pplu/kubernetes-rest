@@ -1,0 +1,42 @@
+---
+class: standard
+completed: 2026-10-18T06:32:31Z
+created: 2026-10-06T19:39:18Z
+id: 75
+priority: medium
+started: 2026-10-18T05:41:05Z
+status: done
+tags:
+- bug
+- tls
+- security
+- review-2026-10-06
+title: 'HTTPTinyIO never sets verify_SSL: no hostname check on HTTP::Tiny < 0.083,
+  and ssl_verify_server => 0 is ignored on newer ones'
+updated: 2026-10-18T06:32:31Z
+---
+
+`HTTPTinyIO` builds its client with `SSL_options` only (lib/Kubernetes/REST/HTTPTinyIO.pm:102 and 122-126): `SSL_verify_mode => SSL_VERIFY_PEER` when `ssl_verify_server` is true, nothing otherwise, and never `verify_SSL`. HTTP::Tiny derives `SSL_verifycn_scheme` from `verify_SSL` and lets `SSL_options` override single keys, so the result depends on the HTTP::Tiny default:
+
+```
+ssl_verify_server=1, verify_SSL=0 (default before 0.083, i.e. core HTTP::Tiny of perl <= 5.36) => SSL_verify_mode=1 SSL_verifycn_scheme=none
+ssl_verify_server=0, verify_SSL=1 (default since 0.083)                                          => SSL_verify_mode=1 SSL_verifycn_scheme=http
+```
+
+(measured through `HTTP::Tiny::Handle->_ssl_args` with the options the backend passes; HTTP::Tiny 0.096 installed here.)
+
+- Old HTTP::Tiny: the chain is checked against the CA, the host name is not. With a cluster CA as `ssl_ca_file`, any certificate that CA issued - a kubelet or service serving certificate - is accepted as the API server.
+- New HTTP::Tiny: a kubeconfig with `insecure-skip-tls-verify: true` (or `ssl_verify_server => 0`) still verifies, so the connection to a self-signed dev cluster fails with this backend while LWPIO connects.
+
+cpanfile only `recommends 'HTTP::Tiny'` without a version, and dist requires no perl minimum that would pin it. LWPIO sets `verify_hostname` explicitly and is not affected.
+
+Done when: the backend passes `verify_SSL => $self->ssl_verify_server ? 1 : 0` (and the matching `SSL_verify_mode`), t/13_io_backends.t asserts scheme and mode for both settings, and the POD names the minimum HTTP::Tiny if one is needed.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+2026-10-18 05:47 HTTPTinyIO ua: verify_SSL => ssl_verify_server ? 1 : 0, SSL_verify_mode PEER/NONE explicit. cpanfile recommends HTTP::Tiny 0.054. t/13 + t/24 green. POD (min version, verify_SSL) still for doc-writer.
+
+Commit 9484db3
+
+2026-10-18 06:32 Hub 2026-10-18: geprüft (Suite 73/907 grün, neue Tests gegen altes lib rot; Gegenprobe NAK, rex-rancher, p5-mcp-k8s, p5-kubernetes-comb, kubernetes-ocp grün), per ff auf master 9168abd, nicht gepusht.
