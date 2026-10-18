@@ -43,6 +43,11 @@ strings, location included:
 so code that prints C<$@>, matches it against a regex or compares it with
 C<eq> keeps working. It is always true in boolean context.
 
+A C<code> of C<599> is not an answer of the API server but a transport
+failure (unreachable, TLS, timeout, a body that broke off, a missing
+L<LWP::Protocol::https>), and its C<body> holds the error message - see the
+"Error contract" in L<Kubernetes::REST::Role::IO>.
+
 Everything else - invalid arguments, a resource name that resolves to no
 class - still croaks with a plain string. Where such a message reports an
 API error behind it, such as a failed discovery read, it embeds this

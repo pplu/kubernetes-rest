@@ -2,6 +2,16 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - call_streaming of both IO backends rethrows an exception from the data
+   callback unchanged (k71): a die in on_event or on_line now reaches the
+   caller of watch() and log() instead of ending the stream silently under
+   LWPIO (and instead of becoming a 599 under HTTPTinyIO). LWPIO reports
+   transport failures - connect errors, a missing LWP::Protocol::https
+   (k72), a body cut short - as status 599 with the message as content, as
+   HTTPTinyIO always did, instead of an LWP-internal 500/501 or a 200. The
+   contract is documented in Kubernetes::REST::Role::IO. A truncated body
+   that LWPIO used to hand back as 200 is now an APIError with code 599.
+
  - The in-cluster endpoint wraps an IPv6 KUBERNETES_SERVICE_HOST in
    brackets (k76): fd00:10:96::1 gives https://[fd00:10:96::1]:443 instead
    of an unparsable URL.

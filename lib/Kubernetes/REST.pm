@@ -1766,7 +1766,10 @@ Validate an HTTP response. Returns the response on success. On a status code
 C<details> of a Kubernetes C<Status> body, the decoded C<body>, the
 C<context> and the C<response>. It stringifies to the message this method
 croaked with as a plain string before, C<Kubernetes API error (get Pod): 404
-...>, naming the line that called C<check_response>. See L</ERROR HANDLING>.
+...>, naming the line that called C<check_response>. A status of C<599> is not an
+answer of the API server but a transport failure, with the error message in
+the C<body> (see "Error contract" in L<Kubernetes::REST::Role::IO>). See
+L</ERROR HANDLING>.
 
 =cut
 
@@ -3570,6 +3573,11 @@ it carries the status for code that has to tell cases apart:
 Besides C<code>, C<is_not_found> and C<is_conflict> it has the C<reason>,
 C<message> and C<details> of the Kubernetes C<Status> body, the decoded
 C<body>, the C<context> and the C<response>.
+
+A C<code> of C<599> is not an answer of the API server but a transport
+failure (unreachable, TLS, timeout, a body that broke off, a missing
+L<LWP::Protocol::https>), and its C<body> holds the error message - see the
+"Error contract" in L<Kubernetes::REST::Role::IO>.
 
 That includes the C</openapi/v2> fetch behind C<schema_for> and
 C<compare_schema>, and the discovery documents (C<GET /api>, C<GET /apis>,

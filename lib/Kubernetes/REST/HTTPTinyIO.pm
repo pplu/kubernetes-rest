@@ -144,6 +144,8 @@ sub call {
 
 Execute an HTTP request. Receives a fully prepared L<Kubernetes::REST::HTTPRequest> (URL, headers, content all set). Returns a L<Kubernetes::REST::HTTPResponse>.
 
+A transport failure is returned as status C<599> with the message as content, as L<HTTP::Tiny> reports it; any other status is the API server's. See L<Kubernetes::REST::Role::IO/Error contract>.
+
 =cut
 
     my $res = $self->ua->request(
@@ -172,16 +174,29 @@ Execute an HTTP request with streaming response. The C<$data_callback> is called
 
 Used internally by L<Kubernetes::REST/watch> and L<Kubernetes::REST/log> for the Watch and Pod Log APIs.
 
+Transport failures come back as status C<599>. If the callback dies, the transfer is aborted and the same exception is rethrown unchanged, with no response: it is not turned into the 599 L<HTTP::Tiny> would report for it. See L<Kubernetes::REST::Role::IO/Error contract>.
+
 =cut
 
+    # HTTP::Tiny turns a die in data_callback into a 599; keep the original
+    # exception and rethrow it unchanged after the request.
+    my ( $failed, $error );
     my $res = $self->ua->request(
       $req->method,
       $req->url,
       {
         headers => $req->headers,
-        data_callback => $data_callback,
+        data_callback => sub {
+          return if $failed;
+          unless ( eval { $data_callback->(@_); 1 } ) {
+            ( $failed, $error ) = ( 1, $@ );
+            die $error;
+          }
+        },
       }
     );
+
+    die $error if $failed;
 
     return Kubernetes::REST::HTTPResponse->new(
        status => $res->{ status },
