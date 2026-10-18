@@ -4,6 +4,7 @@ our $VERSION = '1.110';
 use Moo;
 use Carp qw(croak);
 use Config ();
+use POSIX ();
 use YAML::XS ();
 use Path::Tiny qw(path);
 use MIME::Base64 qw(decode_base64);
@@ -507,8 +508,38 @@ sub _exec_credential {
         $ENV{$env->{name}} = $env->{value};
     }
 
-    my $output = `$cmd @args`;
-    croak "exec credential command failed: $cmd" if $?;
+    # No shell: fork and exec with the indirect-object form, so even a bare
+    # command (a one-element list, which perl would hand to /bin/sh when it
+    # holds whitespace or metacharacters) is one program path and each arg is
+    # exactly one argv element. stderr is inherited, so the plugin's own
+    # complaint stays visible. A failed exec is reported through a pipe, as
+    # perl does for the list form of open.
+    pipe(my $err_r, my $err_w) or croak "exec credential pipe failed: $!";
+    my $pid = open(my $fh, '-|');
+    croak "exec credential command $cmd could not be started: $!"
+        unless defined $pid;
+    unless ($pid) {
+        close $err_r;
+        { exec {$cmd} $cmd, @args }
+        my $errno = $! + 0;
+        print {$err_w} $errno;
+        close $err_w;
+        POSIX::_exit(127);
+    }
+    close $err_w;
+    my $exec_errno = do { local $/; <$err_r> };
+    close $err_r;
+    my $output = do { local $/; <$fh> };
+    close $fh;
+    my $status = $?;
+    if (length $exec_errno) {
+        local $! = $exec_errno;
+        croak "exec credential command $cmd could not be started: $!";
+    }
+    croak "exec credential command $cmd was killed by signal " . ($status & 127)
+        if $status & 127;
+    croak "exec credential command $cmd exited with status " . ($status >> 8)
+        if $status;
 
     my $cred = YAML::XS::Load($output);
     my $token = $cred->{status}{token}

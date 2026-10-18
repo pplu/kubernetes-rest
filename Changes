@@ -2,6 +2,13 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - Kubeconfig exec credential plugins are started without a shell (k70):
+   every configured arg reaches the plugin as exactly one argument, so args
+   with spaces, quotes, "$" or ";" no longer get split or interpreted. The
+   plugin's stderr stays visible, and a failure croaks with "exec credential
+   command CMD exited with status N" (or "could not be started"). Shell
+   expansion in command or args no longer happens.
+
 1.109     2026-10-01 03:32:13Z
 
  - Require IO::K8s 1.109: string-map fields (labels, annotations, ConfigMap
