@@ -1,0 +1,41 @@
+---
+class: standard
+completed: 2026-10-18T06:32:30Z
+created: 2026-10-06T19:38:56Z
+id: 71
+priority: medium
+started: 2026-10-18T05:41:20Z
+status: done
+tags:
+- bug
+- watch
+- io
+- review-2026-10-06
+title: 'LWP backend swallows an exception thrown in on_event / on_line: watch() and
+  log() return as if the stream ended'
+updated: 2026-10-18T06:32:30Z
+---
+
+`LWPIO::call_streaming` (lib/Kubernetes/REST/LWPIO.pm, `$self->ua->request($http_req, sub {...})`) hands the data callback to LWP as a content callback. LWP::Protocol::collect catches a `die` from that callback, aborts the transfer and records it only in the `X-Died` / `Client-Aborted` response headers; the response status stays 200. `_response` drops the headers, so `watch()` (lib/Kubernetes/REST.pm:3044-3051) passes `_check_response` and returns `$last_rv`, and streaming `log()` (3151-3159) returns normally.
+
+Reproduce without a cluster:
+
+```
+perl -Ilib -MKubernetes::REST::LWPIO -MKubernetes::REST::HTTPRequest -e 'my $io=Kubernetes::REST::LWPIO->new; my $r=eval{$io->call_streaming(Kubernetes::REST::HTTPRequest->new(method=>"GET",url=>"file://$ENV{PWD}/cpanfile",headers=>{}), sub { die "boom in on_event\n" })}; print "err=[$@] status=", $r->status, "\n"'
+# err=[] status=200
+```
+
+Effect: a bug in the caller's `on_event` handler (or a deliberate `die` to leave the watch) vanishes; the documented resume loop reconnects from the returned resourceVersion and silently skips the event that failed. The same headers are set when the connection breaks mid-body, so a truncated one-shot `log()` or `list()` body is also returned as a 200 (the list then fails later in the JSON decoder with an unrelated message). HTTPTinyIO behaves differently (599 with the message as content -> APIError code 599), so the two backends disagree.
+
+Done when: both backends rethrow a callback exception from `call_streaming` (LWP: check `X-Died`), the IO role documents that contract, transport failures (LWP's internal 500 'Can't connect', HTTP::Tiny's 599) are distinguishable from an API server status, and t/13_io_backends.t covers a dying callback for both.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+2026-10-18 05:58 Done: LWPIO/HTTPTinyIO call_streaming rethrow callback exception unchanged; LWPIO maps Internal response / Client-Aborted / X-Died / short body to 599 with message as content. REST.pm untouched. prove -lr t green (70 files).
+
+2026-10-18 05:58 Code done, suite green; Role::IO POD contract left to doc-writer
+
+Commit 410e283
+
+2026-10-18 06:32 Hub 2026-10-18: geprüft (Suite 73/907 grün, neue Tests gegen altes lib rot; Gegenprobe NAK, rex-rancher, p5-mcp-k8s, p5-kubernetes-comb, kubernetes-ocp grün), per ff auf master 9168abd, nicht gepusht.
