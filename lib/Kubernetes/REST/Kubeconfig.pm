@@ -4,7 +4,6 @@ our $VERSION = '1.110';
 use Moo;
 use Carp qw(croak);
 use Config ();
-use POSIX ();
 use YAML::XS ();
 use Path::Tiny qw(path);
 use MIME::Base64 qw(decode_base64);
@@ -12,6 +11,7 @@ use Kubernetes::REST;
 use Kubernetes::REST::Server;
 use Kubernetes::REST::AuthToken;
 use Kubernetes::REST::AuthTokenFile;
+use Kubernetes::REST::AuthExec;
 use namespace::clean;
 
 =head1 SYNOPSIS
@@ -410,6 +410,8 @@ Certificate and key material can come from either an inline base64 C<*-data> fie
 
 User authentication is resolved in this order: a plain C<token> field; a C<tokenFile>, whose content is the bearer token; an C<exec> block (kubectl's exec-credential-plugin mechanism, used for e.g. cloud IAM auth), which runs the configured C<command> (with C<args> and any C<env> entries applied to the child process) and reads C<status.token> from its output (parsed as YAML, which also accepts the JSON that real exec plugins emit); otherwise an empty token, for setups that authenticate via client certificate alone.
 
+An C<exec> block is handed to L<Kubernetes::REST> as a L<Kubernetes::REST::AuthExec>. The plugin runs when C<api()> builds the client, and again when the C<status.expirationTimestamp> it reported is within 60 seconds; a plugin that reports none is never run a second time. The first run is fatal. A later run that fails only warns and keeps the last good token, and a C<401> does not trigger a new run. Only token plugins are supported: one that answers with C<clientCertificateData>/C<clientKeyData> instead of a token makes C<api()> die with C<only token plugins are supported, not client certificate credentials>. L</refresh_token_files> does not apply to an C<exec> block.
+
 That order is C<kubectl>'s. An inline C<token> wins over a C<tokenFile> - client-go's C<getUserIdentificationPartialConfig> reads the file only when there is no inline token - and either of them wins over an C<exec> block, which C<kubectl> skips whenever a request already carries an C<Authorization> header. An C<exec> plugin is therefore not run at all when the user also has a token or a token file.
 
 A C<tokenFile> that cannot be read, or that holds nothing but whitespace, is a fatal error naming the user and the file. It is deliberately not a fall-through to the next mechanism: a kubeconfig saying where its token lives is a statement about how this user authenticates, and quietly carrying on would produce a 401 from the cluster with nothing pointing at the file. Leading and trailing whitespace is stripped - such files almost always end in a newline, and a newline in an C<Authorization> header does not reach the server as intended.
@@ -499,53 +501,11 @@ sub _token_file_credential {
 sub _exec_credential {
     my ($self, $exec) = @_;
 
-    my $cmd = $exec->{command};
-    my @args = @{$exec->{args} // []};
-
-    # Set up environment
-    local %ENV = %ENV;
-    for my $env (@{$exec->{env} // []}) {
-        $ENV{$env->{name}} = $env->{value};
-    }
-
-    # No shell: fork and exec with the indirect-object form, so even a bare
-    # command (a one-element list, which perl would hand to /bin/sh when it
-    # holds whitespace or metacharacters) is one program path and each arg is
-    # exactly one argv element. stderr is inherited, so the plugin's own
-    # complaint stays visible. A failed exec is reported through a pipe, as
-    # perl does for the list form of open.
-    pipe(my $err_r, my $err_w) or croak "exec credential pipe failed: $!";
-    my $pid = open(my $fh, '-|');
-    croak "exec credential command $cmd could not be started: $!"
-        unless defined $pid;
-    unless ($pid) {
-        close $err_r;
-        { exec {$cmd} $cmd, @args }
-        my $errno = $! + 0;
-        print {$err_w} $errno;
-        close $err_w;
-        POSIX::_exit(127);
-    }
-    close $err_w;
-    my $exec_errno = do { local $/; <$err_r> };
-    close $err_r;
-    my $output = do { local $/; <$fh> };
-    close $fh;
-    my $status = $?;
-    if (length $exec_errno) {
-        local $! = $exec_errno;
-        croak "exec credential command $cmd could not be started: $!";
-    }
-    croak "exec credential command $cmd was killed by signal " . ($status & 127)
-        if $status & 127;
-    croak "exec credential command $cmd exited with status " . ($status >> 8)
-        if $status;
-
-    my $cred = YAML::XS::Load($output);
-    my $token = $cred->{status}{token}
-        or croak "exec credential did not return token";
-
-    return Kubernetes::REST::AuthToken->new(token => $token);
+    return Kubernetes::REST::AuthExec->new(
+        command => $exec->{command},
+        args => $exec->{args} // [],
+        env => $exec->{env} // [],
+    );
 }
 
 our $SA_TOKEN = '/var/run/secrets/kubernetes.io/serviceaccount/token';
@@ -652,6 +612,10 @@ builds it anew.
 An inline C<token> in the kubeconfig is unaffected either way - there is no
 file to watch, and it is used exactly as it is written.
 
+A token from an C<exec> plugin is renewed by a different trigger, not by a
+file: see L<Kubernetes::REST::AuthExec>, which runs the plugin again when the
+C<expirationTimestamp> it reported comes near.
+
 =seealso
 
 =over
@@ -661,6 +625,10 @@ file to watch, and it is used exactly as it is written.
 =item * L<Kubernetes::REST::Server> - Server configuration
 
 =item * L<Kubernetes::REST::AuthToken> - Authentication credentials
+
+=item * L<Kubernetes::REST::AuthTokenFile> - Token read from a file, re-read on change
+
+=item * L<Kubernetes::REST::AuthExec> - Token from an exec plugin, renewed before it expires
 
 =back
 

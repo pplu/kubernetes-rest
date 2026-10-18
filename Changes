@@ -2,6 +2,16 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - Kubeconfig exec credentials are a Kubernetes::REST::AuthExec (k73): the
+   plugin is run again when status.expirationTimestamp is within
+   expiry_margin seconds (default 60), so a long-running client no longer
+   gets 401 once an EKS/GKE/AKS token expires. Without an
+   expirationTimestamp the plugin runs once, as before. A failed re-run
+   warns and keeps the last token; there is no re-fetch after a 401. A
+   plugin that returns clientCertificateData/clientKeyData instead of a
+   token now dies with "only token plugins are supported ... client
+   certificate".
+
  - list() accepts limit, continue and resourceVersion, sent as query
    parameters (k74), and inflate_list hands the response's metadata
    (resourceVersion, continue, remainingItemCount) to the IO::K8s::List, so
