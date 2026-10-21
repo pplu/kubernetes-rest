@@ -1,5 +1,5 @@
 package Kubernetes::REST::CLI::Watch;
-our $VERSION = '1.110';
+our $VERSION = '1.111';
 # ABSTRACT: CLI for watching Kubernetes resources
 use Moo;
 # protect_argv => 0 so parsed options are removed from @ARGV, leaving the

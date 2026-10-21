@@ -1,5 +1,5 @@
 package Kubernetes::REST::Autoscaling;
-our $VERSION = '1.110';
+our $VERSION = '1.111';
 # ABSTRACT: Compatibility helper for deprecated v0 Autoscaling calls
 use Moo;
 extends 'Kubernetes::REST::V0Group';

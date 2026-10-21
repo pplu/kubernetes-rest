@@ -1,5 +1,5 @@
 package Kubernetes::REST::AuthToken;
-our $VERSION = '1.110';
+our $VERSION = '1.111';
 # ABSTRACT: Kubernetes API authentication token
 use Moo;
 use Types::Standard qw/Str/;

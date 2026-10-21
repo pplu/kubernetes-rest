@@ -1,5 +1,5 @@
 package Kubernetes::REST::AuthExec;
-our $VERSION = '1.110';
+our $VERSION = '1.111';
 # ABSTRACT: Bearer token from an exec credential plugin, run again before it expires
 use Moo;
 use Carp qw(carp croak);
