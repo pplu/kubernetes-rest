@@ -1,6 +1,6 @@
 Revision history for Kubernetes-REST
 
-{{$NEXT}}
+1.110     2026-10-21 18:27:11Z
 
  - Kubeconfig exec credentials are a Kubernetes::REST::AuthExec (k73): the
    plugin is run again when status.expirationTimestamp is within
