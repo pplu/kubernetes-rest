@@ -29,7 +29,8 @@ runnable against the shipped API.
 ## Delegation
 
 Delegate behavior-relevant code to the right agent instead of touching it yourself — the
-principle, the lanes and this repo's hazards are in `.claude/rules/kubernetes-rest-rules.md`.
+principle is a shared house rule (skilletor bundle `getty-cpan-dist@getty`); the lanes and
+this repo's hazards are in `.claude/rules/kubernetes-rest-rules.md`.
 
 | Task | Agent |
 |---|---|

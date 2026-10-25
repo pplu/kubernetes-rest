@@ -1,8 +1,17 @@
 {
   "sources": {
-    "getty": { "git": "https://github.com/Getty/skills.git", "ref": "main" },
-    "karr": { "git": "https://github.com/Getty/karr.git", "ref": "main" },
-    "io-k8s-p5": { "git": "https://github.com/pplu/io-k8s-p5.git", "ref": "master" }
+    "getty": {
+      "git": "https://github.com/Getty/skills.git",
+      "ref": "main"
+    },
+    "karr": {
+      "git": "https://github.com/Getty/karr.git",
+      "ref": "main"
+    },
+    "io-k8s-p5": {
+      "git": "https://github.com/pplu/io-k8s-p5.git",
+      "ref": "master"
+    }
   },
   "install": {
     "skills": [
@@ -17,8 +26,13 @@
       "kanban-issues-karr-coordination@karr",
       "kanban-issues-karr-ticket@karr",
       "perl-io-k8s-kubernetes-classes@io-k8s-p5"
+    ],
+    "bundles": [
+      "getty-cpan-dist@getty"
     ]
   },
-  "targets": ["claude"],
+  "targets": [
+    "claude"
+  ],
   "gitignore": true
 }
