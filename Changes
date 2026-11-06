@@ -2,6 +2,23 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - A kubeconfig value that is the kubeconfig's content instead of a file
+   name is refused. A value counts as a document when it contains a line
+   break, CR or NUL, or when it or any entry of a path list starts with
+   "{", "[" or "---" (after whitespace); this is checked per arrayref
+   entry, for kubeconfig_path and for the KUBECONFIG default.
+   kubeconfig_paths, api, contexts, current_context_name, context,
+   cluster and user die at the caller's line with "kubeconfig expects a
+   path, got a document in kubeconfig_path - pass the name of a
+   kubeconfig file, not its content" (or "... in the environment
+   variable KUBECONFIG ..."), quoting nothing of the value. Before, the
+   document was stat'ed as a file name: it warned "Unsuccessful stat on
+   filename containing newline" and died with "Kubeconfig not found:
+   <the whole document> and not running in-cluster", tokens and client
+   keys included, or silently fell back to an in-cluster client when a
+   service account token was mounted. A document never falls back to
+   in-cluster.
+
 1.110     2026-10-21 18:27:11Z
 
  - Kubeconfig exec credentials are a Kubernetes::REST::AuthExec (k73): the

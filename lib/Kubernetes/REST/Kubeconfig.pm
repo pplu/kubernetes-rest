@@ -100,16 +100,48 @@ croaks naming the two missing variables instead of reaching for C</.kube/config>
 
 The split list, without empty entries, is L</kubeconfig_paths>.
 
+It takes the name of a file, never the kubeconfig's content. A value that looks
+like content - one with a line break or a NUL byte in it, or one that starts
+with C<{>, C<[> or C<--->, as a list entry too - is a mistake and dies with
+C<kubeconfig expects a path, got a document in kubeconfig_path - pass the name of a kubeconfig file, not its content>
+(C<in the environment variable KUBECONFIG> when the default came from there),
+at the first method that needs the kubeconfig. The message does not quote the
+value, which holds tokens and keys, and L</api> does not fall back to in-cluster
+authentication: this is not a kubeconfig that is missing. A kubeconfig held in
+memory has to be written to a file first.
+
 =cut
 
 sub _default_kubeconfig_path {
     my $self = shift;
-    return $ENV{KUBECONFIG} if defined $ENV{KUBECONFIG} and length $ENV{KUBECONFIG};
+    if (defined $ENV{KUBECONFIG} and length $ENV{KUBECONFIG}) {
+        $self->_set_kubeconfig_path_from_env(1);
+        return $ENV{KUBECONFIG};
+    }
     return undef unless defined $ENV{HOME} and length $ENV{HOME};
     return "$ENV{HOME}/.kube/config";
 }
 
+# Whether kubeconfig_path is the KUBECONFIG environment variable, for the one
+# message that has to say where a value came from. Only the default knows: once
+# constructed, an explicit kubeconfig_path => $ENV{KUBECONFIG} looks the same.
+has _kubeconfig_path_from_env => (
+    is => 'ro',
+    init_arg => undef,
+    writer => '_set_kubeconfig_path_from_env',
+);
+
 my $PATH_SEP = $Config::Config{path_sep} || ':';
+
+# The kubeconfig content where its file name belongs - kubeconfig_path => $yaml,
+# KUBECONFIG="$(cat config)". No file name a caller means holds a line break or
+# a NUL, and none opens like a JSON or YAML document. Stat-ing such a value
+# warns, and naming it in "Kubeconfig not found" put every token and key of the
+# kubeconfig into the logs.
+sub _is_document {
+    my ($self, $value) = @_;
+    return $value =~ /[\n\r\0]/ || $value =~ /\A\s*(?:[{\[]|---)/;
+}
 
 has kubeconfig_paths => (
     is => 'lazy',
@@ -119,6 +151,20 @@ has kubeconfig_paths => (
         my $path = $self->kubeconfig_path;
         return [] unless defined $path;
         my @entries = ref $path eq 'ARRAY' ? @$path : split /\Q$PATH_SEP\E/, $path, -1;
+        # Per entry, so a document appended to a list ("path:{...}") is caught
+        # too. The split leaves line breaks and NULs where they were, so for
+        # those this is the same as looking at the whole value.
+        if (grep { defined and $self->_is_document($_) } @entries) {
+            # Reached through lazy builders (api -> _config -> here): trusting
+            # Moo's generated accessors for this croak names the caller's line,
+            # not one in this file. Names the option or the variable, never the
+            # value: the value is the secret.
+            local our @CARP_NOT = ('Method::Generate::Accessor::_Generated');
+            croak 'kubeconfig expects a path, got a document in '
+                . ($self->_kubeconfig_path_from_env
+                    ? 'the environment variable KUBECONFIG' : 'kubeconfig_path')
+                . ' - pass the name of a kubeconfig file, not its content';
+        }
         return [ grep { defined and length } @entries ];
     },
 );
@@ -131,7 +177,8 @@ C<kubeconfig_path> and not settable on its own. Empty when neither
 C<KUBECONFIG> nor C<HOME> is set.
 
 The paths are not checked for existence here - see L</MERGING> for what happens
-to entries that are not there.
+to entries that are not there. A document where a path belongs dies here, see
+L</kubeconfig_path>.
 
 =cut
 
@@ -426,6 +473,10 @@ C</var/run/secrets/kubernetes.io/serviceaccount/token>. In that case the API
 server address comes from the C<KUBERNETES_SERVICE_HOST>/C<KUBERNETES_SERVICE_PORT>
 environment variables (defaulting to C<kubernetes.default.svc:443>), and the
 cluster CA is read from C</var/run/secrets/kubernetes.io/serviceaccount/ca.crt>.
+
+A kubeconfig's content in C<kubeconfig_path> or C<KUBECONFIG> is not "no
+kubeconfig found": it dies as described at L</kubeconfig_path>, with no
+in-cluster fallback, even when a service account token is mounted.
 
 =cut
 
