@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-06T21:18:20Z
+created: 2026-11-06T20:41:17Z
+id: 81
+priority: low
+started: 2026-11-06T21:16:20Z
+status: done
+tags:
+- pod
+- cli
+title: Crd2Class POD links L</api>, which has no heading in the built module
+updated: 2026-11-06T21:18:20Z
+---
+
+podchecker on the built lib/Kubernetes/REST/CLI/Crd2Class.pm (dzil build at d8707a2) reports two errors: "unresolved internal link api" at built lines 203 and 242 — source lines 34 (L<api|/api>) and 110 (L</api>). The api attribute comes from Kubernetes::REST::CLI::Role::Connection (=attr api at Role/Connection.pm:70); PodWeaver does not copy role docs, so the woven Crd2Class has no api heading. Pre-existing: Crd2Class.pm is unchanged since 8746124, found during the release-1106 final check, not caused by k77-k80. Recommendation (mine, not a maintainer decision): point both links at L<Kubernetes::REST::CLI::Role::Connection/api>. Lane: kubernetes-rest-doc-writer. Done = podchecker on the built module reports no errors.
+
+Hub decision, not a maintainer decision (perl-developer-bb, 2026-11-06): the recommendation stands - both links in Crd2Class POD (source lines 34 and 110) point to L<Kubernetes::REST::CLI::Role::Connection/api>. Promoted backlog -> todo on the hub's word. kubernetes-rest-doc-writer edits, release-manager commits with (k81) in the subject, no Changes entry (pure POD link fix). Done = podchecker on all 48 built files without errors, dzil build clean.
+
+Committed as d3c751a (Link Crd2Class's api to Role::Connection, where it is documented), master ff'd to d3c751a. Both links now L<api|Kubernetes::REST::CLI::Role::Connection/api>. dzil build clean; podchecker on all 48 built modules and bin scripts: 48x pod syntax OK (before: 2 errors in Crd2Class.pm). No Changes entry, per hub decision.
