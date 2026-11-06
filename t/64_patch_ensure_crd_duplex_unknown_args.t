@@ -14,8 +14,8 @@
 # watch, ensure_only and log do (k49, k53, k58).
 #
 # What they take is what they read. patch and patch_status: name,
-# namespace, patch and type - with an object only patch and type, since the
-# object names itself (as delete takes only propagationPolicy with an
+# namespace, patch, type and fieldValidation - with an object only patch, type
+# and fieldValidation, since the object names itself (as delete takes only propagationPolicy with an
 # object, and as Net::Async::Kubernetes refuses it since its k63).
 # ensure_crd: timeout, poll_interval and storage. The duplex methods: name,
 # namespace, the stream toggles and container their subresource takes,
@@ -99,8 +99,8 @@ sub refuses {
     is_deeply($api->io->calls, [], "$what: nothing was sent, discovery included");
 }
 
-my $PATCH_ALLOWED        = 'name, namespace, patch, type';
-my $PATCH_OBJECT_ALLOWED = 'patch, type';
+my $PATCH_ALLOWED        = 'name, namespace, patch, type, fieldValidation';
+my $PATCH_OBJECT_ALLOWED = 'patch, type, fieldValidation';
 
 for my $method (qw(patch patch_status)) {
     subtest "$method: an argument it does not take croaks" => sub {

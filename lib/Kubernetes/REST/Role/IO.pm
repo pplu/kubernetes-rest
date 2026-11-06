@@ -74,6 +74,15 @@ With L<LWP::UserAgent> that means C<< $res->decoded_content(charset => 'none') >
 rather than C<< $res->decoded_content >>. See also L<Kubernetes::REST/ENCODING>
 for the full picture from the caller's side of this module.
 
+=head2 Response headers
+
+A backend should fill C<< $res->headers >> from the response it got, as a
+hashref keyed by lowercased header name, each value an arrayref of that
+header's values in the order they came - a repeated header gives several. The
+values are bytes, as the body is. Without it the client sees no C<Warning>
+headers, and L<Kubernetes::REST/on_warning> is never called. Both shipped
+backends fill it.
+
 =head2 Error contract
 
 C<call> and C<call_streaming> tell three kinds of failure apart, and a backend
@@ -129,7 +138,7 @@ requires 'call';
 
 Required. Execute an HTTP request. Receives a L<Kubernetes::REST::HTTPRequest> with C<method>, C<url>, C<headers>, and optionally C<content> already set.
 
-Must return a L<Kubernetes::REST::HTTPResponse> with C<status> and C<content>, the latter as bytes - see L</Encoding contract>. A transport failure (no answer from the API server) is returned as status C<599> with the error message as C<content>, never thrown; every other status is the server's and stays as it is - see L</Error contract>.
+Must return a L<Kubernetes::REST::HTTPResponse> with C<status> and C<content>, the latter as bytes - see L</Encoding contract>. A transport failure (no answer from the API server) is returned as status C<599> with the error message as C<content>, never thrown; every other status is the server's and stays as it is - see L</Error contract>. It should also fill C<headers> - see L</Response headers>.
 
 =cut
 
@@ -141,7 +150,7 @@ requires 'call_streaming';
 
 Required. Execute an HTTP request with streaming response. The C<$data_callback> is called with each chunk of data as it arrives: C<< $data_callback->($chunk) >>. Chunks are bytes - see L</Encoding contract>.
 
-Must return a L<Kubernetes::REST::HTTPResponse> when the stream ends. A transport failure, including a break in the middle of the body, is returned as status C<599> with the error message as C<content>, as in C<call>.
+Must return a L<Kubernetes::REST::HTTPResponse> when the stream ends. A transport failure, including a break in the middle of the body, is returned as status C<599> with the error message as C<content>, as in C<call>. It fills C<headers> as C<call> does.
 
 If C<$data_callback> dies, the backend aborts the transfer and dies with the same exception, unchanged and without a response; that is not a 599. See L</Error contract>.
 

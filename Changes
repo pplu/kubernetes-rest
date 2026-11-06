@@ -2,6 +2,27 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - New attribute field_validation (Strict, Warn or Ignore; anything else
+   croaks listing the allowed values, never the value given), and a
+   fieldValidation option on create, update, update_status, patch and
+   patch_status, sent as the fieldValidation query parameter. A value
+   given to the call wins over the client default; with neither,
+   nothing is sent. create, update and update_status now take options
+   and croak on unknown keys; patch and patch_status with an object
+   accept patch, type and fieldValidation. ensure() passes no options on:
+   its create sends only the client default.
+
+ - New attribute on_warning (a coderef). check_response hands every
+   Warning header of the response to it as text, as on_warning->($text,
+   $context), also on an error status and before the APIError is thrown;
+   the RFC 7234 form 299 - "text" is unpacked to the text. This needs
+   the new attribute headers of Kubernetes::REST::HTTPResponse, a hashref
+   of lower-cased header name to arrayref of values (default empty),
+   which LWPIO and HTTPTinyIO fill. A backend that does not fill headers
+   yields no warnings. check_response is part of the public pipeline
+   seam and the change is additive: Net::Async::Kubernetes has to pass
+   the response headers into HTTPResponse for on_warning to work there.
+
  - New public method $api->add_provider(@providers) registers IO::K8s
    providers on a live client. Each provider is what "with" takes: a
    provider class name (with new and resource_map), an object with

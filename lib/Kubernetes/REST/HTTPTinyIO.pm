@@ -146,6 +146,8 @@ Execute an HTTP request. Receives a fully prepared L<Kubernetes::REST::HTTPReque
 
 A transport failure is returned as status C<599> with the message as content, as L<HTTP::Tiny> reports it; any other status is the API server's. See L<Kubernetes::REST::Role::IO/Error contract>.
 
+The response's headers are filled in, so a C<Warning> header of the API server reaches L<Kubernetes::REST/on_warning>. See L<Kubernetes::REST::Role::IO/Response headers>.
+
 =cut
 
     my $res = $self->ua->request(
@@ -160,6 +162,7 @@ A transport failure is returned as status C<599> with the message as content, as
     return Kubernetes::REST::HTTPResponse->new(
        status => $res->{ status },
        (defined $res->{ content })?( content => $res->{ content } ) : (),
+       headers => $self->_headers($res->{ headers }),
     );
   }
 
@@ -201,8 +204,23 @@ Transport failures come back as status C<599>. If the callback dies, the transfe
     return Kubernetes::REST::HTTPResponse->new(
        status => $res->{ status },
        (defined $res->{ content })?( content => $res->{ content } ) : (),
+       headers => $self->_headers($res->{ headers }),
     );
   }
+
+# HTTP::Tiny's headers - lowercased names, a string for a header that came
+# once and an arrayref for a repeated one - as an arrayref of values each, in
+# the order they came (karr k79). A response without headers has none.
+sub _headers {
+    my ($self, $headers) = @_;
+    return {} unless ref $headers eq 'HASH';
+    my %headers;
+    for my $name (keys %$headers) {
+      my $value = $headers->{$name};
+      $headers{ lc $name } = [ ref $value eq 'ARRAY' ? @$value : $value ];
+    }
+    return \%headers;
+}
 
 1;
 

@@ -151,6 +151,8 @@ Execute an HTTP request. Receives a fully prepared L<Kubernetes::REST::HTTPReque
 
 A failure of L<LWP::UserAgent> itself (cannot connect, TLS error, timeout, unsupported scheme, C<LWP::Protocol::https> not installed) is returned as status C<599> with the message as content; any other status is the API server's. See L<Kubernetes::REST::Role::IO/Error contract>.
 
+The response's headers are filled in, so a C<Warning> header of the API server reaches L<Kubernetes::REST/on_warning>. See L<Kubernetes::REST::Role::IO/Response headers>.
+
 =cut
 
     my $http_req = HTTP::Request->new(
@@ -257,7 +259,20 @@ sub _response {
     return Kubernetes::REST::HTTPResponse->new(
        status => $res->code,
        (defined $content && length $content) ? ( content => $content ) : (),
+       headers => $self->_headers($res),
     );
+}
+
+# Every header of the response under its lowercased name, each value in the
+# order it came - HTTP::Headers keeps a repeated Warning header as several
+# values (karr k79). A response object without ->headers, such as a test
+# double, has none.
+sub _headers {
+    my ($self, $res) = @_;
+    my %headers;
+    $res->headers->scan(sub { push @{ $headers{ lc $_[0] } }, "$_[1]" })
+      if $res->can('headers');
+    return \%headers;
 }
 
 1;

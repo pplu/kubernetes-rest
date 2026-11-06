@@ -3,7 +3,7 @@ our $VERSION = '1.111';
 # ABSTRACT: A Perl REST Client for the Kubernetes API
 use Moo;
 use Carp qw(croak carp);
-use Scalar::Util qw(blessed);
+use Scalar::Util qw(blessed reftype);
 use Module::Runtime qw(require_module);
 use JSON::MaybeXS ();
 use Encode ();
@@ -294,6 +294,93 @@ has resource_map_from_cluster => (is => 'ro', default => sub { 1 });
 Boolean. If true, dynamically loads the resource map from the cluster's OpenAPI spec. Defaults to C<1>.
 
 Set to C<0> to use L<IO::K8s> built-in resource map instead (faster startup, but may not match your cluster version).
+
+=cut
+
+# The fieldValidation values the API server takes, spelled as it spells them.
+my @FIELD_VALIDATIONS = qw(Strict Warn Ignore);
+
+# Sent as the fieldValidation query parameter of every write - create, update,
+# patch, patch_status, update_status, and ensure() through them - that does
+# not pass its own (karr k79). Unset, a write carries none and the server's
+# default applies, which on current clusters drops an unknown field and says
+# so only in a Warning header (see on_warning). The message names the
+# attribute and the allowed values, never the value given.
+has field_validation => (
+    is  => 'ro',
+    isa => sub {
+        my ($value) = @_;
+        croak 'Unknown field_validation value (use: ' . join(', ', @FIELD_VALIDATIONS) . ')'
+            if defined $value && !grep { $_ eq $value } @FIELD_VALIDATIONS;
+    },
+);
+
+=attr field_validation
+
+Optional. What the API server does with a field it does not know or a field
+that appears twice in a write: C<Strict>, C<Warn> or C<Ignore>, spelled as the
+API server spells them. It is sent as the C<fieldValidation> query parameter
+of every write - L</create>, L</update>, L</patch>, L</patch_status>,
+L</update_status>, and L</ensure> through them. Reads and deletes never send
+it.
+
+    my $api = Kubernetes::REST->new(
+        ...,
+        field_validation => 'Strict',
+    );
+
+Unset by default, and then no parameter is sent and the server's own default
+applies. On current clusters that is to drop the unknown field and say so only
+in a C<Warning> header, which nothing shows unless L</on_warning> is set.
+C<Strict> makes the server refuse the write instead, with an error that dies
+as a L<Kubernetes::REST::APIError>, as C<kubectl --validate=strict> does.
+
+Any other value croaks at construction: C<isa check for "field_validation" failed: Unknown field_validation value (use: Strict, Warn, Ignore)>.
+A single write can override this with its own C<fieldValidation> argument.
+
+=cut
+
+# Called as ->($text, $context) for each Warning header value of every
+# response _check_response sees - check_response, the seam async clients use,
+# included (karr k79). Unset, warnings are not looked at.
+has on_warning => (
+    is  => 'ro',
+    isa => sub {
+        croak 'on_warning must be a code reference'
+            if defined $_[0] && (reftype($_[0]) // '') ne 'CODE';
+    },
+);
+
+=attr on_warning
+
+Optional code reference, called once for every C<Warning> header value of
+every response the client checks: each call of L</list>, L</get>, L</create>,
+L</update>, L</patch> and the rest, and the public L</check_response> that
+async clients use. The API server reports what it did not do as asked - a
+field it dropped, a deprecated API - only there.
+
+    my $api = Kubernetes::REST->new(
+        ...,
+        on_warning => sub {
+            my ($text, $context) = @_;
+            warn "$context: $text\n";
+        },
+    );
+
+It is called as C<< $on_warning->($text, $context) >>, in the order of the
+headers. C<$text> is, for the API server's C<299 - "text"> form, the quoted
+text with C<\"> and C<\\> undone (C<unknown field "spec.nodeIP">); any other
+value is passed whole. It is decoded from UTF-8, so it holds characters.
+C<$context> is what an L<Kubernetes::REST::APIError> would carry as its
+C<context>, such as C<create IO::K8s::Api::Core::V1::Pod>. An error response
+delivers its warnings before the error is thrown.
+
+Unset, warnings are not looked at and nothing is printed. L</ensure> reads
+some responses off the status without checking them - the 404 of its GET, a
+409 on its create or update - and those deliver no warnings.
+
+Anything but a code reference croaks at construction:
+C<on_warning must be a code reference>.
 
 =cut
 
@@ -1619,6 +1706,9 @@ sub _query_escape {
 
 sub _check_response {
     my ($self, $response, $context) = @_;
+    # Before the status is looked at, so an error response delivers its
+    # warnings ahead of the APIError (karr k79).
+    $self->_deliver_warnings($response, $context);
     if ($response->status >= 400) {
         # Response bodies are bytes; the error message is read by humans, so
         # decode it (leniently - a truncated or non-UTF-8 body must not turn a
@@ -1635,6 +1725,39 @@ sub _check_response {
         );
     }
     return $response;
+}
+
+# The API server says what it did not do as asked - a field it dropped
+# (unknown field "spec.nodeIP"), a deprecated API - only in Warning response
+# headers (karr k79). Each value goes to on_warning with the context an
+# APIError would carry, in header order. A response object without headers -
+# a test double, another backend's, an async client's own - has none.
+sub _deliver_warnings {
+    my ($self, $response, $context) = @_;
+    my $on_warning = $self->on_warning or return;
+    return unless $response->can('headers');
+    my $headers = $response->headers;
+    my $warnings = ref $headers eq 'HASH' ? $headers->{warning} : undef;
+    return unless ref $warnings eq 'ARRAY';
+    for my $value (@$warnings) {
+        $on_warning->($self->_warning_text($value), $context);
+    }
+    return;
+}
+
+# The text of one Warning header value. The API server writes RFC 7234's
+# warn-code, warn-agent, quoted warn-text and optional quoted warn-date -
+# 299 - "..." - and the text is the quoted part with its quoted-pairs (\" and
+# \\) undone. Any other value is taken whole. Header values are bytes; the
+# text is read by humans, so it is decoded, leniently, as an APIError's body.
+sub _warning_text {
+    my ($self, $value) = @_;
+    my $text = Encode::decode('UTF-8', $value // '', Encode::FB_DEFAULT);
+    return $text
+        unless $text =~ /\A\s*\d{3}\s+\S+\s+"((?:[^"\\]|\\.)*)"(?:\s+"[^"]*")?\s*\z/s;
+    my $quoted = $1;
+    $quoted =~ s/\\(.)/$1/gs;
+    return $quoted;
 }
 
 # The name to hand IO::K8s's json_to_object()/struct_to_object() for $class.
@@ -1862,6 +1985,10 @@ croaked with as a plain string before, C<Kubernetes API error (get Pod): 404
 answer of the API server but a transport failure, with the error message in
 the C<body> (see "Error contract" in L<Kubernetes::REST::Role::IO>). See
 L</ERROR HANDLING>.
+
+It also delivers the response's C<Warning> headers to L</on_warning>, when set
+and when the response has a C<headers> method; an async client fills
+L<Kubernetes::REST::HTTPResponse/headers> to get them.
 
 =cut
 
@@ -2115,7 +2242,7 @@ ignored.
 }
 
 sub create {
-    my ($self, $object) = @_;
+    my ($self, $object, @opts) = @_;
 
 =method create
 
@@ -2123,9 +2250,17 @@ sub create {
 
 Create a resource from an L<IO::K8s> object. Returns the created object with server-assigned fields (UID, resourceVersion, etc.).
 
+Takes one option, C<fieldValidation> (C<Strict>, C<Warn> or C<Ignore>), which
+wins over the client's L</field_validation>:
+
+    my $created = $api->create($pod, fieldValidation => 'Strict');
+
+Any other value croaks before anything is sent: C<Unknown fieldValidation value for create() (use: Strict, Warn, Ignore)>.
+Any other option croaks naming it, and so does an odd-length list.
+
 =cut
 
-    my ($class, $response) = $self->_create_request($object);
+    my ($class, $response) = $self->_create_request($object, @opts);
     $self->_check_response($response, "create $class");
 
     return $self->_inflate_object($class, $response);
@@ -2134,9 +2269,11 @@ Create a resource from an L<IO::K8s> object. Returns the created object with ser
 # create() up to the response, unchecked, for the same reason as
 # _list_request: ensure() takes a 409 as its cue that the object appeared
 # since its GET, and must read that off the status, not out of the text
-# _check_response croaks with (karr k44).
+# _check_response croaks with (karr k44). ensure() passes no options, so its
+# create carries the client's field_validation only (karr k79).
 sub _create_request {
-    my ($self, $object) = @_;
+    my ($self, $object, @opts) = @_;
+    my $field_validation = $self->_write_opts_or_croak('create', @opts);
 
     my $class = ref($object);
     my $namespace = $object->can('metadata') && $object->metadata
@@ -2145,11 +2282,12 @@ sub _create_request {
 
     my $path = $self->_build_path($class, namespace => $namespace,
         $self->_unstructured_hint($class, $object));
-    return ($class, $self->_request('POST', $path, $object->TO_JSON));
+    return ($class, $self->_request('POST', $path, $object->TO_JSON,
+        parameters => { fieldValidation => $field_validation }));
 }
 
 sub update {
-    my ($self, $object) = @_;
+    my ($self, $object, @opts) = @_;
 
 =method update
 
@@ -2159,9 +2297,11 @@ Update an existing resource. Replaces the entire object server-side. Returns the
 
 For partial updates, use L</patch> instead.
 
+Takes the same one option as L</create>: C<fieldValidation>, which wins over the client's L</field_validation>.
+
 =cut
 
-    my ($class, $response) = $self->_update_request($object);
+    my ($class, $response) = $self->_update_request($object, @opts);
     $self->_check_response($response, "update $class");
 
     return $self->_inflate_object($class, $response);
@@ -2170,7 +2310,8 @@ For partial updates, use L</patch> instead.
 # update() up to the response, unchecked, like _create_request: ensure()
 # re-fetches and retries on a 409 Conflict and must tell it apart by status.
 sub _update_request {
-    my ($self, $object) = @_;
+    my ($self, $object, @opts) = @_;
+    my $field_validation = $self->_write_opts_or_croak('update', @opts);
 
     my $class = ref($object);
     my $metadata = $object->metadata or croak "object must have metadata";
@@ -2179,7 +2320,8 @@ sub _update_request {
 
     my $path = $self->_build_path($class, name => $name, namespace => $namespace,
         $self->_unstructured_hint($class, $object));
-    return ($class, $self->_request('PUT', $path, $object->TO_JSON));
+    return ($class, $self->_request('PUT', $path, $object->TO_JSON,
+        parameters => { fieldValidation => $field_validation }));
 }
 
 my %PATCH_TYPES = (
@@ -2197,17 +2339,20 @@ my %PATCH_TYPES = (
 # Any argument it does not read croaks before anything is sent (karr k61): a
 # misspelt namespce patched the object of that name at cluster scope, a
 # patch_type => 'merge' went out as a strategic merge patch. An object names
-# itself, so with one only the patch and its type are taken.
+# itself, so with one only the patch, its type and fieldValidation are taken.
+# fieldValidation is checked as soon as the arguments are known, before the
+# class is resolved - that may read discovery (karr k79).
 sub _unpack_patch_args {
     my ($self, $label, $default_type, $class_or_object, @rest) = @_;
 
-    my ($class, $name, $namespace, $patch, $patch_type);
+    my ($class, $name, $namespace, $patch, $patch_type, $field_validation);
 
     if (ref($class_or_object) && blessed($class_or_object)) {
         # Object passed: patch($object, patch => {...})
         my $object = $class_or_object;
         my %args = @rest;
-        $self->_croak_unknown_args($label, \%args, qw(patch type));
+        $self->_croak_unknown_args($label, \%args, qw(patch type fieldValidation));
+        $field_validation = $self->_field_validation_or_croak($label, $args{fieldValidation});
         $class = ref($object);
         my $metadata = $object->metadata or croak "object must have metadata";
         $name = $metadata->name or croak "object must have metadata.name";
@@ -2217,7 +2362,7 @@ sub _unpack_patch_args {
     } else {
         # Class + name: patch('Pod', 'name', namespace => 'ns', patch => {...})
         my %args;
-        if (@rest >= 1 && !ref($rest[0]) && $rest[0] !~ /^(name|namespace|patch|type)$/) {
+        if (@rest >= 1 && !ref($rest[0]) && $rest[0] !~ /^(name|namespace|patch|type|fieldValidation)$/) {
             $args{name} = shift @rest;
             %args = (%args, @rest);
         } elsif (@rest % 2 == 0) {
@@ -2225,7 +2370,8 @@ sub _unpack_patch_args {
         } else {
             croak "Invalid arguments to $label()";
         }
-        $self->_croak_unknown_args($label, \%args, qw(name namespace patch type));
+        $self->_croak_unknown_args($label, \%args, qw(name namespace patch type fieldValidation));
+        $field_validation = $self->_field_validation_or_croak($label, $args{fieldValidation});
 
         $class = $self->_expand_class_or_croak($class_or_object);
         $name = $args{name} or croak "name required for $label";
@@ -2237,7 +2383,7 @@ sub _unpack_patch_args {
     my $content_type = $PATCH_TYPES{$patch_type}
         // croak "Unknown patch type '$patch_type' (use: strategic, merge, json)";
 
-    return ($class, $name, $namespace, $patch, $content_type);
+    return ($class, $name, $namespace, $patch, $content_type, $field_validation);
 }
 
 sub patch {
@@ -2270,8 +2416,10 @@ Partially update a resource. Unlike C<update()> which replaces the entire object
 Required: C<patch> (a hashref, or an arrayref of operations when C<type> is
 C<json>) and, when passing a class rather than an object, C<name>.
 
-Optional: C<namespace> (for namespaced resources) and C<type>, the patch
-strategy:
+Optional: C<namespace> (for namespaced resources), C<fieldValidation>
+(C<Strict>, C<Warn> or C<Ignore>; wins over the client's
+L</field_validation>, any other value croaks before anything is sent) and
+C<type>, the patch strategy:
 
 =over 4
 
@@ -2296,17 +2444,19 @@ Returns the full updated object from the server.
 
 Any other argument croaks before a request is sent, naming it: a misspelt
 option is not ignored. With an object, which names the resource itself, only
-C<patch> and C<type> are taken - C<name> and C<namespace> croak too.
+C<patch>, C<type> and C<fieldValidation> are taken - C<name> and C<namespace> croak too.
 
 =cut
 
-    my ($class, $name, $namespace, $patch, $content_type)
+    my ($class, $name, $namespace, $patch, $content_type, $field_validation)
         = $self->_unpack_patch_args('patch', 'strategic', $class_or_object, @rest);
 
     my $path = $self->_build_path($class, name => $name, namespace => $namespace,
         $self->_unstructured_hint($class, $class_or_object));
     my $response = $self->_request('PATCH', $path, $patch,
-        content_type => $content_type);
+        content_type => $content_type,
+        parameters   => { fieldValidation => $field_validation },
+    );
     $self->_check_response($response, "patch $class");
 
     return $self->_inflate_object($class, $response);
@@ -2336,7 +2486,7 @@ C<create>, C<update>, C<patch> and server-side apply alike - and still answers
 C</status>, which is what this method addresses.
 
 Takes the same arguments as L</patch> (object or class plus name, both call
-forms, the same C<type> values), croaks on any other as L</patch> does, and
+forms, the same C<type> values, and C<fieldValidation>), croaks on any other as L</patch> does, and
 returns the full object from the server.
 The patch document is passed through unchanged, so it carries its own
 C<status> key.
@@ -2349,7 +2499,7 @@ resource and you need array merge semantics.
 
 =cut
 
-    my ($class, $name, $namespace, $patch, $content_type)
+    my ($class, $name, $namespace, $patch, $content_type, $field_validation)
         = $self->_unpack_patch_args('patch_status', 'merge', $class_or_object, @rest);
 
     my $path = $self->_build_path($class,
@@ -2359,14 +2509,16 @@ resource and you need array merge semantics.
         $self->_unstructured_hint($class, $class_or_object),
     );
     my $response = $self->_request('PATCH', $path, $patch,
-        content_type => $content_type);
+        content_type => $content_type,
+        parameters   => { fieldValidation => $field_validation },
+    );
     $self->_check_response($response, "patch_status $class");
 
     return $self->_inflate_object($class, $response);
 }
 
 sub update_status {
-    my ($self, $object) = @_;
+    my ($self, $object, @opts) = @_;
 
 =method update_status
 
@@ -2381,8 +2533,11 @@ current C<resourceVersion> and fails with a 409 conflict when the object
 changed in the meantime. Prefer L</patch_status> when you are setting
 individual status fields.
 
+Takes the same one option as L</create>: C<fieldValidation>, which wins over the client's L</field_validation>.
+
 =cut
 
+    my $field_validation = $self->_write_opts_or_croak('update_status', @opts);
     my $class = ref($object);
     my $metadata = $object->metadata or croak "object must have metadata";
     my $name = $metadata->name or croak "object must have metadata.name";
@@ -2394,7 +2549,8 @@ individual status fields.
         subresource => 'status',
         $self->_unstructured_hint($class, $object),
     );
-    my $response = $self->_request('PUT', $path, $object->TO_JSON);
+    my $response = $self->_request('PUT', $path, $object->TO_JSON,
+        parameters => { fieldValidation => $field_validation });
     $self->_check_response($response, "update_status " . ref($object));
 
     return $self->_inflate_object($class, $response);
@@ -2523,6 +2679,30 @@ sub _propagation_policy_or_croak {
     return $policy if !defined $policy || grep { $_ eq $policy } @PROPAGATION_POLICIES;
     croak "Unknown propagationPolicy '$policy' for $label() (use: "
         . join(', ', @PROPAGATION_POLICIES) . ")";
+}
+
+# The fieldValidation a write sends: the request's own when it gives one, else
+# the client's field_validation, else none (undef - the URL then has no
+# query). A value the API server does not take croaks before anything is sent,
+# naming the option and the allowed values, never the value (karr k79).
+# $label only appears in the message.
+sub _field_validation_or_croak {
+    my ($self, $label, $requested) = @_;
+    return $self->field_validation unless defined $requested;
+    return $requested if grep { $_ eq $requested } @FIELD_VALIDATIONS;
+    croak "Unknown fieldValidation value for $label() (use: "
+        . join(', ', @FIELD_VALIDATIONS) . ")";
+}
+
+# The options after the object of create(), update() and update_status():
+# fieldValidation only, any other key croaking as everywhere else. Returns
+# the fieldValidation to send. $label only appears in the messages.
+sub _write_opts_or_croak {
+    my ($self, $label, @opts) = @_;
+    croak "Invalid arguments to $label()" if @opts % 2;
+    my %opts = @opts;
+    $self->_croak_unknown_args($label, \%opts, 'fieldValidation');
+    return $self->_field_validation_or_croak($label, $opts{fieldValidation});
 }
 
 # Croak on the first key of %$args that is not in @allowed, naming it and
@@ -3826,7 +4006,8 @@ public methods provide this:
 =item * C<prepare_request($method, $path, %opts)> - Build HTTP request with auth
 
 =item * C<check_response($response, $context)> - Validate HTTP status (dies
-with a L<Kubernetes::REST::APIError> on 400 and up)
+with a L<Kubernetes::REST::APIError> on 400 and up) and deliver the
+response's C<Warning> headers to L</on_warning>
 
 =item * C<inflate_object($class, $response)> - JSON to typed object
 
