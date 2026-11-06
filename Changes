@@ -2,6 +2,20 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - Kubernetes::REST::Kubeconfig->api($context_name, %options) passes
+   %options on to Kubernetes::REST->new, next to the server and
+   credentials it builds from the kubeconfig, on the kubeconfig path and
+   on the in-cluster fallback alike; api(undef, %options) keeps the
+   current context. The options are not checked here. So
+   api(undef, resource_map_from_cluster => 0) switches discovery off:
+   the client never reads /api and /apis, and a failed discovery adds no
+   "Falling back to the built-in resource map" warning to STDERR.
+   server or credentials as an option croaks ("api() builds server from
+   the kubeconfig, server is not an option"), as does an odd-length
+   option list ("api() takes a context name and then key/value options,
+   got an odd number of option elements"), both before the kubeconfig is
+   read. Before, anything after the context name was ignored.
+
  - A kubeconfig value that is the kubeconfig's content instead of a file
    name is refused. A value counts as a document when it contains a line
    break, CR or NUL, or when it or any entry of a path list starts with

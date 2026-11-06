@@ -42,6 +42,9 @@ use namespace::clean;
     # Get API for specific context
     my $api = $kc->api('production');
 
+    # Without asking the cluster for its resource map
+    my $api = $kc->api(undef, resource_map_from_cluster => 0);
+
     # Inside a Kubernetes pod: no kubeconfig needed, auto-detects service account
     my $api = Kubernetes::REST::Kubeconfig->new->api;
 
@@ -444,14 +447,20 @@ sub _resolve_cert {
 }
 
 sub api {
-    my ($self, $context_name) = @_;
+    my ($self, $context_name, @options) = @_;
 
 =method api
 
     my $api = $kc->api;
     my $api = $kc->api('production');
+    my $api = $kc->api(undef, resource_map_from_cluster => 0);
+    my $api = $kc->api('production', resource_map_from_cluster => 0);
 
 Create a L<Kubernetes::REST> instance (with a L<Kubernetes::REST::Server> built from the cluster entry and credentials built from the user entry) configured from the kubeconfig. If C<$context_name> is provided, uses that context; otherwise uses the current context.
+
+Anything after the context name is a list of options and is passed on, as given, to C<< Kubernetes::REST->new >> next to the C<server> and C<credentials> built here - on the in-cluster fallback as well. They are not checked here; any attribute of L<Kubernetes::REST> will do. Use C<undef> as the context name to keep the current context. C<server> and C<credentials> are not options and croak with C<api() builds server from the kubeconfig, server is not an option> (likewise for C<credentials>), as does an odd-length option list with C<api() takes a context name and then key/value options, got an odd number of option elements>, in both cases before the kubeconfig is read.
+
+The usual use is C<< resource_map_from_cluster => 0 >>: the client then never reads C</api> and C</apis>, so a discovery that fails adds nothing to STDERR, and the built-in L<IO::K8s> resource map is used. See L<Kubernetes::REST/resource_map_from_cluster>.
 
 Certificate and key material can come from either an inline base64 C<*-data> field or a plain file-path field in the kubeconfig. Inline data is decoded and passed to L<Kubernetes::REST::Server> as an in-memory PEM string (C<ssl_ca_pem>/C<ssl_cert_pem>/C<ssl_key_pem>) rather than written to a temporary file, so the returned L<Kubernetes::REST> instance keeps working after this C<Kubernetes::REST::Kubeconfig> object is garbage-collected. A file path is passed on as C<ssl_ca_file>/C<ssl_cert_file>/C<ssl_key_file>, absolute: a relative one is resolved against the directory of the kubeconfig that defined the entry, see L</MERGING>.
 
@@ -480,9 +489,20 @@ in-cluster fallback, even when a service account token is mounted.
 
 =cut
 
+    # Checked before the kubeconfig is read: a mistake in the call, not in the
+    # kubeconfig. The message names the key, never the value.
+    croak 'api() takes a context name and then key/value options,'
+        . ' got an odd number of option elements'
+        if @options % 2;
+    my %options = @options;
+    for my $key (qw(server credentials)) {
+        croak "api() builds $key from the kubeconfig, $key is not an option"
+            if exists $options{$key};
+    }
+
     # If no kubeconfig, try in-cluster
     unless ($self->_config) {
-        return $self->_in_cluster_api
+        return $self->_in_cluster_api(%options)
             // croak $self->_not_found_error . " and not running in-cluster";
     }
 
@@ -530,6 +550,7 @@ in-cluster fallback, even when a service account token is mounted.
     }
 
     return Kubernetes::REST->new(
+        %options,
         server => Kubernetes::REST::Server->new(%server),
         credentials => $credentials,
     );
@@ -563,7 +584,7 @@ our $SA_TOKEN = '/var/run/secrets/kubernetes.io/serviceaccount/token';
 our $SA_CA    = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
 
 sub _in_cluster_api {
-    my ($self) = @_;
+    my ($self, %options) = @_;
     return undef unless -f $SA_TOKEN;
 
     my $host = $ENV{KUBERNETES_SERVICE_HOST} // 'kubernetes.default.svc';
@@ -571,6 +592,7 @@ sub _in_cluster_api {
     $host = "[$host]" if $host =~ /:/ && $host !~ /^\[/;
 
     return Kubernetes::REST->new(
+        %options,
         server => Kubernetes::REST::Server->new(
             endpoint          => "https://$host:$port",
             ssl_ca_file       => $SA_CA,
