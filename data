@@ -1,0 +1,45 @@
+---
+class: standard
+completed: 2026-11-06T20:18:03Z
+created: 2026-10-31T04:25:29Z
+id: 78
+priority: medium
+started: 2026-11-06T20:01:20Z
+status: done
+tags:
+- discovery
+- docs
+- api
+title: resource_map entries a caller wrote are lost on invalidate_discovery / absorb_discovery
+updated: 2026-11-06T20:18:03Z
+---
+
+Found from kubernetes-ocp k283 (2026-10-31), Kubernetes::REST 1.110 with IO::K8s 1.111.
+
+The POD names `$api->resource_map->{StaticWebSite} = "+My::StaticWebSite"` as the way to add a class after construction. On the default client (resource_map_from_cluster => 1, no map passed), that map is _resource_map_built. invalidate_discovery, which ensure_crd calls last, and absorb_discovery both clear the map and rebuild it from discovery. So the caller-written entry is gone:
+- if discovery does not list the group, the bare Kind croaks "unknown resource";
+- if it does list the group, the Kind resolves to IO::K8s::Unstructured instead of the caller's class.
+Writing the entry also forces the discovery fetch (GET /api, /apis).
+
+Repro:
+    my $api = Kubernetes::REST->new(...);   # default, map from cluster
+    $api->resource_map->{OCPNode} = "+OCP::K8s::OCPNode";
+    $api->invalidate_discovery;
+    $api->expand_class("OCPNode");          # IO::K8s::OCPNode, unresolved
+
+Ask, one of:
+1. Carry caller-written entries over a rebuild.
+2. Document `with` (a provider map, read lazily, survives rebuilds) as the only durable way to register after construction, and drop the resource_map recipe from the POD.
+
+Also: give a public way to add a `with` provider to a live client whose inner IO::K8s is already built. kubernetes-ocp needs the private _has_k8s/_clear_k8s for that in two places (OCP::K8s->register, register_resource_providers).
+
+kubernetes-ocp has worked around it on its side (OCP::K8s->register now pushes onto `with`). Done = one of the two asks above, plus the public hook.
+
+Hub decision (perl-developer-bb, 2026-11-06), not a maintainer decision: Ask 2. 'with' is the one durable way to register a class after construction. There is a public way to add a 'with' provider to a live client, also when its inner IO::K8s is already built; the name fits the dist's API. The $api->resource_map->{Kind} = ... recipe stays in the POD only where it holds (a client with a fixed map). The POD says that discovery rebuilds the map. Tests: an entry added the new way survives invalidate_discovery and absorb_discovery.
+Coordinator's choices (mine): the method is add_provider(@providers) - the POD calls the entries of 'with' resource-map providers, and IO::K8s's merge method is add(). It takes what 'with' takes (class name, object, plain hashref), appends them to 'with', merges them into the inner IO::K8s when that is already built, sends no request, and returns the client. 'Fixed map' = a resource_map passed to the constructor; a built map (from discovery, or the built-in copy under resource_map_from_cluster => 0) is rebuilt by invalidate_discovery/absorb_discovery. Example.pm's recipes on a Kubeconfig-built (default) client move to add_provider.
+
+worker: add_provider(@providers) in lib/Kubernetes/REST.pm, uncommitted. It checks every provider first (hashref; object with resource_map; or class name that loads and has new + resource_map), croaking with the position only, never the value. Then k8s->add(@providers) if the inner IO::K8s is built, then push onto with; returns the client; sends no request. t/78: 7/8 pass. Subtest 6 asserts a class-name provider without new works, but IO::K8s add() calls ->new on a class name: test bug, for the test-writer (a temp copy with "sub new { bless {}, shift }" passes 8/8). t/78 is AM: its working-tree revision is unstaged.
+
+worker: add_provider now merges and records one provider at a time, so a provider whose new() dies on a built client leaves with and the live map agreeing on everything before it (checked by hand). The up-front checks are unchanged. t/78 8/8; prove -lr t/ Files=76 Tests=979 PASS. Uncommitted.
+
+Committed as ebfdcc2 (Add add_provider() to register providers on a live client), master fast-forwarded to it. t/78 (8 subtests) red against the old lib, green now; prove -lr t/ Files=76 Tests=979 PASS; t/06, t/07 PASS after the POD; dzil build clean, podchecker OK. kubernetes-ocp can replace its _has_k8s/_clear_k8s use with add_provider (its board, not done here).
