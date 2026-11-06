@@ -1,0 +1,32 @@
+---
+class: standard
+completed: 2026-11-06T20:40:02Z
+created: 2026-10-31T04:36:07Z
+id: 79
+priority: medium
+started: 2026-11-06T20:07:25Z
+status: done
+tags:
+- api
+- validation
+title: 'Field validation: let callers ask for fieldValidation=Strict, or surface the
+  API server''s Warning headers'
+updated: 2026-11-06T20:40:02Z
+---
+
+Found from kubernetes-ocp k290 (2026-10-31, live on a 1.36 cluster).
+
+A client that does not ask for strict field validation gets unknown fields dropped by the API server. The server only sends a `Warning:` response header (299 "unknown field ..."), and Kubernetes::REST shows the caller nothing. In kubernetes-ocp, an OCPNode written against a CRD whose schema predated spec.nodeIP was stored without that field. The node then joined on the wrong address, and nothing said so.
+
+Ask (either one closes the silent path; both would be best):
+1. A way to send `fieldValidation=Strict`, per request (create/update/patch/apply) and/or as a client default. The server then refuses unknown or duplicate fields with a 4xx, and the caller sees it as an error. kubectl does this by default (`--validate=strict`).
+2. Surface the response `Warning` headers: return them to the caller, or log them through a hook the caller can set. That way a dropped field is at least visible.
+
+Done = the option(s) and their POD, plus a test with a fake transport: a request carries the fieldValidation query parameter, and a Warning header reaches the caller.
+
+Hub decision (perl-developer-bb, 2026-11-06), not a maintainer decision: both asks. (1) fieldValidation can be set per request (create, update, patch, apply) and as a client default (Strict, Warn, Ignore); without either the client does not send the parameter, as today. (2) Warning headers of the response reach the caller through a callback set on the client; without a callback nothing changes on STDERR. Tests with a fake transport: the request carries the query parameter, and a Warning header reaches the callback.
+Coordinator's choices (mine): this client has no server-side apply (patch types are strategic, merge, json), so 'apply' has no method to go on; the per-request option goes on create, update, patch and on the two status writes patch_status and update_status, and the client default reaches all five (and ensure() through them). Per-request option fieldValidation (the query parameter's name, as delete's propagationPolicy and list's limit/continue/resourceVersion); client attribute field_validation (snake_case like every attribute here); per request wins. Another value croaks before anything is sent, naming the option and the allowed values, not the value. Callback attribute on_warning, called once per Warning header value with ($text, $context): $text the warning text (the quoted part of '299 - "..."', else the raw value), $context the string an APIError carries; on every response that passes check_response, so async clients on the seam get it too, error responses included. Kubernetes::REST::HTTPResponse gains an optional headers attribute (lowercased names, arrayref of values); LWPIO and HTTPTinyIO fill it; a response object without headers means no warnings, no error.
+
+2026-11-06 20:31 Worker: implemented in lib/ (uncommitted, tree ready). REST.pm: attrs field_validation (Strict|Warn|Ignore, isa croak names attr + allowed values, never the value; undef = unset) and on_warning (coderef); option fieldValidation on create/update/update_status (via _write_opts_or_croak) and patch/patch_status (via _unpack_patch_args), checked before anything is sent (before class resolution/discovery too); sent as parameters => { fieldValidation => ... } on exactly those writes, undef -> no query. _check_response calls _deliver_warnings first (can('headers') guard); _warning_text parses 299 - "..." [date], undoes quoted-pairs, else raw; text decoded UTF-8 leniently like the APIError body (my choice). HTTPResponse: headers HashRef[ArrayRef[Str]], default {}. LWPIO _headers via HTTP::Headers->scan; HTTPTinyIO _headers string|arrayref -> arrayref; both in call and call_streaming; 599 carries none. t/79, t/80, t/24, t/13 green. prove -lr t/: one red, t/64 subtests 1-4: its expected 'allowed:' lists for patch/patch_status lack fieldValidation (claim kept, literal superseded by the contract); fix = t/64 lines 102-103 + header comment lines 16-19, test-writer lane, verified on a /tmp copy (11/11). Drift for doc-writer: patch POD 'only patch and type' with an object; skill kubernetes-rest-hazards says the same.
+
+Committed as d8707a2 (Send fieldValidation on writes, pass Warning headers to on_warning), master ff'd to d8707a2. prove -lr t/: Files=78, Tests=1000, PASS (self-skips t/11, t/46: TEST_KUBERNETES_REST_KUBECONFIG unset). dzil build clean, podchecker OK on the five lib files. Follow-up for Net::Async::Kubernetes: pass response headers into HTTPResponse for on_warning, send fieldValidation through its own request path.
