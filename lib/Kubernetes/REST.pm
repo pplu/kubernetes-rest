@@ -130,7 +130,78 @@ resource map, so the cluster's CRD Kinds resolve to real classes:
 
 Defaults to C<[]>. See L<IO::K8s/with> for the accepted provider forms.
 
+This is the durable registration: every time the inner L<IO::K8s> is rebuilt
+(after L</invalidate_discovery>, L</absorb_discovery> or the fetch of the
+OpenAPI spec) these providers are merged again. For a client that is already
+built, add to it with L</add_provider>.
+
 =cut
+
+# `with` is the one registration every rebuild of the inner IO::K8s merges
+# again - after invalidate_discovery, absorb_discovery or the openapi fetch -
+# so that is where the providers go (karr k78). An inner IO::K8s that already
+# exists gets them through its own add(), which merges into this client's
+# resource_map hashref exactly as a build does, and keeps the AutoGen classes
+# and whatever else was registered on that instance; clearing it would lose
+# those. Nothing built means nothing to do now, and no request.
+sub add_provider {
+    my ($self, @providers) = @_;
+
+=method add_provider
+
+    $api->add_provider({ StaticWebSite => '+My::StaticWebSite' });
+    $api->add_provider('IO::K8s::GatewayAPI');
+    $api->add_provider($provider_object, 'IO::K8s::Other');
+
+Register one or more L<IO::K8s> resource-map providers on a client that is
+already built. Each one takes any form L</with> does: a provider class name
+(one that loads and has C<new> and C<resource_map>), an object with a
+C<resource_map> method, or a plain hashref of Kind to class, as in the first
+example above.
+
+The providers are appended to L</with>. If the inner L<IO::K8s> (L</k8s>) is
+already built they are merged into it at once; if not, nothing is built and no
+request is sent, and they are merged when it is. Returns the client, so calls
+can be chained.
+
+All providers are checked before any is merged. A bad one croaks at the call
+and names its position, never its value:
+C<add_provider: provider 2 is not a class name, an object with resource_map or a hashref>,
+or, for a class name that does not load,
+C<add_provider: provider 2 is a class name that does not load as a provider (one with new and resource_map)>.
+
+Use this rather than writing into L</resource_map> on a client whose map was
+built, not passed in: the entry in L</with> is merged again by every rebuild,
+the entry in a built map is lost with it, see L</resource_map>.
+
+=cut
+
+    # Checked before anything is merged or kept: a provider that cannot work
+    # would otherwise sit in `with` and break every later build of the inner
+    # IO::K8s, far from this call. The message names the position, never the
+    # value.
+    my $position = 0;
+    for my $provider (@providers) {
+        $position++;
+        next if ref $provider eq 'HASH';
+        next if blessed($provider) && $provider->can('resource_map');
+        croak "add_provider: provider $position is not a class name,"
+            . ' an object with resource_map or a hashref'
+            if ref $provider or !defined $provider or !length $provider;
+        croak "add_provider: provider $position is a class name that does not"
+            . ' load as a provider (one with new and resource_map)'
+            unless eval { require_module($provider); 1 }
+                && $provider->can('new') && $provider->can('resource_map');
+    }
+
+    # One at a time, so a provider whose new() dies on a built client leaves
+    # `with` and the live map agreeing on every provider before it.
+    for my $provider (@providers) {
+        $self->k8s->add($provider) if $self->_has_k8s;
+        push @{ $self->with }, $provider;
+    }
+    return $self;
+}
 
 # IO::K8s instance - configured with same resource_map
 has k8s => (
@@ -211,7 +282,7 @@ Only load C<.pk8s> files you trust; for data-only manifests use C<load_yaml>.
 
 =back
 
-Not delegated: C<add>, which registers extra classes in the L<IO::K8s> resource map. That map is mirrored by this client's own L</resource_map> attribute, and mutating one behind the other's back makes the two disagree - reach through C<< $api->k8s->add(...) >> if you really mean to.
+Not delegated: C<add>, which registers extra classes in the L<IO::K8s> resource map. That map is mirrored by this client's own L</resource_map> attribute, and mutating one behind the other's back makes the two disagree - use L</add_provider> instead, which registers the provider on the inner instance and also records it in L</with>, so it survives rebuilds. Reaching through C<< $api->k8s->add(...) >> does only the first and is lost when the instance is rebuilt.
 
 =cut
 
@@ -291,10 +362,20 @@ The C<+> prefix tells L<IO::K8s> that this is a custom class (not in the IO::K8s
 
 The client keeps a copy of the hashref it is given: the Kinds of the L</with>
 providers are merged into that copy, never into your hash, and a change you
-make to your hash after construction is not seen. Change
-C<< $api->resource_map >> itself instead:
+make to your hash after construction is not seen. To change the map of a client
+you were given a map for, change C<< $api->resource_map >> itself:
 
     $api->resource_map->{StaticWebSite} = '+My::StaticWebSite';
+
+That holds only for a map passed to the constructor. A map the client built
+itself - from the cluster's discovery, or the built-in copy under
+C<< resource_map_from_cluster => 0 >> - is rebuilt by L</invalidate_discovery>
+and L</absorb_discovery> (so by C<ensure_crd>), and an entry written into it is
+gone: a bare Kind then croaks as an unknown resource, or resolves to
+L<IO::K8s::Unstructured> when discovery lists its group. On such a client
+register the class with L</add_provider>:
+
+    $api->add_provider({ StaticWebSite => '+My::StaticWebSite' });
 
 =cut
 
@@ -1002,7 +1083,9 @@ next resolution re-queries the cluster. Use it after a CustomResourceDefinition
 is installed or changed, to make the new Kind visible to this client instance.
 
 A resource map passed to the constructor is not built from the catalog and
-stays as it is, entries such as C<'+My::Class'> included.
+stays as it is, entries such as C<'+My::Class'> included. The providers from
+L</with> and L</add_provider> are merged again into the rebuilt map; an entry
+written into a built map by hand is not.
 
 =cut
 
@@ -1064,7 +1147,8 @@ itself, and the method returns true. From then on L</expand_class>,
 L</fetch_resource_map>, L</build_path> and the lazily built L</resource_map>
 answer from that catalog without sending a request. A resource map built from
 an earlier catalog is rebuilt from this one; a map passed to the constructor
-stays as it is.
+stays as it is. The providers from L</with> and L</add_provider> are merged
+again into the rebuilt map; an entry written into a built map by hand is not.
 
 When either is a legacy discovery document - a cluster older than Kubernetes
 1.27 ignores the C<Accept> header - it returns false and caches nothing:

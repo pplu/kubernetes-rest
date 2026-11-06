@@ -905,10 +905,15 @@ Key points:
 
 =head2 Registering the CRD class
 
-Register your class with the C<+> prefix in the resource map:
+Register your class with the C<+> prefix:
 
     my $api = Kubernetes::REST::Kubeconfig->new->api;
-    $api->resource_map->{StaticWebSite} = '+My::StaticWebSite';
+    $api->add_provider({ StaticWebSite => '+My::StaticWebSite' });
+
+This client built its resource map itself, from the cluster's discovery, and
+rebuilds it whenever discovery is refreshed (C<ensure_crd> does that).
+C<add_provider> keeps the registration in C<with>, which every rebuild merges
+again; an entry written straight into C<< $api->resource_map >> would be lost.
 
 Or pass it at construction time:
 
@@ -1036,7 +1041,9 @@ dynamically using L<IO::K8s::AutoGen>:
         is_namespaced   => 1,
     );
 
-    $api->resource_map->{StaticWebSite} = "+$class";
+    # add_provider, not a write into $api->resource_map: it survives a
+    # refresh of the client's discovery
+    $api->add_provider({ StaticWebSite => "+$class" });
 
     # Now use it like any other resource
     my $site = $api->k8s->struct_to_object($class, {

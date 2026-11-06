@@ -2,6 +2,25 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - New public method $api->add_provider(@providers) registers IO::K8s
+   providers on a live client. Each provider is what "with" takes: a
+   provider class name (with new and resource_map), an object with
+   resource_map, or a hashref { Kind => '+My::Class' }. They are appended
+   to "with" and, when the inner IO::K8s is already built, merged into it
+   at once; otherwise nothing is built and no request is sent. It returns
+   the client. All providers are checked first; a bad one croaks at the
+   call, naming its position and not its value ("add_provider: provider 2
+   is not a class name, an object with resource_map or a hashref", or
+   "... is a class name that does not load as a provider (one with new
+   and resource_map)"). Unlike an entry written into a built
+   $api->resource_map, which is lost when discovery rebuilds the inner
+   IO::K8s (invalidate_discovery and so ensure_crd, absorb_discovery, the
+   openapi fetch) and then croaked "unknown resource" for a bare Kind or
+   resolved to IO::K8s::Unstructured, a provider in "with" is merged
+   again by every rebuild. The POD of with, resource_map, k8s,
+   invalidate_discovery and absorb_discovery says so, and the recipes in
+   Kubernetes::REST::Example use add_provider.
+
  - Kubernetes::REST::Kubeconfig->api($context_name, %options) passes
    %options on to Kubernetes::REST->new, next to the server and
    credentials it builds from the kubeconfig, on the kubeconfig path and
