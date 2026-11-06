@@ -31,7 +31,7 @@ L<IO::K8s::CRD/served_versions> and L<IO::K8s::CRD/generate> build the
 classes and L<IO::K8s::CRD::Emitter/render> renders them. This class is only
 the CLI hull: file in, emitter, source out.
 
-The C<-f> path never talks to a cluster: it builds the L<api|/api> lazily
+The C<-f> path never talks to a cluster: it builds the L<api|Kubernetes::REST::CLI::Role::Connection/api> lazily
 through L<Kubernetes::REST::CLI::Role::Connection>, so reading a file reads no
 kubeconfig. The C</from_cluster> path uses that same C<api> to list the
 cluster's C<CustomResourceDefinition>s, picks the one whose C<spec.names.kind>
@@ -107,7 +107,7 @@ option from_cluster => (
 
 A Kubernetes B<Kind> (for example C<CronTab>) that a live cluster already
 serves through a C<CustomResourceDefinition>. The cluster's CRDs are listed
-through L</api> and the one whose C<spec.names.kind> matches is turned into
+through L<api|Kubernetes::REST::CLI::Role::Connection/api> and the one whose C<spec.names.kind> matches is turned into
 class source for every served version, exactly as L</file> would from that
 CRD's manifest. Dies clearly when no CRD - or more than one - serves the Kind.
 
