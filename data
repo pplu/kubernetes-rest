@@ -1,0 +1,32 @@
+---
+class: standard
+completed: 2026-11-06T19:55:36Z
+created: 2026-10-30T21:53:22Z
+id: 77
+priority: medium
+started: 2026-11-06T19:37:16Z
+status: done
+tags:
+- security
+- kubeconfig
+title: 'Kubeconfig: a YAML document passed as the path ends up whole in the error
+  message'
+updated: 2026-11-06T19:55:36Z
+---
+
+A caller that passes the kubeconfig text instead of a path (Net::Async::Kubernetes->new(kubeconfig => $yaml), the same through Kubernetes::REST) gets "Kubeconfig not found: <the whole YAML> and not running in-cluster" plus an "Unsuccessful stat on filename containing newline" warning. The message (lib/Kubernetes/REST/Kubeconfig.pm, _kubeconfig_paths_string, around line 265; the stat around line 66) then carries every token and client key of that kubeconfig into logs.
+
+Seen offline while writing the consumer skill perl-net-async-kubernetes (p5-net-async-kubernetes k82).
+
+Done when: a path value that holds a newline (or does not look like a path) dies with a message that names the mistake ("kubeconfig expects a path, got a document") and quotes none of its content; a test pins that no secret from the document appears in the error.
+
+Hub decision (perl-developer-bb, 2026-11-06), not a maintainer decision: a kubeconfig value that holds a line break or does not look like a path dies with a message that names the mistake ('kubeconfig expects a path, got a document') and quotes nothing of its content. The stat on such a value goes, and with it the 'Unsuccessful stat' warning. The test pins that no token and no key from the document appears in the message.
+Coordinator's choice (mine, not the maintainer's): 'does not look like a path' = the value contains \n, \r or NUL, or starts (after leading whitespace) with '{' or '[' (JSON) or '---' (YAML document marker). Checked on the raw value before the path_sep split - a string as a whole, an arrayref per entry - so it also covers a document in KUBECONFIG. The message names where the value came from (kubeconfig_path / KUBECONFIG), never the value.
+
+worker: fix in lib/Kubernetes/REST/Kubeconfig.pm, uncommitted. kubeconfig_paths builder rejects a document (newline, CR, NUL, or leading {, [, ---) on the raw value / per arrayref entry before the split; croaks "kubeconfig expects a path, got a document in kubeconfig_path" or "... in the environment variable KUBECONFIG", quoting nothing, no stat, no in-cluster fallback. Source tracked by private _kubeconfig_path_from_env, set only by the kubeconfig_path default. t/76 33/33; prove -lr t/ Files=74 Tests=940 PASS. Follow-ups in the worker report.
+
+Coordinator's contract extension (mine): the leading-marker check also runs on every entry after the path_sep split, so '/a/config:{json}' is a document too (it leaked the token through 'Kubeconfig not found'). The croak names the caller's line when reached through the lazy builders (house pattern, _carp_past_builders). Both pinned in t/76.
+
+worker, follow-up: (1) the document check now runs on every entry after the path_sep split, so "path:{json}" (kubeconfig_path or KUBECONFIG) dies with the same message; for newline/CR/NUL this is equivalent to checking the raw value, since the split leaves them in place. (2) the croak uses local our @CARP_NOT = (Method::Generate::Accessor::_Generated), scoped to this one croak, following _carp_past_builders, so it names the caller line through api/contexts/current_context_name. t/76 58/58; prove -lr t/ Files=74 Tests=965 PASS.
+
+Committed as ac8d175 (Refuse a kubeconfig document where a path belongs), master fast-forwarded to it. t/76 (58 tests) red against the old lib, green now; prove -lr t/ Files=74 Tests=965 PASS; dzil build clean, podchecker OK.
