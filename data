@@ -1,0 +1,35 @@
+---
+class: standard
+completed: 2026-11-06T20:04:08Z
+created: 2026-10-31T16:41:01Z
+id: 80
+priority: low
+started: 2026-11-06T19:52:53Z
+status: done
+tags:
+- kubeconfig
+- discovery
+- api
+title: 'Kubeconfig->api: let a caller pass constructor options, or report a discovery
+  failure without carp'
+updated: 2026-11-06T20:04:08Z
+---
+
+Filed from kubernetes-ocp (k387, 2026-10-31). Found with Kubernetes::REST 1.110.
+
+When discovery fails after /version answered (an aggregated API group that is down, or the API going away between calls), Kubernetes::REST carps a warning with a Perl source location (REST.pm around lines 953 and 1307). A CLI that already reports the API error as one clean line on STDERR then also shows that carp line.
+
+The caller cannot switch discovery off: Kubernetes::REST::Kubeconfig->api (Kubeconfig.pm:399) takes only a context name, so no constructor options reach Kubernetes::REST. OCP registers its own resource types and does not need discovery for ocp node ls / provider ls.
+
+Possible fixes, either one is enough:
+- Kubeconfig->api(context, %options) passes options through to the constructor, so a caller can turn discovery off or tune it.
+- Report a discovery failure through a hook or attribute (or a warning without a location) instead of a bare carp.
+
+Done when a caller can get a client from a kubeconfig whose failed discovery adds nothing to STDERR.
+
+Hub decision (perl-developer-bb, 2026-11-06), not a maintainer decision: Kubernetes::REST::Kubeconfig->api($context, %options) passes the options on to the constructor, so a caller can switch discovery off. The POD says so, and a test shows that a switched-off discovery writes nothing to STDERR.
+Coordinator's choices (mine): the options reach Kubernetes::REST->new on both paths, kubeconfig and in-cluster fallback. server and credentials are what api() builds from the kubeconfig: passing either as an option croaks, naming the key. An odd-length option list croaks. api(undef, %options) uses the current context. 'Discovery off' is resource_map_from_cluster => 0.
+
+worker: api($context_name, %options) in lib/Kubernetes/REST/Kubeconfig.pm passes the options to Kubernetes::REST->new on the kubeconfig path and through _in_cluster_api(%options). Croaks before reading the kubeconfig: an odd-length list, or server/credentials ("api() builds KEY from the kubeconfig, KEY is not an option", no value). The k77 document check still runs before anything is built. Uncommitted, no POD touched. t/77 6/6 (red against HEAD); prove -lr t/ Files=75 Tests=971 PASS.
+
+Committed as eefd45a (Pass constructor options through Kubeconfig->api), master fast-forwarded to it. t/77 (6 subtests) red against the old lib, green now; prove -lr t/ Files=75 Tests=971 PASS; dzil build clean, podchecker OK. The card's alternative (report a discovery failure without carp) is not done; the card asks for either. Not done either: bin/kube_client / kube_watch still call api($context) without options.
