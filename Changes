@@ -2,6 +2,8 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - Test::Warn is declared as a test dependency, as the test suite loads it.
+
  - New attribute field_validation (Strict, Warn or Ignore; anything else
    croaks listing the allowed values, never the value given), and a
    fieldValidation option on create, update, update_status, patch and

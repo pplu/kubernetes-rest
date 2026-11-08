@@ -17,4 +17,5 @@ requires 'Throwable';
 
 on test => sub {
   requires 'Test::Exception';
+  requires 'Test::Warn';
 };

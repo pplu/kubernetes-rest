@@ -13,7 +13,7 @@
 #
 # IO::K8s::CRD ships with IO::K8s (>= 1.108); run with the neighbouring lib
 # prepended for consistency with the rest of the CRD increment:
-#   PERL5LIB=/home/getty/dev/io-k8s-p5/lib prove -lv t/40_cli_crd2class.t
+#   PERL5LIB=../io-k8s-p5/lib prove -lv t/40_cli_crd2class.t
 
 use strict;
 use warnings;
