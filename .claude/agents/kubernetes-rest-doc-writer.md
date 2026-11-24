@@ -3,12 +3,11 @@ name: kubernetes-rest-doc-writer
 description: "Write and maintain Kubernetes::REST POD in the @Author::GETTY PodWeaver house format (inline =attr/=method/=opt, =seealso, # ABSTRACT). Covers the client core, the IO backends, the kubeconfig parser, the CLI layer and the Example tutorial. Specify the files to work on."
 model: sonnet
 disallowedTools: Write, NotebookEdit, Bash
-briefing:
-  skills:
-    - kubernetes-rest-core
-    - kubernetes-rest-hazards
-    - perl-kubernetes-rest
-    - getty-perl-pod
+skills:
+  - kubernetes-rest-core
+  - kubernetes-rest-hazards
+  - perl-kubernetes-rest
+  - getty-perl-pod
 ---
 
 You write POD for **Kubernetes::REST**, an `[@Author::GETTY]` Dist::Zilla distribution. The

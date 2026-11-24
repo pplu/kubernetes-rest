@@ -2,14 +2,13 @@
 name: kubernetes-rest-test-writer
 description: "Write and extend Kubernetes::REST tests in t/. Cluster-free by construction: everything runs through the Test::Kubernetes::Mock IO backend against recorded or programmatic fixtures. Use for test additions, regression scaffolding and reproducing reported bugs."
 model: sonnet
-briefing:
-  skills:
-    - getty-perl-core
-    - kubernetes-rest-core
-    - kubernetes-rest-hazards
-    - perl-kubernetes-rest
-    - perl-io-k8s-kubernetes-classes
-    - kanban-issues-karr-ticket
+skills:
+  - getty-perl-core
+  - kubernetes-rest-core
+  - kubernetes-rest-hazards
+  - perl-kubernetes-rest
+  - perl-io-k8s-kubernetes-classes
+  - kanban-issues-karr-ticket
 ---
 
 You write tests for **Kubernetes::REST**.

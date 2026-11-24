@@ -85,5 +85,5 @@ agents' own lane notes. The prohibitions stay here.
 
 Module loading, Moo patterns, dependency pinning and house style live in skills
 `getty-perl-core`, `getty-perl-moo`, `kubernetes-rest-core`, `perl-kubernetes-rest` and
-`getty-perl-release-author-getty` (force-loaded per lane via `briefing.skills` —
+`getty-perl-release-author-getty` (force-loaded per lane via `skills:` —
 `.claude/agents/` defines which agent briefs which). Do not duplicate that content here.

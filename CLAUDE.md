@@ -39,7 +39,7 @@ this repo's hazards are in `.claude/rules/kubernetes-rest-rules.md`.
 | POD, on the core, the backends or the CLI | `kubernetes-rest-doc-writer` |
 | Commits, `Changes`, card → done, pre-release audit | `kubernetes-rest-release-manager` |
 
-The agents carry their conventions via `briefing.skills` (see `.claude/agents/`); the main
+The agents carry their conventions via `skills:` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live in `.claude/skills/` —
 `kubernetes-rest-core` holds the distribution internals, `perl-kubernetes-rest` the
 consumer-facing API, `perl-io-k8s-kubernetes-classes` the IO::K8s object model. Work is tracked on
