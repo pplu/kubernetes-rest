@@ -1,0 +1,31 @@
+---
+class: standard
+completed: 2026-11-25T19:30:06Z
+created: 2026-11-25T19:26:40Z
+id: 82
+priority: high
+started: 2026-11-25T19:30:06Z
+status: done
+title: AuthExec and CLI::Minikube fail to compile when CORE::GLOBAL::exec or ::system
+  is overridden
+updated: 2026-11-25T19:30:22Z
+---
+
+Ist CORE::GLOBAL::exec gesetzt (Test-Wächter wie in cai-hive, Test::Mock-Module), wird die indirekte Blockform `exec {$cmd} $cmd, @args` zum Syntaxfehler, und jedes Modul, das Kubernetes::REST::AuthExec lädt (auch über Kubernetes::REST::Kubeconfig), stirbt beim Laden:
+
+    Scalar found where operator expected (Missing operator before "$cmd"?) at lib/Kubernetes/REST/AuthExec.pm line 209
+
+Dasselbe gilt für `system { $cmd[0] } @cmd` in lib/Kubernetes/REST/CLI/Minikube.pm:606, wenn CORE::GLOBAL::system gesetzt ist (nachgestellt: „Array found where operator expected“).
+
+Nachstellen:
+
+    perl -Ilib -e 'BEGIN { *CORE::GLOBAL::exec = sub { die } } require Kubernetes::REST::Kubeconfig'
+    perl -Ilib -e 'BEGIN { *CORE::GLOBAL::system = sub { die } } require Kubernetes::REST::CLI::Minikube'
+
+Fix: `CORE::exec {$cmd} $cmd, @args` und `CORE::system { $cmd[0] } @cmd`. Die Absicht bleibt: argv[0] = Programm, keine Shell. Weitere Stellen mit `exec {…}` oder `system {…}` gibt es in lib/ und bin/ nicht (`sub exec` in Kubernetes/REST.pm ist eine Methode, nicht betroffen).
+
+Test: eine Testdatei setzt in BEGIN *CORE::GLOBAL::exec und *CORE::GLOBAL::system auf Wächter-Subs, lädt danach Kubernetes::REST::AuthExec, Kubernetes::REST::Kubeconfig und Kubernetes::REST::CLI::Minikube und erwartet: lädt ohne Fehler. Dazu ein statischer Wächter über lib/ und bin/: keine Blockform von exec/system ohne CORE::. Der Test muss gegen den alten lib/ rot sein.
+
+Changes-Eintrag unter {{$NEXT}} (die nächste Version ist 1.111, $VERSION steht schon darauf). Release macht Getty.
+
+2026-11-25 19:30 Fixed in e525d48 on master (pushed): CORE::exec in AuthExec.pm:209, CORE::system in CLI/Minikube.pm:606, t/81_core_global_override.t (red on old lib at both syntax errors, green on new; prove -lr t/ 79 files 1052 tests PASS). Changes entry under {{$NEXT}} for 1.111. Release by Getty.
