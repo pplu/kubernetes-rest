@@ -23,6 +23,11 @@ use_ok('Kubernetes::REST::Kubeconfig');
 
 my $tmpdir = tempdir(CLEANUP => 1);
 local $ENV{HOME} = $tmpdir;
+# Some sh implementations (NetBSD) read the file named by ENV even for sh -c;
+# a startup file sourcing $HOME/... fails under the temporary HOME and the
+# shell exits before the script runs. No shell started here reads one.
+delete local $ENV{ENV};
+delete local $ENV{BASH_ENV};
 delete local $ENV{KUBECONFIG};
 
 my $json = JSON::MaybeXS->new(canonical => 1);

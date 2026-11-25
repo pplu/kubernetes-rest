@@ -2,6 +2,11 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - t/71_kubeconfig_exec_no_shell.t runs its sh -c plugin without a shell
+   startup file: it removes ENV and BASH_ENV for the test. NetBSD's sh
+   reads the file named by ENV for sh -c too, and a startup file that
+   sources something under $HOME failed under the test's temporary HOME.
+
  - Requires IO::K8s 1.112. IO::K8s 1.109 serialized the JSONSchemaProps
    bounds minimum, maximum and multipleOf as JSON strings, and the API
    server refused every CRD carrying one, also through ensure() with a
