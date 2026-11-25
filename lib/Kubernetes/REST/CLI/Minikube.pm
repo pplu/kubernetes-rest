@@ -603,7 +603,7 @@ sub _minikube_capture {
 sub _run {
     my ($self, @cmd) = @_;
     no warnings qw( exec );
-    system { $cmd[0] } @cmd;
+    CORE::system { $cmd[0] } @cmd;
     return $?;
 }
 

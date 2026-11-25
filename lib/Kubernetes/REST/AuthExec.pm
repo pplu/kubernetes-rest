@@ -206,7 +206,7 @@ sub _run_plugin {
         unless defined $pid;
     unless ($pid) {
         close $err_r;
-        { exec {$cmd} $cmd, @args }
+        { CORE::exec {$cmd} $cmd, @args }
         my $errno = $! + 0;
         print {$err_w} $errno;
         close $err_w;

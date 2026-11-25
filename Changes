@@ -2,6 +2,14 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - Kubernetes::REST::AuthExec, and with it Kubernetes::REST::Kubeconfig,
+   and Kubernetes::REST::CLI::Minikube load when a program overrides
+   CORE::GLOBAL::exec or CORE::GLOBAL::system before loading them, as
+   test guards and mocking modules do. The block forms exec {$cmd} ...
+   and system { $cmd[0] } ... were a syntax error under such an
+   override; they are spelled CORE::exec and CORE::system now and still
+   run the program directly, without a shell.
+
  - Test::Warn is declared as a test dependency, as the test suite loads it.
 
  - New attribute field_validation (Strict, Warn or Ignore; anything else
