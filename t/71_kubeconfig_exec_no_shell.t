@@ -104,6 +104,7 @@ sub capture_stderr {
 }
 
 subtest 'a plugin given a shell-style script argument gets it intact' => sub {
+    plan skip_all => 'no /bin/sh on this platform' unless -x '/bin/sh';
     is token_of(
         command => '/bin/sh',
         args => ['-c', q{echo '{"status":{"token":"abc"}}'}],

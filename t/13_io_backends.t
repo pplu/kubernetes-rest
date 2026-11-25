@@ -371,6 +371,14 @@ subtest 'REST allows HTTPTinyIO override' => sub {
 
 use IO::Socket::INET;
 use POSIX ();
+use Config;
+
+# Where fork is emulated by threads (perlfork, Windows) the forked server sits
+# in accept() and cannot be stopped: a signal other than KILL never reaches a
+# pseudo-process, so waitpid in stop_server would wait forever.
+my $no_fork = $Config{d_pseudofork}
+    ? 'fork is emulated here (perlfork): the forked test server cannot be stopped'
+    : undef;
 
 # Forked one-shot-per-connection server on 127.0.0.1. $handler gets the
 # connected socket after the request head was read and writes the raw response.
@@ -426,6 +434,7 @@ for my $name (sort keys %backend) {
     my $io = $backend{$name}->();
 
     subtest "$name - call_streaming rethrows a string exception from the callback" => sub {
+        plan skip_all => $no_fork if $no_fork;
         my ($port, $pid) = spawn_server(sub {
             my ($c) = @_;
             print $c "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nabc\ndef";
@@ -438,6 +447,7 @@ for my $name (sort keys %backend) {
     };
 
     subtest "$name - call_streaming rethrows an object exception from the callback" => sub {
+        plan skip_all => $no_fork if $no_fork;
         my ($port, $pid) = spawn_server(sub {
             my ($c) = @_;
             print $c "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nabc\ndef";
@@ -451,6 +461,7 @@ for my $name (sort keys %backend) {
     };
 
     subtest "$name - call_streaming with a well-behaved callback" => sub {
+        plan skip_all => $no_fork if $no_fork;
         my ($port, $pid) = spawn_server(sub {
             my ($c) = @_;
             print $c "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\nabc\ndef";
@@ -474,6 +485,7 @@ for my $name (sort keys %backend) {
     };
 
     subtest "$name - a real server 500 stays 500" => sub {
+        plan skip_all => $no_fork if $no_fork;
         my $body = '{"kind":"Status","code":500}';
         my ($port, $pid) = spawn_server(sub {
             my ($c) = @_;
@@ -488,6 +500,7 @@ for my $name (sort keys %backend) {
     };
 
     subtest "$name - connection dropped mid-body is a 599" => sub {
+        plan skip_all => $no_fork if $no_fork;
         my ($port, $pid) = spawn_server(sub {
             my ($c) = @_;
             print $c "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort";

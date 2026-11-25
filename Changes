@@ -2,6 +2,13 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - The test suite runs through on Windows. t/13_io_backends.t skips its
+   forked test server where fork is emulated (perlfork): a signal other
+   than KILL never reaches a pseudo-process sitting in accept(), so the
+   run hung until the smoker gave up, and no Windows report came back.
+   t/71_kubeconfig_exec_no_shell.t skips the /bin/sh case where there is
+   no /bin/sh.
+
  - t/71_kubeconfig_exec_no_shell.t runs its sh -c plugin without a shell
    startup file: it removes ENV and BASH_ENV for the test. NetBSD's sh
    reads the file named by ENV for sh -c too, and a startup file that
