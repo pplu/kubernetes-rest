@@ -3,7 +3,7 @@ requires 'LWP::Protocol::https';
 recommends 'LWP::ConsoleLogger';
 recommends 'HTTP::Tiny', '0.054';
 requires 'IO::Socket::SSL';
-requires 'IO::K8s', '1.109';
+requires 'IO::K8s', '1.112';
 requires 'Moo';
 requires 'MooX::Cmd';
 requires 'MooX::Options';

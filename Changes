@@ -2,6 +2,11 @@ Revision history for Kubernetes-REST
 
 {{$NEXT}}
 
+ - Requires IO::K8s 1.112. IO::K8s 1.109 serialized the JSONSchemaProps
+   bounds minimum, maximum and multipleOf as JSON strings, and the API
+   server refused every CRD carrying one, also through ensure() with a
+   hash.
+
  - Kubernetes::REST::AuthExec, and with it Kubernetes::REST::Kubeconfig,
    and Kubernetes::REST::CLI::Minikube load when a program overrides
    CORE::GLOBAL::exec or CORE::GLOBAL::system before loading them, as
