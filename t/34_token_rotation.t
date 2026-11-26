@@ -224,7 +224,12 @@ subtest 'both token files go through the same credentials' => sub {
 };
 
 subtest 'the kubelet swaps a symlink, and that counts as a change' => sub {
-    plan skip_all => 'no symlinks on this platform' unless $Config::Config{d_symlink};
+    # d_symlink is defined on Windows too, where creating one needs a privilege
+    # the account may not have: try one, instead of guessing from $^O.
+    my $probe_dir = case_dir();
+    plan skip_all => 'cannot create symlinks here'
+        unless $Config::Config{d_symlink} and eval { symlink('target', "$probe_dir/probe"); 1 }
+            and -l "$probe_dir/probe";
 
     # What a mounted service account token really looks like:
     #   token   -> ..data/token
@@ -282,6 +287,7 @@ subtest 'what the fingerprint cannot see' => sub {
 
     # Rewritten in place: same inode, same length, mtime put back.
     open my $fh, '+<', $token_file or die "Cannot open $token_file: $!";
+    binmode $fh;    # no \n to \r\n on Windows: the size has to stay the same
     print $fh "token-22222222\n";
     close $fh;
     utime 1_000_000_000, 1_000_000_000, $token_file or die "Cannot utime: $!";

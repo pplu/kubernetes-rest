@@ -197,7 +197,7 @@ subtest '_env_for_child - --context additionally exports TEST_KUBERNETES_REST_CO
 };
 
 subtest '_env_for_child - PATH only gains the install dir when the binary in use lives there' => sub {
-    my $tmp = tempdir(CLEANUP => 1);
+    my $tmp = path(tempdir(CLEANUP => 1))->stringify;
     local $ENV{PATH} = '/usr/bin';
 
     my $elsewhere = Kubernetes::REST::CLI::Minikube->new(
@@ -232,7 +232,7 @@ subtest '_export_lines - sorted export lines with shell-safe single-quote escapi
 };
 
 subtest 'run() - defaults never touch ~/.kube/config, only ~/.cache' => sub {
-    my $tmp = tempdir(CLEANUP => 1);
+    my $tmp = path(tempdir(CLEANUP => 1))->stringify;
     my $fake_home = "$tmp/home";
     make_path("$fake_home/.kube");
     my $home_kubeconfig = "$fake_home/.kube/config";

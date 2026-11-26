@@ -32,12 +32,20 @@ delete local $ENV{KUBECONFIG};
 
 my $json = JSON::MaybeXS->new(canonical => 1);
 
+# A plugin is a perl script, started as "$^X script args": a script with a
+# shebang line does not start on Windows, and perl is the one interpreter every
+# platform running this suite has. What is under test is the plugin's own
+# argv, which is everything after the script.
 sub plugin {
     my ($name, $body) = @_;
     my $file = "$tmpdir/$name";
-    path($file)->spew("#!$^X\n$body");
-    chmod 0755, $file or die "Cannot chmod $file: $!";
+    path($file)->spew($body);
     return $file;
+}
+
+sub run_perl {
+    my ($script, @args) = @_;
+    return (command => $^X, args => [$script, @args]);
 }
 
 # Prints its argv, JSON encoded, as the token.
@@ -124,7 +132,7 @@ subtest 'every arg arrives as exactly one unchanged argv element' => sub {
         q{two  spaces 'and' "both"},
         '',
     );
-    my $token = token_of(command => $echo, args => \@args);
+    my $token = token_of(run_perl($echo, @args));
     is_deeply eval { $json->decode($token // 'null') }, \@args,
         'argv is exactly the configured list';
 };
@@ -134,7 +142,7 @@ subtest 'a command path containing a space is not split' => sub {
     my $spaced = plugin('dir with space/plugin', <<'PERL');
 print qq({"status":{"token":"from-spaced-path"}}\n);
 PERL
-    is token_of(command => $spaced), 'from-spaced-path',
+    is token_of(run_perl($spaced)), 'from-spaced-path',
         'started by its path, not by a shell word';
 };
 
@@ -142,22 +150,22 @@ subtest 'the configured env reaches the plugin' => sub {
     my $env = plugin('env', <<'PERL');
 print qq({"status":{"token":"$ENV{K70_TEST}"}}\n);
 PERL
-    is token_of(command => $env, env => [{ name => 'K70_TEST', value => 'a b;c' }]),
+    is token_of(run_perl($env), env => [{ name => 'K70_TEST', value => 'a b;c' }]),
         'a b;c', 'value untouched';
 };
 
 subtest 'stderr of the plugin stays visible' => sub {
-    my ($seen, $err, $token) = capture_stderr(sub { token_of(command => $chatty) });
+    my ($seen, $err, $token) = capture_stderr(sub { token_of(run_perl($chatty)) });
     is $err, '', 'the plugin succeeded';
     like $seen, qr/plugin-says-login-expired/, 'its stderr text reached our stderr';
     is $token, 'after-stderr', 'and the token still came through';
 };
 
 subtest 'a failing plugin: exit status in the message, stderr visible' => sub {
-    my ($seen, $err) = capture_stderr(sub { api_for(command => $failing) });
+    my ($seen, $err) = capture_stderr(sub { api_for(run_perl($failing)) });
     $err = "$err";
     like $err, qr/exited with status 3/, 'the message names the exit status';
-    like $err, qr/\Q$failing\E/, 'and the command';
+    like $err, qr/\Q$^X\E/, 'and the command';
     like $seen, qr/plugin-failure-detail/, 'the plugin stderr was not swallowed';
 };
 
@@ -168,7 +176,11 @@ subtest 'a command that does not exist croaks, with or without args' => sub {
         'no args: the error names the command';
     throws_ok { api_for(command => $missing, args => ['get-token', '--x y']) } qr/$name/,
         'with args: the error names the command';
-    unlike $@, qr/exited with status/, 'it never ran, so no exit status is claimed';
+    # perl for Windows starts a program that is not there through the command
+    # interpreter, which answers with an exit status of its own; the message
+    # still names the command, which is what the two assertions above pin.
+    unlike $@, qr/exited with status/, 'it never ran, so no exit status is claimed'
+        unless $^O eq 'MSWin32';
 };
 
 done_testing;

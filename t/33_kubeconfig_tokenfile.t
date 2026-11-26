@@ -29,7 +29,10 @@ use YAML::XS ();
 
 use_ok('Kubernetes::REST::Kubeconfig');
 
-my $tmpdir = tempdir(CLEANUP => 1);
+# The code under test hands paths back the way Path::Tiny writes them (forward
+# slashes also on Windows), so the expected values are built the same way: File::Temp
+# returns backslashes there.
+my $tmpdir = path(tempdir(CLEANUP => 1))->stringify;
 local $ENV{HOME} = $tmpdir;
 delete local $ENV{KUBECONFIG};
 
@@ -37,17 +40,15 @@ make_path("$tmpdir/$_") for qw(conf elsewhere);
 
 # An exec plugin that leaves a trace, so "the plugin did not run" is something
 # this file can actually assert rather than infer from the token it did not
-# produce. No arguments: Kubeconfig runs the command through the shell and
-# interpolates args unquoted.
+# produce. It is a perl script run as "$^X script": a script with a shebang
+# line does not start on Windows.
 my $exec_marker = "$tmpdir/exec-ran";
 my $exec_plugin = "$tmpdir/credential-plugin";
 path($exec_plugin)->spew(<<"PERL");
-#!$^X
 open my \$fh, '>', '$exec_marker' or die "cannot mark: \$!";
 close \$fh;
 print "status:\\n  token: token-from-exec\\n";
 PERL
-chmod 0755, $exec_plugin or die "Cannot chmod $exec_plugin: $!";
 
 sub exec_ran {
     my $ran = -e $exec_marker;
@@ -94,19 +95,22 @@ YAML::XS::DumpFile($config, {
         # exec alone, unchanged behaviour.
         { name => 'exec-user', user => { exec => {
             apiVersion => 'client.authentication.k8s.io/v1',
-            command => $exec_plugin,
+            command => $^X,
+            args => [$exec_plugin],
         } } },
         # tokenFile and exec: the file wins and the plugin must stay unrun.
         { name => 'file-and-exec-user', user => { tokenFile => 'token', exec => {
             apiVersion => 'client.authentication.k8s.io/v1',
-            command => $exec_plugin,
+            command => $^X,
+            args => [$exec_plugin],
         } } },
         # A tokenFile that is not there.
         { name => 'missing-user', user => { tokenFile => 'no-such-token' } },
         # ... and one with an exec block behind it, which must not rescue it.
         { name => 'missing-and-exec-user', user => { tokenFile => 'no-such-token', exec => {
             apiVersion => 'client.authentication.k8s.io/v1',
-            command => $exec_plugin,
+            command => $^X,
+            args => [$exec_plugin],
         } } },
         # Empty file, and one holding only whitespace.
         { name => 'empty-user', user => { tokenFile => 'empty-token' } },

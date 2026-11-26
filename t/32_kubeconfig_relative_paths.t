@@ -25,7 +25,10 @@ use YAML::XS ();
 
 use_ok('Kubernetes::REST::Kubeconfig');
 
-my $tmpdir = tempdir(CLEANUP => 1);
+# The code under test hands paths back the way Path::Tiny writes them (forward
+# slashes also on Windows), so the expected values are built the same way: File::Temp
+# returns backslashes there.
+my $tmpdir = path(tempdir(CLEANUP => 1))->stringify;
 local $ENV{HOME} = $tmpdir;
 delete local $ENV{KUBECONFIG};
 

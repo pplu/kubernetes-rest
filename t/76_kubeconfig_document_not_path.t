@@ -18,6 +18,7 @@ use warnings;
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/../lib";
+use Config;
 use File::Temp qw(tempdir);
 use Path::Tiny qw(path);
 use JSON::PP ();
@@ -212,7 +213,7 @@ for my $method (qw(kubeconfig_paths api contexts current_context_name)) {
 # every entry after the path_sep split, so "path:{...json...}" cannot get its
 # JSON pieces stat'ed and quoted in "Kubeconfig not found".
 for my $prefix ("$tmpdir/absent", $real) {
-    my $list = "$prefix:$json";
+    my $list = $prefix . $Config{path_sep} . $json;
     for my $method (qw(kubeconfig_paths api contexts)) {
         document_rejected(
             sub { Kubernetes::REST::Kubeconfig->new(kubeconfig_path => $list)->$method },

@@ -44,7 +44,7 @@ sub counting_plugin {
     my $expiry = defined $opt{expiry} ? $opt{expiry} : 'undef';
     my $fail_from = $opt{fail_from} // 0;
     my $file = "$tmpdir/plugin-$id";
-    path($file)->spew("#!$^X\n" . <<"PERL");
+    path($file)->spew(<<"PERL");
 use POSIX ();
 my \$n = do { open my \$f, '<', '$counter' or die; local \$/; <\$f> } + 1;
 open my \$o, '>', '$counter' or die; print \$o \$n; close \$o;
@@ -56,19 +56,20 @@ my \$off = $expiry;
 require JSON::PP;
 print JSON::PP->new->encode({ apiVersion => 'client.authentication.k8s.io/v1', kind => 'ExecCredential', status => \$status }), "\\n";
 PERL
-    chmod 0755, $file or die "Cannot chmod $file: $!";
     return ($file, sub { 0 + path($counter)->slurp });
 }
 
+# A plugin is a perl script, started as "$^X script": a script with a shebang
+# line does not start on Windows. $script is what counting_plugin returned.
 sub auth_for {
-    my ($command, %extra) = @_;
-    my $auth = eval { $class->new(command => $command, %extra) };
+    my ($script, %extra) = @_;
+    my $auth = eval { $class->new(command => $^X, args => [$script], %extra) };
     diag "construction died: $@" if $@;
     return $auth;
 }
 
 sub api_for {
-    my ($command) = @_;
+    my ($script) = @_;
     my $config = "$tmpdir/kubeconfig";
     YAML::XS::DumpFile($config, {
         apiVersion => 'v1',
@@ -81,7 +82,8 @@ sub api_for {
         contexts => [{ name => 'ctx', context => { cluster => 'c', user => 'u' } }],
         users => [{ name => 'u', user => { exec => {
             apiVersion => 'client.authentication.k8s.io/v1',
-            command => $command,
+            command => $^X,
+            args => [$script],
         } } }],
     });
     return Kubernetes::REST::Kubeconfig->new(kubeconfig_path => $config)->api;
@@ -134,18 +136,17 @@ subtest 'a failing re-run keeps the last good token and warns' => sub {
 
 subtest 'a failing first run is fatal and names the exit status' => sub {
     my ($cmd) = counting_plugin(fail_from => 1);
-    throws_ok { $class->new(command => $cmd) } qr/exited with status 1/,
+    throws_ok { $class->new(command => $^X, args => [$cmd]) } qr/exited with status 1/,
         'construction dies with the exit status';
 };
 
 subtest 'a plugin handing out a client certificate is refused' => sub {
     my $cert = "$tmpdir/cert-plugin";
-    path($cert)->spew("#!$^X\n" . <<'PERL');
+    path($cert)->spew(<<'PERL');
 print qq({"status":{"clientCertificateData":"CERT","clientKeyData":"KEY"}}\n);
 PERL
-    chmod 0755, $cert or die $!;
     my $re = qr/only token plugins are supported.*client certificate/is;
-    throws_ok { $class->new(command => $cert) } $re, 'AuthExec says so';
+    throws_ok { $class->new(command => $^X, args => [$cert]) } $re, 'AuthExec says so';
     throws_ok { api_for($cert) } $re, 'and so does Kubeconfig->api';
 };
 

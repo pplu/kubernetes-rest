@@ -3,6 +3,7 @@ our $VERSION = '1.111';
 # ABSTRACT: Bearer token from an exec credential plugin, run again before it expires
 use Moo;
 use Carp qw(carp croak);
+use File::Temp ();
 use POSIX ();
 use Time::Local qw(timegm);
 use YAML::XS ();
@@ -194,6 +195,10 @@ sub _run_plugin {
         $ENV{$env->{name}} = $env->{value};
     }
 
+    # Win32 has no forking pipe open and runs a bare "-" through cmd.exe
+    # instead (perlport, perlfork), so it takes the spawn branch below.
+    return $self->_run_plugin_spawn($cmd, @args) if $^O eq 'MSWin32';
+
     # No shell: fork and exec with the indirect-object form, so even a bare
     # command (a one-element list, which perl would hand to /bin/sh when it
     # holds whitespace or metacharacters) is one program path and each arg is
@@ -228,6 +233,73 @@ sub _run_plugin {
         if $status;
 
     return $output;
+}
+
+# One argument as the Microsoft C runtime (and perl.exe) reads it back: in
+# double quotes, a double quote as \", backslashes in front of a double quote
+# or of the closing quote doubled. An empty argument is "".
+sub _quote_win32_arg {
+    my ($self, $arg) = @_;
+    $arg =~ s/(\\*)"/$1$1\\"/g;
+    $arg =~ s/(\\+)\z/$1$1/;
+    return qq{"$arg"};
+}
+
+# Where fork cannot be used (Windows): run the plugin with the indirect-object
+# system, which never involves a shell either, with STDOUT pointed at a
+# temporary file and read back afterwards. Same contract as the fork branch:
+# one argv element per argument, stderr inherited, the failures worded alike.
+sub _run_plugin_spawn {
+    my ($self, $cmd, @args) = @_;
+
+    my $tmp = File::Temp->new(TEMPLATE => 'k8s-exec-XXXXXXXX', TMPDIR => 1);
+    binmode $tmp;
+
+    STDOUT->flush;
+    my $saved;
+    my $had_stdout = open($saved, '>&', \*STDOUT);
+    open(STDOUT, '>&', $tmp) or croak "exec credential could not redirect STDOUT: $!";
+
+    # Windows: perl joins the arguments into one command line itself and puts
+    # an argument holding a space in quotes without escaping a quote inside it,
+    # but leaves one that already starts and ends with a quote alone. So every
+    # argument is quoted here, by the rules of the C runtime that parses it.
+    my @argv = $^O eq 'MSWin32' ? map { $self->_quote_win32_arg($_) } @args : @args;
+
+    my ($rc, $errno, $status);
+    if ($^O eq 'MSWin32') {
+        # A failed spawn there sets status 255 (which a plugin can also exit
+        # with) and raises the exec warning: made fatal, it is told apart.
+        my $started = eval {
+            use warnings FATAL => 'exec';
+            $rc = CORE::system {$cmd} $cmd, @argv;
+            ($errno, $status) = ($! + 0, $?);
+            1;
+        };
+        ($errno, $rc) = ($! + 0, -1) unless $started;
+    }
+    else {
+        # Not fatal: perl's fork child would catch it and carry on. The
+        # parent gets -1 and $! for a failed start.
+        no warnings 'exec';
+        $rc = CORE::system {$cmd} $cmd, @argv;
+        ($errno, $status) = ($! + 0, $?);
+    }
+
+    if ($had_stdout) { open(STDOUT, '>&', $saved) or croak "exec credential could not restore STDOUT: $!" }
+    else             { close STDOUT }
+
+    if ($rc == -1) {
+        local $! = $errno;
+        croak "exec credential command $cmd could not be started: $!";
+    }
+    croak "exec credential command $cmd was killed by signal " . ($status & 127)
+        if $status & 127;
+    croak "exec credential command $cmd exited with status " . ($status >> 8)
+        if $status;
+
+    seek $tmp, 0, 0 or croak "exec credential output could not be read: $!";
+    return do { local $/; <$tmp> };
 }
 
 1;
